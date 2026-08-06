@@ -57,7 +57,7 @@
 | 分红历史（连续年数+是否曾削减） | 15% | <3年 或 曾削减 | 3–10年 | ≥10年且无削减 |
 | 行业属性 | 10% | 强周期 | 一般 | 防御/成熟稳定 |
 
-- 资产负债率口径：优先取东财 `DEBT_ASSET_RATIO`（百分数→小数），缺失时用 `总负债/总资产` 推算。
+- 资产负债率口径：东财无 `DEBT_ASSET_RATIO` 字段（实测为空），完全用 `总负债(LIABILITY)/总资产(TOTAL_ASSETS_PK)` 推算。
 - **缺失维度计 0 分（T4 修正）**：某维度数据缺失时**按 0 分计入**加权（分母为全部权重），不再归一化分摊——避免数据稀疏的股票因缺失而虚高得分。缺失权重 ≥ 30% 时额外标注"结论置信度偏低"。
 - **银行 general-fallback 屏蔽负债率（T7）**：银行专项全缺失降级通用分支时，资产负债表维度强制设为 None（银行天然负债率 90%+，通用阈值必踩坑）。
 
@@ -68,9 +68,9 @@
 | 资本充足率 | ≥12% | 10.5–12% | <10.5%（监管红线 8%） |
 | 净息差 | ≥1.8% | 1.4–1.8%（2026 行业冰点约 1.4%） | <1.4% |
 | 不良贷款率 | <1.0% | 1.0–2.0% | ≥2.0% |
-| 拨备覆盖率 | ≥150% | 120–150% | <120% |
+| 拨贷比 | ≥2.5% | 2.0–2.5% | <2.0% |
 
-- **资本充足率字段口径（T1 修正）**：取东财 `ADEQUACY_RATIO`（**总**资本充足率），非 `FIRST_ADEQUACY_RATIO`（一级资本充足率）——后者恒 ≤ 总 CAR，用总 CAR 口径的阈值（≥12/10.5）校准才正确。
+- **资本充足率字段口径（实地核验修正）**：取东财 `NEWCAPITALADER`（**总**资本充足率），非 `FIRST_ADEQUACY_RATIO`（一级资本充足率）——后者恒 ≤ 总 CAR，用总 CAR 口径的阈值（≥12/10.5）校准才正确。注意 `ADEQUACY_RATIO` 字段不存在。
 - **CAR 升致命红线（T1）**：资本充足率 < 10.5% 升为 Layer 1 致命否决（监管约束分红），不再仅作等权评分项——避免"CAR 擦边 8%、其他三项满分"的银行被等权稀释后判"可持续"。
 - **降级机制**：若银行专项指标全部缺失，自动降级为通用分支（balance_sheet 维度屏蔽），并在结果 `notes` 标注"银行专项指标不可用"。
 
@@ -121,7 +121,7 @@
 
 | 数据 | 东财接口（reportName） | host | 关键字段 |
 |------|----------------------|------|---------|
-| 财务主表 | `RPT_F10_FINANCE_MAINFINADATA` | datacenter.eastmoney.com | ROEJQ / PARENTNETPROFIT / PARENTNETPROFITTZ / NETCASH_OPERATE_PK / NETCASH_INVEST_PK / LIABILITY / TOTAL_ASSETS_PK / DEBT_ASSET_RATIO / INTEREST_DEBT_RATIO / INTEREST_COVERAGE_RATIO / **ADEQUACY_RATIO**（总资本充足率，T1）/ NET_INTEREST_MARGIN / NON_PERFORMING_LOAN / RISK_COVERAGE |
+| 财务主表 | `RPT_F10_FINANCE_MAINFINADATA` | datacenter.eastmoney.com | ROEJQ / PARENTNETPROFIT / PARENTNETPROFITTZ / NETCASH_OPERATE_PK / NETCASH_INVEST_PK / LIABILITY / TOTAL_ASSETS_PK / INTEREST_DEBT_RATIO / INTEREST_COVERAGE_RATIO / **NEWCAPITALADER**（总资本充足率）/ **NONPERLOAN**（不良率%）/ **LOAN_PROVISION_RATIO**（拨贷比%）/ NET_INTEREST_MARGIN |
 | 现金流量表 | `RPT_F10_FINANCE_GCASHFLOW` | datacenter.eastmoney.com | **CONSTRUCT_LONG_ASSET**（资本开支；主表无此字段） |
 | 分红明细 | `RPT_SHAREBONUS_DET` | datacenter-web.eastmoney.com | PRETAX_BONUS_RMB / ASSIGN_PROGRESS / EX_DIVIDEND_DATE / REPORT_DATE |
 | 行业分类 | `RPT_F10_BASIC_ORGINFO` | datacenter-web.eastmoney.com | EM2016（东财行业）/ INDUSTRYCSRC1（证监会） |
@@ -130,7 +130,7 @@
 ### 4.2 字段语义说明
 
 - **金额单位**：元（如 PARENTNETPROFIT 34502809176.39 = 345 亿元）。
-- **比率口径**：ROEJQ、PARENTNETPROFITTZ、DEBT_ASSET_RATIO 等为**百分数**（如 52.0 表示 52%）；资产负债率在评分时转为小数。
+- **比率口径**：ROEJQ、PARENTNETPROFITTZ、NEWCAPITALADER、NONPERLOAN、NET_INTEREST_MARGIN、LOAN_PROVISION_RATIO 等为**百分数**；资产负债率由 LIABILITY/TOTAL_ASSETS_PK 推算为小数。
 - **年报过滤**：`RPT_F10_FINANCE_MAINFINADATA` 把年报与季报累计值混在一起，**只保留 `REPORT_DATE` 月日为 `12-31` 的年报行**，否则净利润取到季报累计值会与分红总额（某完整财年）错配，导致支付率虚高失真。
 - **资本开支（CAPEX）**：来自现金流量表 `CONSTRUCT_LONG_ASSET`（购建固定资产/无形资产支付的现金，正数），主表无此字段。
 
@@ -220,7 +220,7 @@ WARN_HIGH_PAYOUT = 0.80            # 高派息门槛
 2. **被动高股息（股价跌幅）数据未接入**：需近1年股价涨跌幅，当前未取（走势图有月度价格可算）。
 3. **行业字段上游口径**：`/api/pr` 的 `industry` 来自 pr.py（走 mootdx F10），mootdx 不可用时为"未知行业"；可持续性模块内部已走东财重取行业保证银行/周期判定准确，但 UI 上"行业"字段可能显示"未知行业"。
 4. **阈值为主观经验值**：六维阈值、权重、三档分界参考 CFA Institute / Investopedia / S&P DJI 等业界共识设定，并非绝对，可按实际案例调参。
-5. **银行专项数据**：资本充足率/净息差/不良率/拨备覆盖率达自东财主表（普通股这些字段为空，银行股有值），已验证可用。
+5. **银行专项数据**：资本充足率（NEWCAPITALADER）/净息差（NET_INTEREST_MARGIN）/不良率（NONPERLOAN）/拨贷比（LOAN_PROVISION_RATIO）达自东财主表（普通股这些字段为空，银行股有值），已实测 600036 确认全部可达。注：东财无"拨备覆盖率"字段，用拨贷比近似。
 6. **A+H 股总市值口径**：当前用 `A股股价 × 总股本(含H股)`，对 A+H 股（如中国银行 H 股占 34.6%、中国神华 24%）会用 A 股价给 H 股估值，若 A 股溢价则高估市值、低估股息率。正确口径应为 `A股股价×A股股本 + H股股价×H股股本`，需额外接入港股行情接口。此为股息率本身的口径问题（非可持续性功能范围），暂以 A 股价近似，后续接入港股行情后修正。
 
 ---
