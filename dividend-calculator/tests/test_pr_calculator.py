@@ -1,6 +1,9 @@
 """
 pr_calculator 纯计算模块测试
 """
+from unittest.mock import patch
+
+from src.pr import _get_industry
 from src.pr_calculator import (
     compute_basic_pr,
     compute_corrected_pr,
@@ -142,3 +145,35 @@ class TestClassifyIndustry:
     def test_empty(self):
         c, t, w = classify_industry("")
         assert c is False and t is False
+
+
+# ---- _get_industry 降级链（pr.py 数据层）----
+
+class TestGetIndustryFallback:
+    """行业获取降级链：mootdx F10 → 东财 datacenter(RPT_F10_BASIC_ORGINFO) → 未知行业"""
+
+    def test_mootdx_fail_falls_back_to_eastmoney_datacenter(self):
+        with patch("src.datasource.mootdx_source.MootdxSource", side_effect=Exception("mootdx down")), \
+             patch("src.pr.fetch_eastmoney_industry", return_value="公用事业-电力-水电") as mock_em:
+            industry, source = _get_industry("600900")
+        assert industry == "公用事业-电力-水电"
+        assert source == "东方财富"
+        mock_em.assert_called_once_with("600900")
+
+    def test_both_fail_returns_unknown(self):
+        with patch("src.datasource.mootdx_source.MootdxSource", side_effect=Exception("mootdx down")), \
+             patch("src.pr.fetch_eastmoney_industry", return_value=""):
+            industry, source = _get_industry("600900")
+        assert (industry, source) == ("未知行业", "无")
+
+    def test_mootdx_ok_skips_eastmoney(self):
+        class FakeSource:
+            def get_industry(self, code):
+                return "电力"
+
+        with patch("src.datasource.mootdx_source.MootdxSource", return_value=FakeSource()), \
+             patch("src.pr.fetch_eastmoney_industry") as mock_em:
+            industry, source = _get_industry("600900")
+        assert industry == "电力"
+        assert source == "mootdx F10"
+        mock_em.assert_not_called()

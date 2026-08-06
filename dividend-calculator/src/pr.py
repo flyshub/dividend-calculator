@@ -9,7 +9,7 @@
 数据来源（多源降级）：
   PE-TTM / PB: 腾讯行情 [主] → 东方财富 push2 [备]
   ROE / 净利润: 同花顺财报 [主] → 东方财富 push2 [备]
-  行业分类:     东方财富 push2 → 降级为 "未知行业"
+  行业分类:     mootdx F10 → 东方财富 datacenter(RPT_F10_BASIC_ORGINFO) → 降级为 "未知行业"
 """
 import logging
 import re
@@ -27,6 +27,7 @@ from .pr_calculator import (
     classify_valuation,
     classify_industry,
 )
+from .sustainability import fetch_industry as fetch_eastmoney_industry
 
 logger = logging.getLogger(__name__)
 
@@ -327,7 +328,7 @@ def _get_financial(stock_code: str) -> Tuple[
 # ---------------------------------------------------------------------------
 
 def _get_industry(stock_code: str) -> Tuple[str, str]:
-    """获取行业分类：mootdx F10 优先，东方财富备用"""
+    """获取行业分类：mootdx F10 优先，东方财富 datacenter 备用（与 JS 端同源）"""
     # 主：mootdx F10 行业分析
     try:
         from .datasource.mootdx_source import MootdxSource
@@ -339,22 +340,12 @@ def _get_industry(stock_code: str) -> Tuple[str, str]:
     except Exception as e:
         logger.debug("mootdx F10 行业获取失败 %s: %s", stock_code, e)
 
-    # 备：东方财富 push2
+    # 备：东方财富 datacenter RPT_F10_BASIC_ORGINFO（与 sustainability/JS 端同源，全球可用）
     try:
-        market = "1" if stock_code.startswith("6") else "0"
-        url = (
-            f"https://push2.eastmoney.com/api/qt/stock/get"
-            f"?secid={market}.{stock_code}&fields=f127"
-        )
-        headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://quote.eastmoney.com/"}
-        resp = requests.get(url, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json().get("data")
-            if data:
-                industry = str(data.get("f127", "")).strip()
-                if industry:
-                    logger.debug("东方财富行业 %s: %s", stock_code, industry)
-                    return industry, "东方财富"
+        industry = fetch_eastmoney_industry(stock_code)
+        if industry:
+            logger.debug("东方财富行业 %s: %s", stock_code, industry)
+            return industry, "东方财富"
     except Exception as e:
         logger.debug("东方财富行业获取失败 %s: %s", stock_code, e)
 
