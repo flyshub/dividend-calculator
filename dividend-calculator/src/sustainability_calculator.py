@@ -90,7 +90,7 @@ class AnnualFinancial:
     capital_adequacy_ratio: Optional[float]   # 资本充足率（百分数）
     net_interest_margin: Optional[float]      # 净息差（百分数）
     npl_ratio: Optional[float]                # 不良贷款率（百分数）
-    provision_coverage: Optional[float]       # 拨备覆盖率（百分数）
+    provision_coverage: Optional[float]       # 拨贷比（LOAN_PROVISION_RATIO，百分数；东财无拨备覆盖率字段，用拨贷比近似）
     # 资本开支（购建固定资产/无形资产，元，正数）；来自现金流量表，缺失则 FCF 降级用 investing_cf
     capex: Optional[float] = None
     # 资产负债率（百分数）；东财无直接字段，靠 debt_ratio_decimal() 用 LIABILITY/TOTAL_ASSETS_PK 推算

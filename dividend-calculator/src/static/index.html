@@ -895,7 +895,7 @@
     var SUS_DIM_LABEL = {
       cf_coverage: '经营现金流覆盖', payout: '股利支付率', profitability: '盈利稳定性',
       balance_sheet: '资产负债表', dividend_history: '分红历史', industry: '行业属性',
-      capital_adequacy: '资本充足率', net_interest_margin: '净息差', npl: '不良贷款率', provision: '拨备覆盖率',
+      capital_adequacy: '资本充足率', net_interest_margin: '净息差', npl: '不良贷款率', provision: '拨贷比',
     };
 
     function renderSustainability(s) {
@@ -913,7 +913,7 @@
       document.getElementById('sus-payout').textContent = m.payout_ratio == null ? '无' : (Number(m.payout_ratio * 100).toFixed(1) + '%');
       document.getElementById('sus-cf-cov').textContent = m.cf_coverage == null ? '无' : (Number(m.cf_coverage).toFixed(2) + 'x');
       document.getElementById('sus-fcf-cov').textContent = m.fcf_coverage == null ? '无' : (Number(m.fcf_coverage).toFixed(2) + 'x');
-      document.getElementById('sus-debt').textContent = m.debt_ratio == null ? '无' : (Number(m.debt_ratio).toFixed(1) + '%');
+      document.getElementById('sus-debt').textContent = m.debt_ratio == null ? '无' : (Number(m.debt_ratio) * 100).toFixed(1) + '%';
       document.getElementById('sus-roe').textContent = m.roe_latest == null ? '无' : (Number(m.roe_latest).toFixed(2) + '%');
       document.getElementById('sus-np-yoy').textContent = m.net_profit_yoy == null ? '无' : (Number(m.net_profit_yoy).toFixed(1) + '%');
       document.getElementById('sus-consecutive').textContent = m.consecutive_dividend_years == null ? '无' : (parseInt(m.consecutive_dividend_years) + ' 年');
