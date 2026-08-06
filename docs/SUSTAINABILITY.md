@@ -26,19 +26,23 @@
 ### Layer 0 — 行业路由
 
 按行业字符串判定是否**银行/保险**（关键词 `银行`/`保险`）：
-- 是 → 走 **金融分支**（看资本充足率/净息差/不良率/拨备）。
+- 是 → 走 **金融分支**（看资本充足率/净息差/不良率/拨备）；Layer 1 现金流类致命红旗短路（见下）。
 - 否 → 走 **通用分支**（六维加权评分）。
 
 ### Layer 1 — 致命红旗（一票否决 → 直接"不可持续"）
 
 满足任一即判不可持续，并输出对应理由（带数值）。**注意**：致命红旗层会先算好维度评分再判否决，故否决时各维度评分仍会展示。
 
-| # | 致命红旗 | 触发条件 |
-|---|---------|---------|
-| 1 | 分红超过净利润 | 股利支付率 > 100%（`FATAL_PAYOUT_RATIO = 1.0`） |
-| 2 | 分红超过自由现金流 | FCF 覆盖 < 1.0x（`FATAL_CF_COVERAGE = 1.0`） |
-| 3 | 经营现金流为负却分红 | 经营现金流净额 < 0 且分红 > 0 |
-| 4 | 亏损却分红 | 净利润 < 0 且分红 > 0 |
+| # | 致命红旗 | 触发条件 | 适用对象 |
+|---|---------|---------|---------|
+| 1 | 分红超过自由现金流 | FCF 覆盖 < 1.0x（`FATAL_CF_COVERAGE = 1.0`） | 非金融 |
+| 2 | 经营现金流为负却分红 | 经营现金流净额 < 0 且分红 > 0 | 非金融 |
+| 3 | 亏损却分红 | 净利润 < 0 且分红 > 0 | 全部 |
+| 4 | 资本充足率不足（监管约束） | 总资本充足率 < 10.5%（`FATAL_BANK_CAR = 10.5`） | 仅银行/保险 |
+
+> **银行/保险短路**：致命红旗 #1、#2 对金融机构无意义（银行经营CF含存贷款净变动、扩张期为负属常态；FCF 概念对银行不适用——其"投资"是放贷而非固定资产），故 `is_bank=True` 时跳过。仅 #3、#4 适用。
+
+> **支付率 > 100% 不再是致命红旗**（T2 修正）：成熟期/高折旧股（双汇、长江电力、高速公路）支付率结构性 > 100% 属健康信号，单年不否决，改为 Layer 3 情境红旗。
 
 ### Layer 2 — 加权评分
 
@@ -54,9 +58,10 @@
 | 行业属性 | 10% | 强周期 | 一般 | 防御/成熟稳定 |
 
 - 资产负债率口径：优先取东财 `DEBT_ASSET_RATIO`（百分数→小数），缺失时用 `总负债/总资产` 推算。
-- **缺失维度按权重归一化**：某个维度数据缺失不计入加权，其权重分摊给可得维度，避免缺数据拖垮总分。
+- **缺失维度计 0 分（T4 修正）**：某维度数据缺失时**按 0 分计入**加权（分母为全部权重），不再归一化分摊——避免数据稀疏的股票因缺失而虚高得分。缺失权重 ≥ 30% 时额外标注"结论置信度偏低"。
+- **银行 general-fallback 屏蔽负债率（T7）**：银行专项全缺失降级通用分支时，资产负债表维度强制设为 None（银行天然负债率 90%+，通用阈值必踩坑）。
 
-#### 金融分支：银行专项评分（等权平均，0~2）
+#### 金融分支：银行专项评分（等权平均，0~2；CAR 另有致命否决）
 
 | 维度 | 2 分（健康） | 1 分（警戒） | 0 分（危险） |
 |------|------------|------------|------------|
@@ -65,7 +70,9 @@
 | 不良贷款率 | <1.0% | 1.0–2.0% | ≥2.0% |
 | 拨备覆盖率 | ≥150% | 120–150% | <120% |
 
-- **降级机制**：若银行专项指标全部缺失，自动降级为通用分支，并在结果 `notes` 标注"银行专项指标不可用"。
+- **资本充足率字段口径（T1 修正）**：取东财 `ADEQUACY_RATIO`（**总**资本充足率），非 `FIRST_ADEQUACY_RATIO`（一级资本充足率）——后者恒 ≤ 总 CAR，用总 CAR 口径的阈值（≥12/10.5）校准才正确。
+- **CAR 升致命红线（T1）**：资本充足率 < 10.5% 升为 Layer 1 致命否决（监管约束分红），不再仅作等权评分项——避免"CAR 擦边 8%、其他三项满分"的银行被等权稀释后判"可持续"。
+- **降级机制**：若银行专项指标全部缺失，自动降级为通用分支（balance_sheet 维度屏蔽），并在结果 `notes` 标注"银行专项指标不可用"。
 
 ### 三档结论（加权总分 0~2）
 
@@ -81,11 +88,12 @@
 
 | 情境红旗 | 触发条件 |
 |---------|---------|
+| 股利支付率 > 100% | 单年支付率 > 100%（`WARN_PAYOUT_OVER_100 = 1.0`，T2；成熟期/高折旧股结构性偏高属健康信号，仅警示不否决） |
 | 被动高股息 | 近1年股价跌幅 < -30%（`WARN_PRICE_DROP`） |
-| 特别/突击分红 | 最新财年分红 > 历史均值 × 1.5（`WARN_SPECIAL_DIV_MULTIPLE`） |
+| 特别/突击分红 | 最新财年分红 > **近3年均值** × 2.0（`WARN_SPECIAL_DIV_MULTIPLE`，T3；近3年均值缺失时回退全历史均值） |
 | 一股独大 + 高派息 | 前十大持股 > 50% 且 支付率 > 80%（当前大股东数据未接入，暂不触发） |
 | 周期顶点信号 | 强周期行业 + 净利润同比为负 + 支付率 > 80% |
-| 证监会红线画像 | 高负债(>70%) + 弱现金流覆盖(<1.5x) + 高派息(>80%) 三者并存 |
+| 证监会红线画像 | 高负债(>70%) + 弱现金流覆盖(<1.5x) + 高派息(>80%) 三者并存（银行跳过——T7，负债率对银行无意义） |
 
 ---
 
@@ -113,7 +121,7 @@
 
 | 数据 | 东财接口（reportName） | host | 关键字段 |
 |------|----------------------|------|---------|
-| 财务主表 | `RPT_F10_FINANCE_MAINFINADATA` | datacenter.eastmoney.com | ROEJQ / PARENTNETPROFIT / PARENTNETPROFITTZ / NETCASH_OPERATE_PK / NETCASH_INVEST_PK / LIABILITY / TOTAL_ASSETS_PK / DEBT_ASSET_RATIO / INTEREST_DEBT_RATIO / INTEREST_COVERAGE_RATIO / FIRST_ADEQUACY_RATIO / NET_INTEREST_MARGIN / NON_PERFORMING_LOAN / RISK_COVERAGE |
+| 财务主表 | `RPT_F10_FINANCE_MAINFINADATA` | datacenter.eastmoney.com | ROEJQ / PARENTNETPROFIT / PARENTNETPROFITTZ / NETCASH_OPERATE_PK / NETCASH_INVEST_PK / LIABILITY / TOTAL_ASSETS_PK / DEBT_ASSET_RATIO / INTEREST_DEBT_RATIO / INTEREST_COVERAGE_RATIO / **ADEQUACY_RATIO**（总资本充足率，T1）/ NET_INTEREST_MARGIN / NON_PERFORMING_LOAN / RISK_COVERAGE |
 | 现金流量表 | `RPT_F10_FINANCE_GCASHFLOW` | datacenter.eastmoney.com | **CONSTRUCT_LONG_ASSET**（资本开支；主表无此字段） |
 | 分红明细 | `RPT_SHAREBONUS_DET` | datacenter-web.eastmoney.com | PRETAX_BONUS_RMB / ASSIGN_PROGRESS / EX_DIVIDEND_DATE / REPORT_DATE |
 | 行业分类 | `RPT_F10_BASIC_ORGINFO` | datacenter-web.eastmoney.com | EM2016（东财行业）/ INDUSTRYCSRC1（证监会） |
@@ -177,14 +185,15 @@ SCORE_SUSTAINABLE = 1.5            # 加权总分 ≥ 此值 → 可持续
 SCORE_WEAK = 1.0                   # ≥ 此值 → 偏弱；更低 → 不可持续
 
 # 致命红旗
-FATAL_PAYOUT_RATIO = 1.0           # 股利支付率 > 100%
-FATAL_CF_COVERAGE = 1.0            # FCF 覆盖 < 1.0x
+FATAL_CF_COVERAGE = 1.0            # FCF 覆盖 < 1.0x（银行短路）
+FATAL_BANK_CAR = 10.5              # 银行总资本充足率 < 10.5%（监管约束，仅银行/保险）
+# 注：支付率 > 100% 已移至 Layer 3 情境红旗（T2），不再致命否决
 
 # 六维评分阈值 (low, high)：值 < low → 0 分，[low,high) → 1 分，≥ high → 2 分
 DIM_CF_COVERAGE = (1.0, 1.5)       # 现金流覆盖（x）
 DIM_PAYOUT = (0.60, 0.80)          # 股利支付率（小数）
 DIM_ROE = (10.0, 15.0)             # ROE（%）
-DIM_DEBT_RATIO = (0.50, 0.70)      # 资产负债率（小数）
+DIM_DEBT_RATIO = (0.50, 0.70)      # 资产负债率（小数；银行 fallback 时屏蔽）
 DIM_INTEREST_COVERAGE = (3.0, 5.0) # 利息保障倍数（x）
 DIM_CONSECUTIVE_YEARS = (3, 10)    # 连续分红年数
 
@@ -193,10 +202,14 @@ WEIGHTS = {"cf_coverage": 0.25, "payout": 0.20, "profitability": 0.15,
            "balance_sheet": 0.15, "dividend_history": 0.15, "industry": 0.10}
 
 # 情境红旗
+WARN_PAYOUT_OVER_100 = 1.0         # 股利支付率 > 100%（T2，单年不否决）
 WARN_PRICE_DROP = -0.30            # 近1年股价跌幅
-WARN_SPECIAL_DIV_MULTIPLE = 1.5    # 突击分红倍数
+WARN_SPECIAL_DIV_MULTIPLE = 2.0    # 突击分红倍数（相对近3年均值，T3）
 WARN_HOLDING_CONCENTRATION = 0.50  # 前十大持股
 WARN_HIGH_PAYOUT = 0.80            # 高派息门槛
+
+# 数据缺失惩罚（T4）
+# _weighted_score 返回 (score, missing_ratio)；缺失维度计 0 分（非归一化），missing_ratio ≥ 0.30 标低置信
 ```
 
 ---
