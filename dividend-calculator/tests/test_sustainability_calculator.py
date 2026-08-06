@@ -66,12 +66,37 @@ def test_payout_ratio():
 # 致命红旗
 # ---------------------------------------------------------------------------
 
-def test_fatal_payout_over_100():
+def test_payout_over_100_not_fatal():
+    """T2：支付率>100% 不再是致命红旗（改情境），check_fatal_flags 不应返回。"""
     flags = check_fatal_flags(
         payout_ratio=1.2, fcf_coverage=2.0, operating_cf=100e8,
         net_profit=100e8, dividend_total=120e8,
     )
-    assert any("股利支付率" in f and "> 100%" in f for f in flags)
+    assert not any("股利支付率" in f for f in flags)
+
+
+def test_bank_short_circuits_cf_flags():
+    """T1：银行/保险短路现金流类致命红旗（经营CF/FCF对银行无意义）。"""
+    # 非银行：经营CF为负触发
+    flags_non_bank = check_fatal_flags(
+        payout_ratio=0.3, fcf_coverage=0.5, operating_cf=-10e8,
+        net_profit=100e8, dividend_total=30e8, is_bank=False,
+    )
+    assert any("经营现金流为负" in f for f in flags_non_bank)
+    assert any("自由现金流覆盖" in f for f in flags_non_bank)
+    # 银行：同样经营CF为负/FCF低，短路不触发
+    flags_bank = check_fatal_flags(
+        payout_ratio=0.3, fcf_coverage=0.5, operating_cf=-10e8,
+        net_profit=100e8, dividend_total=30e8, is_bank=True,
+    )
+    assert not any("经营现金流为负" in f for f in flags_bank)
+    assert not any("自由现金流覆盖" in f for f in flags_bank)
+    # 银行净利润为负仍分红仍触发（全行业适用）
+    flags_bank_loss = check_fatal_flags(
+        payout_ratio=None, fcf_coverage=None, operating_cf=10e8,
+        net_profit=-5e8, dividend_total=5e8, is_bank=True,
+    )
+    assert any("净利润为负" in f for f in flags_bank_loss)
 
 
 def test_fatal_fcf_under_1x():
@@ -183,8 +208,8 @@ def test_loss_stock_dividend_unsustainable():
     assert result.score == 0.0
 
 
-def test_payout_over_100_unsustainable():
-    """支付率>100% → 致命红旗。"""
+def test_payout_over_100_is_warning_not_fatal():
+    """T2：支付率>100% → 情境红旗（非致命否决）。"""
     fin = _healthy_financial()
     fin.net_profit = 100e8       # 净利润 100亿，分红 214亿 → 支付率 214%
     result = assess_sustainability(
@@ -194,8 +219,10 @@ def test_payout_over_100_unsustainable():
         history=_healthy_history(),
         industry="煤炭",
     )
-    assert result.verdict == "不可持续"
-    assert any("股利支付率" in f and "> 100%" in f for f in result.fatal_flags)
+    # 不再是致命红旗
+    assert not any("股利支付率" in f for f in result.fatal_flags)
+    # 应作为情境红旗出现
+    assert any("股利支付率" in w and "> 100%" in w for w in result.warning_flags)
 
 
 def test_cyclical_top_triggers_warning():
@@ -249,6 +276,28 @@ def test_bank_uses_finance_branch():
     assert "capital_adequacy" in result.dimension_scores
 
 
+def test_bank_low_car_is_fatal():
+    """T1：银行资本充足率 < 10.5% → 致命否决（监管约束分红）。"""
+    bank_fin = AnnualFinancial(
+        year=2025, net_profit=1500e8, net_profit_yoy=1.5, operating_cf=-500e8,  # 经营CF为负（银行扩张期常态）
+        investing_cf=None, total_assets=12e12, total_liabilities=11e12, debt_ratio=87.8,
+        interest_debt_ratio=None, interest_coverage=None, roe=14.0,
+        capital_adequacy_ratio=9.8,   # 低于 10.5% 监管约束线
+        net_interest_margin=1.87, npl_ratio=0.95, provision_coverage=200.0,
+    )
+    result = assess_sustainability(
+        dividend_yield_before_tax=5.0, dividend_total=350e8,
+        latest=bank_fin,
+        history=DividendHistory(consecutive_years=12, ever_cut=False,
+                                latest_year_amount=350e8, history_mean_amount=340e8),
+        industry="银行",
+    )
+    assert result.verdict == "不可持续"
+    assert any("资本充足率" in f and "10.5%" in f for f in result.fatal_flags)
+    # 银行短路：经营CF为负不应触发致命
+    assert not any("经营现金流为负" in f for f in result.fatal_flags)
+
+
 def test_bank_missing_specialty_falls_back():
     """银行但专项数据缺失 → 降级通用分支 + 标注。"""
     bank_fin = AnnualFinancial(
@@ -277,6 +326,27 @@ def test_bank_missing_specialty_falls_back():
     )
     assert result.branch == "general-fallback"
     assert any("银行专项" in n for n in result.notes)
+
+
+def test_sparse_data_not_inflated():
+    """T4：数据稀疏股不应因缺失而虚高得分（缺失按0分计入，非归一化）。"""
+    # 只有 cf_coverage 满分、其他维度全缺失的股票
+    fin = AnnualFinancial(
+        year=2025, net_profit=100e8, net_profit_yoy=5.0, operating_cf=200e8,
+        investing_cf=None, capex=None, total_assets=None, total_liabilities=None,
+        debt_ratio=None, interest_debt_ratio=None, interest_coverage=None, roe=None,
+        capital_adequacy_ratio=None, net_interest_margin=None, npl_ratio=None, provision_coverage=None,
+    )
+    result = assess_sustainability(
+        dividend_yield_before_tax=5.0, dividend_total=50e8,
+        latest=fin, history=DividendHistory(consecutive_years=5, ever_cut=False,
+                                             latest_year_amount=50e8, history_mean_amount=40e8),
+        industry="煤炭",
+    )
+    # 缺失权重 ≥ 30%（profitability+balance_sheet 缺，占 30%）→ 应标注低置信
+    assert any("缺失较多" in n or "置信度" in n for n in result.notes)
+    # T4 前（归一化）这只股会 = 2.0（只看满分的 cf+payout）；T4 后缺失计 0，应明显 < 2.0
+    assert result.score is not None and result.score < 1.5
 
 
 def test_missing_financial_data():

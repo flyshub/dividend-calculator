@@ -218,14 +218,16 @@ test('assessSustainability 亏损却分红→不可持续', () => {
   assert.equal(r.score, 0.0);
 });
 
-test('assessSustainability 支付率>100%→不可持续', () => {
+test('assessSustainability 支付率>100%→情境红旗(非致命) (T2)', () => {
   const fin = healthyFin(); fin.net_profit = 100e8;
   const r = Calc.assessSustainability({
     dividend_yield_before_tax: 5.0, dividend_total: 214e8,
     latest: fin, history: healthyHistory(), industry: '煤炭',
   });
-  assert.equal(r.verdict, '不可持续');
-  assert.ok(r.fatal_flags.some(f => f.includes('股利支付率') && f.includes('> 100%')));
+  // T2：不再是致命红旗
+  assert.ok(!r.fatal_flags.some(f => f.includes('股利支付率')));
+  // 应作为情境红旗
+  assert.ok(r.warning_flags.some(w => w.includes('股利支付率') && w.includes('> 100%')));
 });
 
 test('assessSustainability 周期股顶点→情境红旗降档', () => {

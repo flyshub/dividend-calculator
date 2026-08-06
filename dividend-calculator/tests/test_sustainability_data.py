@@ -252,7 +252,7 @@ def test_assess_for_stock_bank_finance_branch():
         "LIABILITY": 11e12,
         "DEBT_ASSET_RATIO": 91.5,
         "ROEJQ": 14.0,
-        "FIRST_ADEQUACY_RATIO": 16.5,
+        "ADEQUACY_RATIO": 16.5,
         "NET_INTEREST_MARGIN": 1.87,
         "NON_PERFORMING_LOAN": 0.95,
         "RISK_COVERAGE": 200.0,

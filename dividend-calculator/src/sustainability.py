@@ -75,7 +75,7 @@ _FIELD_MAP = {
     "INTEREST_DEBT_RATIO": "interest_debt_ratio",
     "INTEREST_COVERAGE_RATIO": "interest_coverage",
     "ROEJQ": "roe",
-    "FIRST_ADEQUACY_RATIO": "capital_adequacy_ratio",
+    "ADEQUACY_RATIO": "capital_adequacy_ratio",   # 总资本充足率（监管红线8%；非FIRST_ADEQUACY一级口径）
     "NET_INTEREST_MARGIN": "net_interest_margin",
     "NON_PERFORMING_LOAN": "npl_ratio",
     "RISK_COVERAGE": "provision_coverage",
@@ -142,11 +142,19 @@ def select_latest_annual(financials: List[AnnualFinancial],
 # 分红明细解析 → DividendRecord（对齐 JS parseDividendRecords 的口径）
 # ---------------------------------------------------------------------------
 
+def _is_implemented(progress: str) -> bool:
+    """东财分红方案进度是否已实施落地（排除预案/预披露/批准/未实施等）。
+
+    实际值含"实施分配"等。判定：包含"实施"且不含"未实施"。
+    """
+    return "实施" in progress and "未实施" not in progress
+
+
 def parse_dividend_rows(rows: List[dict]) -> Tuple[List[DividendRecord], Optional[str]]:
     """解析东财分红明细行 → DividendRecord 列表 + 最新有年报的财年字符串。
 
     纯函数，与 JS calculator.parseDividendRecords 同口径：
-      - 跳过 ASSIGN_PROGRESS == '预披露'
+      - 仅保留已实施分红（_is_implemented，T5）
       - 仅保留 PRETAX_BONUS_RMB > 0 的现金分红
       - report_time 取报告期年份 + '年报'/'半年报'
     返回: (records, latest_year_str)
@@ -156,7 +164,9 @@ def parse_dividend_rows(rows: List[dict]) -> Tuple[List[DividendRecord], Optiona
     date_re = re.compile(r"(\d{4})-(\d{2})")
 
     for row in rows:
-        if str(row.get("ASSIGN_PROGRESS") or "") == "预披露":
+        progress = str(row.get("ASSIGN_PROGRESS") or "")
+        # T5：仅保留已实施分红（含"实施"但排除"未实施"/"预案"/"预披露"/"批准"等未落地状态）
+        if not _is_implemented(progress):
             continue
         dp10 = _to_float(row.get("PRETAX_BONUS_RMB"))
         if dp10 is None or dp10 <= 0:
@@ -241,6 +251,17 @@ def aggregate_dividend_history(records: List[DividendRecord],
     if history_years:
         history_mean = sum(year_amount[yy] for yy in history_years) / len(history_years)
 
+    # 近3年均值（target_year 之前最近的3年）——突击分红判断用，避免早期低基数拉低全历史均值
+    # 导致稳定增长股被误判为"突兀"（如伊利逐年提升分红，全历史均值偏低）
+    try:
+        tgt_int = int(target_year)
+        recent3 = [yy for yy in years_sorted if yy != target_year and int(yy) < tgt_int][:3]
+    except ValueError:
+        recent3 = history_years[:3]
+    history_3y_mean = None
+    if recent3:
+        history_3y_mean = sum(year_amount[yy] for yy in recent3) / len(recent3)
+
     ever_cut = False
     asc = sorted(year_amount.keys())
     for i in range(1, len(asc)):
@@ -254,6 +275,7 @@ def aggregate_dividend_history(records: List[DividendRecord],
         ever_cut=ever_cut,
         latest_year_amount=year_amount.get(target_year),
         history_mean_amount=history_mean,
+        history_3y_mean=history_3y_mean,
     )
 
 

@@ -51,7 +51,9 @@
 
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i];
-      if (row.ASSIGN_PROGRESS === '预披露') continue;
+      /* T5：仅保留已实施分红（含'实施'且不含'未实施'，排除预案/预披露/批准等）*/
+      var progress = String(row.ASSIGN_PROGRESS || '');
+      if (progress.indexOf('实施') === -1 || progress.indexOf('未实施') !== -1) continue;
       var dp10 = Number(row.PRETAX_BONUS_RMB);
       if (!(dp10 > 0)) continue;
       var m = reportDate.exec(row.REPORT_DATE || '');
@@ -120,6 +122,15 @@
       historyYears.forEach(function (y) { sum += yearAmount[y]; });
       historyMean = sum / historyYears.length;
     }
+    /* 近3年均值（targetYear之前最近3年）——突击分红判断用，避免早期低基数拉偏（T3）*/
+    var tgtInt = parseInt(targetYear, 10);
+    var recent3 = historyYears.filter(function (y) { return parseInt(y, 10) < tgtInt; }).slice(0, 3);
+    var history3yMean = null;
+    if (recent3.length) {
+      var s3 = 0;
+      recent3.forEach(function (y) { s3 += yearAmount[y]; });
+      history3yMean = s3 / recent3.length;
+    }
     /* 曾削减：相邻年降幅 > 30% */
     var asc = yearsSorted.slice().sort(function (a, b) { return a - b; }).map(String);
     var everCut = false;
@@ -131,6 +142,7 @@
       consecutive_years: consecutive, ever_cut: everCut,
       latest_year_amount: yearAmount[String(yearsSorted[0])] || null,
       history_mean_amount: historyMean,
+      history_3y_mean: history3yMean,
     };
   }
 
@@ -251,7 +263,7 @@
       interest_debt_ratio: num(latestRow.INTEREST_DEBT_RATIO),
       interest_coverage: num(latestRow.INTEREST_COVERAGE_RATIO),
       roe: num(latestRow.ROEJQ),
-      capital_adequacy_ratio: num(latestRow.FIRST_ADEQUACY_RATIO),
+      capital_adequacy_ratio: num(latestRow.ADEQUACY_RATIO),   // 总资本充足率（非FIRST_ADEQUACY一级口径）
       net_interest_margin: num(latestRow.NET_INTEREST_MARGIN),
       npl_ratio: num(latestRow.NON_PERFORMING_LOAN),
       provision_coverage: num(latestRow.RISK_COVERAGE),
@@ -370,8 +382,8 @@
   var SUS_THRESHOLD_YIELD = 4.0;
   var SUS_SCORE_SUSTAINABLE = 1.5;
   var SUS_SCORE_WEAK = 1.0;
-  var SUS_FATAL_PAYOUT = 1.0;
   var SUS_FATAL_CF_COV = 1.0;
+  var SUS_FATAL_BANK_CAR = 10.5;   // 银行总资本充足率致命红线（监管约束）
   /* 六维阈值与权重（对齐 Python） */
   var SUS_DIM = {
     cf_coverage: [1.0, 1.5], payout: [0.60, 0.80], roe: [10.0, 15.0],
@@ -381,7 +393,7 @@
     cf_coverage: 0.25, payout: 0.20, profitability: 0.15, balance_sheet: 0.15,
     dividend_history: 0.15, industry: 0.10,
   };
-  var SUS_WARN = { price_drop: -0.30, special_div: 1.5, holding: 0.50, high_payout: 0.80 };
+  var SUS_WARN = { payout_over_100: 1.0, price_drop: -0.30, special_div: 2.0, holding: 0.50, high_payout: 0.80 };
   var FINANCE_INDUSTRIES = ['银行', '保险'];
   var DEFENSIVE_INDUSTRIES = [
     '公用事业', '电力', '水务', '燃气', '高速公路', '铁路', '港口', '机场',
@@ -422,17 +434,17 @@
     return null;
   }
 
-  /* Layer 1：致命红旗 */
-  function checkFatalFlags(payoutRatio, fcfCoverage, operatingCf, netProfit, dividendTotal) {
+  /* Layer 1：致命红旗。银行/保险（isBank）短路现金流类红旗（语义失真）。 */
+  function checkFatalFlags(payoutRatio, fcfCoverage, operatingCf, netProfit, dividendTotal, isBank) {
     var flags = [];
     var hasDiv = !!(dividendTotal && dividendTotal > 0);
-    if (payoutRatio != null && payoutRatio > SUS_FATAL_PAYOUT) {
-      flags.push('股利支付率 ' + (payoutRatio * 100).toFixed(1) + '% > 100%，分红已超过当年净利润，不可持续');
+    // 支付率>100% 移至 Layer 3 情境红旗（T2）
+    if (!isBank) {
+      if (fcfCoverage != null && fcfCoverage < SUS_FATAL_CF_COV) {
+        flags.push('自由现金流覆盖 ' + fcfCoverage.toFixed(2) + 'x < 1.0x，分红金额超过自由现金流');
+      }
+      if (hasDiv && operatingCf != null && operatingCf < 0) flags.push('经营现金流为负却仍派发现金分红');
     }
-    if (fcfCoverage != null && fcfCoverage < SUS_FATAL_CF_COV) {
-      flags.push('自由现金流覆盖 ' + fcfCoverage.toFixed(2) + 'x < 1.0x，分红金额超过自由现金流');
-    }
-    if (hasDiv && operatingCf != null && operatingCf < 0) flags.push('经营现金流为负却仍派发现金分红');
     if (hasDiv && netProfit != null && netProfit < 0) flags.push('净利润为负（亏损）却仍派发现金分红');
     return flags;
   }
@@ -490,25 +502,35 @@
     return s;
   }
 
+  /* 返回 [score, missingRatio]：缺失维度计 0 分（不归一化分摊，T4）*/
   function _weightedScore(scores, weights) {
-    var totalW = 0, weighted = 0;
-    Object.keys(scores).forEach(function (k) {
-      if (scores[k] != null) { totalW += weights[k] || 0; weighted += scores[k] * (weights[k] || 0); }
+    var keys = Object.keys(scores);
+    var totalW = 0, weighted = 0, missingW = 0;
+    keys.forEach(function (k) {
+      totalW += weights[k] || 0;
+      if (scores[k] == null) { missingW += weights[k] || 0; }
+      else { weighted += scores[k] * (weights[k] || 0); }
     });
-    if (totalW <= 0) return null;
-    return weighted / totalW;
+    if (totalW <= 0) return [null, 1.0];
+    return [weighted / totalW, missingW / totalW];
   }
 
   /* Layer 3：情境红旗 */
-  function checkWarningFlags(fin, history, isCyclical, priceChange1y, top10Holding, payoutRatio, debtDec, cfCoverage) {
+  function checkWarningFlags(fin, history, isCyclical, priceChange1y, top10Holding, payoutRatio, debtDec, cfCoverage, isBank) {
     var flags = [];
+    /* 支付率>100%（T2：单年不否决，仅警示；成熟期/高折旧股结构性偏高属健康）*/
+    if (payoutRatio != null && payoutRatio > SUS_WARN.payout_over_100) {
+      flags.push('股利支付率 ' + (payoutRatio * 100).toFixed(1) + '% > 100%，分红超过当年净利润（成熟期/高折旧股常见，关注是否动用留存收益）');
+    }
     if (priceChange1y != null && priceChange1y < SUS_WARN.price_drop) {
       flags.push('近1年股价跌幅 ' + (priceChange1y * 100).toFixed(1) + '%，高股息率可能源于股价下跌（分母效应）');
     }
-    if (history.latest_year_amount && history.history_mean_amount && history.history_mean_amount > 0
-        && history.latest_year_amount > history.history_mean_amount * SUS_WARN.special_div) {
-      flags.push('最新财年分红 ' + (history.latest_year_amount / 1e8).toFixed(2) + '亿元 远超历史均值 '
-        + (history.history_mean_amount / 1e8).toFixed(2) + '亿元，疑似特别/突击分红');
+    /* 特别/突击分红：当年分红远超近3年均值（T3：避免早期低基数拉偏误判稳定增长股）*/
+    var historyBaseline = (history.history_3y_mean != null) ? history.history_3y_mean : history.history_mean_amount;
+    if (history.latest_year_amount && historyBaseline && historyBaseline > 0
+        && history.latest_year_amount > historyBaseline * SUS_WARN.special_div) {
+      flags.push('最新财年分红 ' + (history.latest_year_amount / 1e8).toFixed(2) + '亿元 远超近3年均值 '
+        + (historyBaseline / 1e8).toFixed(2) + '亿元，疑似特别/突击分红');
     }
     if (top10Holding != null && top10Holding > SUS_WARN.holding
         && payoutRatio != null && payoutRatio > SUS_WARN.high_payout) {
@@ -520,11 +542,14 @@
       flags.push('属周期行业且净利润同比 ' + fin.net_profit_yoy.toFixed(1) + '% 已拐头，支付率仍 '
         + (payoutRatio * 100).toFixed(1) + '%，警惕周期顶点高分红陷阱');
     }
-    var weakCf = cfCoverage != null && cfCoverage < SUS_DIM.cf_coverage[1];
-    var highDebt = debtDec != null && debtDec > SUS_DIM.debt_ratio[1];
-    var highPayout = payoutRatio != null && payoutRatio > SUS_WARN.high_payout;
-    if (weakCf && highDebt && highPayout) {
-      flags.push("高负债 + 弱现金流覆盖 + 高派息，符合监管重点关注的'透支式分红'画像");
+    /* 证监会红线画像：高负债+弱现金流+高派息（银行跳过——负债率对银行无意义，T7）*/
+    if (!isBank) {
+      var weakCf = cfCoverage != null && cfCoverage < SUS_DIM.cf_coverage[1];
+      var highDebt = debtDec != null && debtDec > SUS_DIM.debt_ratio[1];
+      var highPayout = payoutRatio != null && payoutRatio > SUS_WARN.high_payout;
+      if (weakCf && highDebt && highPayout) {
+        flags.push("高负债 + 弱现金流覆盖 + 高派息，符合监管重点关注的'透支式分红'画像");
+      }
     }
     return flags;
   }
@@ -536,21 +561,23 @@
     return { isBank: isBank, isCyclical: isCyclical, isDefensive: isDefensive };
   }
 
-  /* Layer 2 分支评分（对齐 Python _score_by_branch）：返回 {dimScores, score} */
+  /* Layer 2 分支评分（对齐 Python _score_by_branch）：返回 {dimScores, score, missingRatio} */
   function _scoreByBranch(fin, history, payoutRatio, cfCoverage, isBank, isCyclical, isDefensive) {
     if (isBank) {
       var dimScores = scoreFinanceBranch(fin);
       if (Object.keys(dimScores).length) {
         var vals = Object.keys(dimScores).map(function (k) { return dimScores[k]; });
         var score = vals.reduce(function (a, b) { return a + b; }, 0) / vals.length;
-        return { dimScores: dimScores, score: score };
+        return { dimScores: dimScores, score: score, missingRatio: 0.0 };
       }
       // 银行专项全缺失 → 降级通用（note/branch 由调用方处理）
       dimScores = scoreDimensions(fin, history, payoutRatio, cfCoverage, isCyclical, isDefensive);
-      return { dimScores: dimScores, score: _weightedScore(dimScores, SUS_WEIGHTS) };
+      var r1 = _weightedScore(dimScores, SUS_WEIGHTS);
+      return { dimScores: dimScores, score: r1[0], missingRatio: r1[1] };
     }
     dimScores = scoreDimensions(fin, history, payoutRatio, cfCoverage, isCyclical, isDefensive);
-    return { dimScores: dimScores, score: _weightedScore(dimScores, SUS_WEIGHTS) };
+    var r2 = _weightedScore(dimScores, SUS_WEIGHTS);
+    return { dimScores: dimScores, score: r2[0], missingRatio: r2[1] };
   }
 
   /* 三档结论映射 + 情境红旗降档（对齐 Python _verdict_from_score） */
@@ -618,17 +645,32 @@
     /* Layer 2：分支评分（先算，供展示；红旗否决时也有维度分）*/
     var scored = _scoreByBranch(fin, history, payoutRatio, cfCoverage, cls.isBank, cls.isCyclical, cls.isDefensive);
     var dimScores = scored.dimScores, score = scored.score;
+    var isFallback = false;
     // 银行走金融分支但专项全缺失时 _scoreByBranch 内部已降级通用；此处补记 note/branch
     if (cls.isBank && !(('capital_adequacy' in dimScores) || ('npl' in dimScores))) {
       result.notes.push('银行专项指标（资本充足率/净息差/不良率）缺失，按通用指标评估');
       result.branch = 'general-fallback';
+      isFallback = true;
+      // T7：银行 fallback 时屏蔽资产负债表维度（银行天然 90%+，通用阈值必踩坑）
+      dimScores.balance_sheet = null;
+      var reScored = _weightedScore(dimScores, SUS_WEIGHTS);
+      score = reScored[0]; scored.missingRatio = reScored[1];
+    }
+    // T4：数据缺失惩罚——缺失权重 ≥ 30% 标低置信（score 已含缺失维度计 0 分）
+    if (scored.missingRatio >= 0.30 && score != null) {
+      result.notes.push('财务数据缺失较多（' + (scored.missingRatio * 100).toFixed(0) + '%），结论置信度偏低');
+      result.metrics.missing_weight_ratio = scored.missingRatio;
     }
     Object.keys(dimScores).forEach(function (k) { if (dimScores[k] == null) dimScores[k] = 0; });
     result.dimension_scores = dimScores;
     result.metrics.consecutive_dividend_years = history.consecutive_years;
 
     /* Layer 1：致命红旗（维度分已算好，否决时仍展示）*/
-    result.fatal_flags = checkFatalFlags(payoutRatio, fcfCoverage, fin.operating_cf, fin.net_profit, dividendTotal);
+    result.fatal_flags = checkFatalFlags(payoutRatio, fcfCoverage, fin.operating_cf, fin.net_profit, dividendTotal, cls.isBank);
+    /* 银行/保险：资本充足率 < 10.5% 是监管约束分红的硬红线，单列致命否决 */
+    if (cls.isBank && fin.capital_adequacy_ratio != null && fin.capital_adequacy_ratio < SUS_FATAL_BANK_CAR) {
+      result.fatal_flags.push('资本充足率 ' + fin.capital_adequacy_ratio.toFixed(2) + '% < 10.5%，触及监管约束，分红受限');
+    }
     if (result.fatal_flags.length) {
       result.score = 0.0;
       return result;
@@ -644,7 +686,7 @@
 
     /* Layer 3：情境红旗 → 降一档 */
     result.warning_flags = checkWarningFlags(fin, history, cls.isCyclical,
-      opts.price_change_1y, opts.top10_holding, payoutRatio, debtDec, cfCoverage);
+      opts.price_change_1y, opts.top10_holding, payoutRatio, debtDec, cfCoverage, cls.isBank);
     result.verdict = _verdictFromScore(score, result.warning_flags);
     return result;
   }

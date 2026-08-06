@@ -27,8 +27,8 @@ SCORE_SUSTAINABLE = 1.5   # ≥ 该值 → 可持续
 SCORE_WEAK = 1.0          # ≥ 该值 → 偏弱；更低 → 不可持续
 
 # Layer 1 致命红旗阈值
-FATAL_PAYOUT_RATIO = 1.0       # 股利支付率 > 100%
-FATAL_CF_COVERAGE = 1.0        # 自由现金流覆盖 < 1.0x → 分红 > FCF
+FATAL_CF_COVERAGE = 1.0        # 自由现金流覆盖 < 1.0x → 分红 > FCF（银行短路）
+FATAL_BANK_CAR = 10.5          # 银行总资本充足率 < 10.5% → 监管约束分红，致命红线
 
 # Layer 2 六维评分阈值（通用分支）
 # 现金流覆盖（经营现金流/分红）
@@ -55,8 +55,9 @@ WEIGHTS = {
 }
 
 # Layer 3 情境红旗阈值
+WARN_PAYOUT_OVER_100 = 1.0        # 股利支付率 > 100%（成熟期股结构性偏高属健康信号，仅警示）
 WARN_PRICE_DROP = -0.30        # 近1年股价跌幅 < -30%
-WARN_SPECIAL_DIV_MULTIPLE = 1.5  # 当年分红 > 历史均值 × 1.5
+WARN_SPECIAL_DIV_MULTIPLE = 2.0  # 当年分红 > 近3年均值 × 2.0（避免早期低基数拉偏误判稳定增长股）
 WARN_HOLDING_CONCENTRATION = 0.50  # 前十大持股 > 50%
 WARN_HIGH_PAYOUT = 0.80        # 高派息门槛（情境画像用）
 
@@ -110,6 +111,7 @@ class DividendHistory:
     ever_cut: bool                         # 可得历史内是否曾削减/中断
     latest_year_amount: Optional[float]    # 最新财年分红总额（元）
     history_mean_amount: Optional[float]   # 历史年均分红总额（元，不含最新年）
+    history_3y_mean: Optional[float] = None  # 近3年（最新年前3年）年均分红（元）；突击分红判断用
 
 
 @dataclass
@@ -211,28 +213,32 @@ def check_fatal_flags(payout_ratio: Optional[float],
                       fcf_coverage: Optional[float],
                       operating_cf: Optional[float],
                       net_profit: Optional[float],
-                      dividend_total: Optional[float]) -> List[str]:
-    """返回致命红旗理由列表（空则无致命问题）。"""
+                      dividend_total: Optional[float],
+                      is_bank: bool = False) -> List[str]:
+    """返回致命红旗理由列表（空则无致命问题）。
+
+    银行/保险（is_bank=True）短路现金流类红旗：
+      银行经营CF含存贷款净变动、扩张期为负属常态；FCF 概念对银行不适用
+      （其"投资"是放贷而非固定资产）。故仅保留"净利润<0却分红"。
+    """
     flags: List[str] = []
     has_div = bool(dividend_total and dividend_total > 0)
 
-    # 1. 股利支付率 > 100%（净利润为正才有意义）
-    if payout_ratio is not None and payout_ratio > FATAL_PAYOUT_RATIO:
-        flags.append(
-            f"股利支付率 {payout_ratio*100:.1f}% > 100%，分红已超过当年净利润，不可持续"
-        )
+    # 1. 股利支付率 > 100% —— 移至 Layer 3 情境红旗（成熟期股结构性>100%属健康，见 T2）
+    # （此处不再判否决）
 
-    # 2. 自由现金流覆盖 < 1.0x（分红 > FCF）
-    if fcf_coverage is not None and fcf_coverage < FATAL_CF_COVERAGE:
-        flags.append(
-            f"自由现金流覆盖 {fcf_coverage:.2f}x < 1.0x，分红金额超过自由现金流"
-        )
+    if not is_bank:
+        # 2. 自由现金流覆盖 < 1.0x（分红 > FCF）
+        if fcf_coverage is not None and fcf_coverage < FATAL_CF_COVERAGE:
+            flags.append(
+                f"自由现金流覆盖 {fcf_coverage:.2f}x < 1.0x，分红金额超过自由现金流"
+            )
 
-    # 3. 经营现金流为负却分红
-    if has_div and operating_cf is not None and operating_cf < 0:
-        flags.append("经营现金流为负却仍派发现金分红")
+        # 3. 经营现金流为负却分红
+        if has_div and operating_cf is not None and operating_cf < 0:
+            flags.append("经营现金流为负却仍派发现金分红")
 
-    # 4. 净利润为负仍分红
+    # 4. 净利润为负仍分红（所有行业适用，含银行）
     if has_div and net_profit is not None and net_profit < 0:
         flags.append("净利润为负（亏损）却仍派发现金分红")
 
@@ -347,13 +353,20 @@ def score_finance_branch(latest: AnnualFinancial) -> Dict[str, int]:
     return scores
 
 
-def _weighted_score(scores: Dict[str, int], weights: Dict[str, float]) -> Optional[float]:
-    """按权重加权，缺失维度按其权重归一化到已有维度。全缺失返回 None。"""
-    total_w = sum(weights.get(k, 0) for k, v in scores.items() if v is not None)
+def _weighted_score(scores: Dict[str, Optional[int]], weights: Dict[str, float]) -> Tuple[Optional[float], float]:
+    """按权重加权。缺失维度按 0 分计入（不再归一化分摊——避免数据稀疏虚高得分，T4）。
+
+    返回 (score, missing_weight_ratio)：
+      - score = ∑(分数×权重) / ∑(全部权重)，缺失维度贡献 0 分
+      - missing_weight_ratio = 缺失维度权重和 / 总权重
+    全部维度缺失返回 (None, 1.0)。
+    """
+    total_w = sum(weights.get(k, 0) for k in scores)
     if total_w <= 0:
-        return None
-    weighted = sum(scores[k] * weights.get(k, 0) for k, v in scores.items() if v is not None)
-    return weighted / total_w
+        return None, 1.0
+    missing_w = sum(weights.get(k, 0) for k, v in scores.items() if v is None)
+    weighted = sum((scores[k] or 0) * weights.get(k, 0) for k in scores)
+    return weighted / total_w, missing_w / total_w
 
 
 # ---------------------------------------------------------------------------
@@ -367,9 +380,17 @@ def check_warning_flags(latest: AnnualFinancial,
                         top10_holding: Optional[float],
                         payout_ratio: Optional[float],
                         debt_ratio_dec: Optional[float],
-                        cf_coverage: Optional[float]) -> List[str]:
+                        cf_coverage: Optional[float],
+                        is_bank: bool = False) -> List[str]:
     """返回情境红旗理由列表。"""
     flags: List[str] = []
+
+    # 股利支付率 > 100%（成熟期股结构性偏高属健康信号，单年不否决，仅警示）
+    if payout_ratio is not None and payout_ratio > WARN_PAYOUT_OVER_100:
+        flags.append(
+            f"股利支付率 {payout_ratio*100:.1f}% > 100%，分红超过当年净利润"
+            f"（成熟期/高折旧股常见，关注是否动用留存收益）"
+        )
 
     # 被动高股息：股价近1年跌幅 > 30%
     if price_change_1y is not None and price_change_1y < WARN_PRICE_DROP:
@@ -377,13 +398,14 @@ def check_warning_flags(latest: AnnualFinancial,
             f"近1年股价跌幅 {price_change_1y*100:.1f}%，高股息率可能源于股价下跌（分母效应）"
         )
 
-    # 特别/突击分红：当年分红远超历史均值
-    if (history.latest_year_amount and history.history_mean_amount
-            and history.history_mean_amount > 0
-            and history.latest_year_amount > history.history_mean_amount * WARN_SPECIAL_DIV_MULTIPLE):
+    # 特别/突击分红：当年分红远超近3年均值（T3：用近3年而非全历史，避免稳定增长股被误伤）
+    history_baseline = history.history_3y_mean if history.history_3y_mean is not None else history.history_mean_amount
+    if (history.latest_year_amount and history_baseline
+            and history_baseline > 0
+            and history.latest_year_amount > history_baseline * WARN_SPECIAL_DIV_MULTIPLE):
         flags.append(
             f"最新财年分红 {history.latest_year_amount/1e8:.2f}亿元 "
-            f"远超历史均值 {history.history_mean_amount/1e8:.2f}亿元，疑似特别/突击分红"
+            f"远超近3年均值 {history_baseline/1e8:.2f}亿元，疑似特别/突击分红"
         )
 
     # 一股独大 + 高派息（需大股东数据）
@@ -402,12 +424,13 @@ def check_warning_flags(latest: AnnualFinancial,
             f"支付率仍 {payout_ratio*100:.1f}%，警惕周期顶点高分红陷阱"
         )
 
-    # 证监会红线画像：高负债 + 弱现金流 + 高分红
-    weak_cf = cf_coverage is not None and cf_coverage < DIM_CF_COVERAGE[1]
-    high_debt = debt_ratio_dec is not None and debt_ratio_dec > DIM_DEBT_RATIO[1]
-    high_payout = payout_ratio is not None and payout_ratio > WARN_HIGH_PAYOUT
-    if weak_cf and high_debt and high_payout:
-        flags.append("高负债 + 弱现金流覆盖 + 高派息，符合监管重点关注的'透支式分红'画像")
+    # 证监会红线画像：高负债 + 弱现金流 + 高分红（银行跳过——负债率对银行无意义，T7）
+    if not is_bank:
+        weak_cf = cf_coverage is not None and cf_coverage < DIM_CF_COVERAGE[1]
+        high_debt = debt_ratio_dec is not None and debt_ratio_dec > DIM_DEBT_RATIO[1]
+        high_payout = payout_ratio is not None and payout_ratio > WARN_HIGH_PAYOUT
+        if weak_cf and high_debt and high_payout:
+            flags.append("高负债 + 弱现金流覆盖 + 高派息，符合监管重点关注的'透支式分红'画像")
 
     return flags
 
@@ -439,23 +462,26 @@ def _classify_industry(industry: str) -> Tuple[bool, bool, bool]:
 
 def _score_by_branch(latest: AnnualFinancial, history: DividendHistory,
                      metrics: DerivedMetrics, is_bank: bool, is_cyclical: bool,
-                     is_defensive: bool) -> Tuple[Dict[str, Optional[int]], Optional[float]]:
+                     is_defensive: bool) -> Tuple[Dict[str, Optional[int]], Optional[float], float]:
     """Layer 2 分支评分：银行走金融专项（等权平均），否则通用六维加权。
 
-    返回 (dimension_scores, score)。银行专项全缺失时降级通用分支。
+    返回 (dimension_scores, score, missing_weight_ratio)。
+    金融分支只计入有值的专项项，missing_ratio=0；通用分支按 _weighted_score 缺失惩罚。
     """
     if is_bank:
         dim_scores = score_finance_branch(latest)
         if dim_scores:
             score = sum(dim_scores.values()) / len(dim_scores)
-            return dim_scores, score
+            return dim_scores, score, 0.0
         # 银行专项全缺失 → 降级（调用方负责记 note/branch）
         dim_scores = score_dimensions(latest, history, metrics.payout_ratio, metrics.cf_coverage,
                                       is_cyclical, is_defensive)
-        return dim_scores, _weighted_score(dim_scores, WEIGHTS)
+        score, missing = _weighted_score(dim_scores, WEIGHTS)
+        return dim_scores, score, missing
     dim_scores = score_dimensions(latest, history, metrics.payout_ratio, metrics.cf_coverage,
                                   is_cyclical, is_defensive)
-    return dim_scores, _weighted_score(dim_scores, WEIGHTS)
+    score, missing = _weighted_score(dim_scores, WEIGHTS)
+    return dim_scores, score, missing
 
 
 def _verdict_from_score(score: Optional[float], warning_flags: List[str]) -> str:
@@ -542,18 +568,33 @@ def assess_sustainability(*,
         result.notes.append("分红历史缺失，分红历史维度按 0 分计")
 
     # Layer 2：分支评分（先算，供展示；红旗否决时也有维度分）
-    dim_scores, score = _score_by_branch(latest, history, metrics, is_bank, is_cyclical, is_defensive)
+    dim_scores, score, missing_ratio = _score_by_branch(latest, history, metrics, is_bank, is_cyclical, is_defensive)
+    is_fallback = False
     # 银行走金融分支但专项全缺失时 _score_by_branch 内部已降级通用；此处补记 note/branch
     if is_bank and not any(k in dim_scores for k in ("capital_adequacy", "npl")):
         result.notes.append("银行专项指标（资本充足率/净息差/不良率）缺失，按通用指标评估")
         result.branch = "general-fallback"
+        is_fallback = True
+        # T7：银行 fallback 时屏蔽资产负债表维度（银行天然 90%+，通用阈值必踩坑）
+        dim_scores["balance_sheet"] = None
+        score, missing_ratio = _weighted_score(dim_scores, WEIGHTS)
+    # T4：数据缺失惩罚——缺失权重 ≥ 30% 标低置信（score 已含缺失维度计 0 分）
+    if missing_ratio >= 0.30 and score is not None:
+        result.notes.append(f"财务数据缺失较多（{missing_ratio*100:.0f}%），结论置信度偏低")
+        result.metrics["missing_weight_ratio"] = missing_ratio
     result.dimension_scores = {k: (v if v is not None else 0) for k, v in dim_scores.items()}
     result.metrics["consecutive_dividend_years"] = float(history.consecutive_years)
 
     # Layer 1：致命红旗（维度分已算好，否决时仍展示）
     result.fatal_flags = check_fatal_flags(
-        metrics.payout_ratio, metrics.fcf_coverage, latest.operating_cf, latest.net_profit, dividend_total
+        metrics.payout_ratio, metrics.fcf_coverage, latest.operating_cf, latest.net_profit, dividend_total,
+        is_bank=is_bank,
     )
+    # 银行/保险：资本充足率 < 10.5% 是监管约束分红的硬红线，单列致命否决
+    if is_bank and latest.capital_adequacy_ratio is not None and latest.capital_adequacy_ratio < FATAL_BANK_CAR:
+        result.fatal_flags.append(
+            f"资本充足率 {latest.capital_adequacy_ratio:.2f}% < {FATAL_BANK_CAR}%，触及监管约束，分红受限"
+        )
     if result.fatal_flags:
         result.score = 0.0
         return result
@@ -566,10 +607,10 @@ def assess_sustainability(*,
 
     result.score = round(score, 3)
 
-    # Layer 3：情境红旗 → 降一档
+    # Layer 3：情境红旗 → 降一档（银行跳过证监会画像，T7）
     result.warning_flags = check_warning_flags(
         latest, history, is_cyclical, price_change_1y, top10_holding,
-        metrics.payout_ratio, metrics.debt_ratio_dec, metrics.cf_coverage
+        metrics.payout_ratio, metrics.debt_ratio_dec, metrics.cf_coverage, is_bank=is_bank
     )
     result.verdict = _verdict_from_score(score, result.warning_flags)
     return result
