@@ -263,10 +263,10 @@
       interest_debt_ratio: num(latestRow.INTEREST_DEBT_RATIO),
       interest_coverage: num(latestRow.INTEREST_COVERAGE_RATIO),
       roe: num(latestRow.ROEJQ),
-      capital_adequacy_ratio: num(latestRow.ADEQUACY_RATIO),   // 总资本充足率（非FIRST_ADEQUACY一级口径）
+      capital_adequacy_ratio: num(latestRow.NEWCAPITALADER),   // 总资本充足率（实地验证，非ADEQUACY_RATIO虚构字段）
       net_interest_margin: num(latestRow.NET_INTEREST_MARGIN),
-      npl_ratio: num(latestRow.NON_PERFORMING_LOAN),
-      provision_coverage: num(latestRow.RISK_COVERAGE),
+      npl_ratio: num(latestRow.NONPERLOAN),                    // 不良率%（非NON_PERFORMING_LOAN余额）
+      provision_coverage: num(latestRow.LOAN_PROVISION_RATIO), // 拨贷比%（非RISK_COVERAGE恒空）
     };
   }
 
@@ -495,9 +495,10 @@
       var npl = fin.npl_ratio;
       s.npl = npl < 1.0 ? 2 : (npl < 2.0 ? 1 : 0);
     }
+    // 拨贷比（LOAN_PROVISION_RATIO，监管要求1.5-2.5%；东财无拨备覆盖率字段，用拨贷比近似）
     if (fin.provision_coverage != null) {
       var pc = fin.provision_coverage;
-      s.provision = pc >= 150 ? 2 : (pc >= 120 ? 1 : 0);
+      s.provision = pc >= 2.5 ? 2 : (pc >= 2.0 ? 1 : 0);
     }
     return s;
   }
@@ -628,7 +629,7 @@
     result.metrics.free_cash_flow = fcf;
     result.metrics.fcf_coverage = fcfCoverage;
     result.metrics.cf_coverage = cfCoverage;
-    result.metrics.debt_ratio = fin.debt_ratio;
+    result.metrics.debt_ratio = (fin.debt_ratio != null) ? fin.debt_ratio : _debtRatioDecimal(fin);
     result.metrics.interest_coverage = fin.interest_coverage;
     result.metrics.roe_latest = fin.roe;
     result.metrics.net_profit = fin.net_profit;
@@ -636,6 +637,7 @@
     result.metrics.capital_adequacy = fin.capital_adequacy_ratio;
     result.metrics.net_interest_margin = fin.net_interest_margin;
     result.metrics.npl_ratio = fin.npl_ratio;
+    result.metrics.provision_coverage = fin.provision_coverage;
 
     /* 分红历史缺失补默认 */
     var history = opts.history || { consecutive_years: 0, ever_cut: false,

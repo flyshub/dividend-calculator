@@ -83,7 +83,6 @@ class AnnualFinancial:
     investing_cf: Optional[float]          # 投资活动现金流净额（元，通常为负；含金融投资，非纯 CAPEX）
     total_assets: Optional[float]          # 总资产（元）
     total_liabilities: Optional[float]     # 总负债（元）
-    debt_ratio: Optional[float]            # 资产负债率（百分数，如 52 表示 52%）
     interest_debt_ratio: Optional[float]   # 有息负债率（百分数）
     interest_coverage: Optional[float]     # 利息保障倍数（x）
     roe: Optional[float]                   # ROE（百分数）
@@ -94,6 +93,8 @@ class AnnualFinancial:
     provision_coverage: Optional[float]       # 拨备覆盖率（百分数）
     # 资本开支（购建固定资产/无形资产，元，正数）；来自现金流量表，缺失则 FCF 降级用 investing_cf
     capex: Optional[float] = None
+    # 资产负债率（百分数）；东财无直接字段，靠 debt_ratio_decimal() 用 LIABILITY/TOTAL_ASSETS_PK 推算
+    debt_ratio: Optional[float] = None
 
     def debt_ratio_decimal(self) -> Optional[float]:
         """资产负债率统一转为小数（0~1）。优先取 debt_ratio（东财百分数），缺失用总负债/总资产推算。"""
@@ -346,10 +347,11 @@ def score_finance_branch(latest: AnnualFinancial) -> Dict[str, int]:
     if latest.npl_ratio is not None:
         npl = latest.npl_ratio
         scores["npl"] = 2 if npl < 1.0 else (1 if npl < 2.0 else 0)
-    # 拨备覆盖率（>150 健康/120~150 警戒/<120 危险）
+    # 拨贷比（LOAN_PROVISION_RATIO，监管要求1.5-2.5%；东财无拨备覆盖率字段，用拨贷比近似）
+    # ≥2.5 健康 / 2.0-2.5 警戒 / <2.0 危险
     if latest.provision_coverage is not None:
         pc = latest.provision_coverage
-        scores["provision"] = 2 if pc >= 150 else (1 if pc >= 120 else 0)
+        scores["provision"] = 2 if pc >= 2.5 else (1 if pc >= 2.0 else 0)
     return scores
 
 
@@ -551,7 +553,7 @@ def assess_sustainability(*,
         "free_cash_flow": metrics.fcf,
         "fcf_coverage": metrics.fcf_coverage,
         "cf_coverage": metrics.cf_coverage,
-        "debt_ratio": latest.debt_ratio,
+        "debt_ratio": latest.debt_ratio_decimal() if latest.debt_ratio is None else latest.debt_ratio,
         "interest_coverage": latest.interest_coverage,
         "roe_latest": latest.roe,
         "net_profit": latest.net_profit,
@@ -559,6 +561,7 @@ def assess_sustainability(*,
         "capital_adequacy": latest.capital_adequacy_ratio,
         "net_interest_margin": latest.net_interest_margin,
         "npl_ratio": latest.npl_ratio,
+        "provision_coverage": latest.provision_coverage,
     })
 
     # 分红历史缺失补默认

@@ -34,14 +34,13 @@ def _make_finance_rows():
             "NETCASH_INVEST_PK": -31264415237.5,
             "TOTAL_ASSETS_PK": 561990500889.54,
             "LIABILITY": 322172683239.63,
-            "DEBT_ASSET_RATIO": 52.0,
             "INTEREST_DEBT_RATIO": 51.5,
             "INTEREST_COVERAGE_RATIO": 6.37,
             "ROEJQ": 16.0,
-            "FIRST_ADEQUACY_RATIO": None,
+            "NEWCAPITALADER": None,
             "NET_INTEREST_MARGIN": None,
-            "NON_PERFORMING_LOAN": None,
-            "RISK_COVERAGE": None,
+            "NONPERLOAN": None,
+            "LOAN_PROVISION_RATIO": None,
         },
         {
             "REPORT_DATE": "2024-12-31 00:00:00",
@@ -51,7 +50,6 @@ def _make_finance_rows():
             "NETCASH_INVEST_PK": -300e8,
             "TOTAL_ASSETS_PK": 5300e8,
             "LIABILITY": 280e8,
-            "DEBT_ASSET_RATIO": 52.8,
             "INTEREST_DEBT_RATIO": 50.0,
             "INTEREST_COVERAGE_RATIO": 7.0,
             "ROEJQ": 15.5,
@@ -76,7 +74,9 @@ def test_parse_financial_rows_basic():
     assert fins[0].net_profit == pytest.approx(34502809176.39)
     assert fins[0].operating_cf == pytest.approx(60562925570.41)
     assert fins[0].investing_cf == pytest.approx(-31264415237.5)
-    assert fins[0].debt_ratio == 52.0
+    # debt_ratio 无直接接口字段，靠 debt_ratio_decimal() 用 LIABILITY/TOTAL_ASSETS 推算
+    assert fins[0].debt_ratio is None
+    assert fins[0].debt_ratio_decimal() == pytest.approx(322172683239.63 / 561990500889.54, abs=0.01)
     assert fins[0].interest_coverage == 6.37
     assert fins[0].roe == 16.0
 
@@ -250,12 +250,11 @@ def test_assess_for_stock_bank_finance_branch():
         "NETCASH_INVEST_PK": None,
         "TOTAL_ASSETS_PK": 12e12,
         "LIABILITY": 11e12,
-        "DEBT_ASSET_RATIO": 91.5,
         "ROEJQ": 14.0,
-        "ADEQUACY_RATIO": 16.5,
+        "NEWCAPITALADER": 16.5,
         "NET_INTEREST_MARGIN": 1.87,
-        "NON_PERFORMING_LOAN": 0.95,
-        "RISK_COVERAGE": 200.0,
+        "NONPERLOAN": 0.95,
+        "LOAN_PROVISION_RATIO": 200.0,
     }]
     result = assess_for_stock(
         stock_code="600036",

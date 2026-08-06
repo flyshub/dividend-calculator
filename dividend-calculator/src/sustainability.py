@@ -63,7 +63,9 @@ _CASHFLOW_URL = (
     '&filter=(SECUCODE%3D"{secucode}")'
 )
 
-# 东财财务字段名 → AnnualFinancial 语义（实地验证 600900/600036 确认存在）
+# 东财财务字段名 → AnnualFinancial 语义（实地验证 600036 招行/600887 伊利确认真实存在）
+# 注意：东财字段命名有坑——NON_PERFORMING_LOAN 是"不良贷款余额"(元)非比率，
+#       RISK_COVERAGE 恒为 None，DEBT_ASSET_RATIO/ADEQUACY_RATIO 不存在。
 _FIELD_MAP = {
     "PARENTNETPROFIT": "net_profit",
     "PARENTNETPROFITTZ": "net_profit_yoy",
@@ -71,14 +73,14 @@ _FIELD_MAP = {
     "NETCASH_INVEST_PK": "investing_cf",
     "TOTAL_ASSETS_PK": "total_assets",
     "LIABILITY": "total_liabilities",
-    "DEBT_ASSET_RATIO": "debt_ratio",
+    # debt_ratio 无直接字段，靠 AnnualFinancial.debt_ratio_decimal() 用 LIABILITY/TOTAL_ASSETS_PK 推算
     "INTEREST_DEBT_RATIO": "interest_debt_ratio",
     "INTEREST_COVERAGE_RATIO": "interest_coverage",
     "ROEJQ": "roe",
-    "ADEQUACY_RATIO": "capital_adequacy_ratio",   # 总资本充足率（监管红线8%；非FIRST_ADEQUACY一级口径）
+    "NEWCAPITALADER": "capital_adequacy_ratio",   # 总资本充足率（监管红线8%；非FIRST_ADEQUACY_RATIO一级口径）
     "NET_INTEREST_MARGIN": "net_interest_margin",
-    "NON_PERFORMING_LOAN": "npl_ratio",
-    "RISK_COVERAGE": "provision_coverage",
+    "NONPERLOAN": "npl_ratio",                    # 不良贷款率（%；非NON_PERFORMING_LOAN余额）
+    "LOAN_PROVISION_RATIO": "provision_coverage",  # 拨贷比（%；非RISK_COVERAGE恒空）
 }
 
 
