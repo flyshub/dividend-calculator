@@ -266,3 +266,56 @@ test('assessSustainability 财务缺失→不可持续', () => {
   assert.equal(r.verdict, '不可持续');
   assert.ok(r.fatal_flags.some(f => f.includes('缺少财务数据')));
 });
+
+/* ── 结论说明 explainSustainability（对齐 Python explain_sustainability，逐字一致） ── */
+
+function susBase() {
+  return {
+    triggered: true, verdict: '偏弱', score: 1.2, branch: 'general',
+    fatal_flags: [], warning_flags: [], notes: [],
+    dimension_scores: { cf_coverage: 2, payout: 2, profitability: 0, balance_sheet: 2, dividend_history: 1, industry: 0 },
+    metrics: { cf_coverage: 2.983062851644384, payout_ratio: 0.4946238774464123, roe_latest: 13.17, net_profit_yoy: -37.132715923631, debt_ratio: 0.41415746932614467, consecutive_dividend_years: 5 },
+  };
+}
+
+test('explainSustainability 偏弱→弱维度+优势项', () => {
+  const lines = Calc.explainSustainability(susBase());
+  assert.deepStrictEqual(lines, [
+    '结论：偏弱 — 分红有一定基础，但存在隐忧，长期分红能力可能打折扣',
+    '1. 盈利稳定性：ROE 13.17%、净利润同比 -37.1%，盈利在下滑，分红难持续',
+    '2. 属强周期行业，盈利随景气波动大，高分红难年年保证',
+    '3. 连续分红 5 年，尚不算长期稳定',
+    '4. 优势项：现金流覆盖 2.98 倍（充裕）、支付率 49.5%（健康）',
+  ]);
+});
+
+test('explainSustainability 可持续→优势项+缺失注记', () => {
+  const sus = susBase();
+  sus.verdict = '可持续'; sus.score = 1.8;
+  sus.dimension_scores = { cf_coverage: 2, payout: 2, profitability: 2, balance_sheet: 2, dividend_history: 2, industry: 2 };
+  sus.metrics = { cf_coverage: 3.2, payout_ratio: 0.45, roe_latest: 15.2, net_profit_yoy: 8.7, debt_ratio: 0.35, consecutive_dividend_years: 8 };
+  sus.notes = ['财务数据部分缺失，结论仅供参考'];
+  const lines = Calc.explainSustainability(sus);
+  assert.deepStrictEqual(lines, [
+    '结论：可持续 — 盈利与现金流足以支撑当前分红',
+    '1. 优势项：现金流覆盖 3.20 倍（充裕）、支付率 45.0%（健康）',
+    '注：财务数据部分缺失，结论仅供参考',
+  ]);
+});
+
+test('explainSustainability 不可持续→致命红旗优先', () => {
+  const sus = susBase();
+  sus.verdict = '不可持续'; sus.score = null;
+  sus.fatal_flags = ['净利润为负（亏损）却仍派发现金分红', '自由现金流覆盖 0.60x < 1.0x，分红金额超过自由现金流'];
+  const lines = Calc.explainSustainability(sus);
+  assert.deepStrictEqual(lines, [
+    '结论：不可持续 — 存在致命问题，当前分红水平大概率维持不下去',
+    '1. 净利润为负（亏损）却仍派发现金分红',
+    '2. 自由现金流覆盖 0.60x < 1.0x，分红金额超过自由现金流',
+  ]);
+});
+
+test('explainSustainability 未触发→空数组', () => {
+  assert.deepStrictEqual(Calc.explainSustainability(null), []);
+  assert.deepStrictEqual(Calc.explainSustainability({ triggered: false, verdict: '未评估' }), []);
+});

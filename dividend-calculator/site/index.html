@@ -376,6 +376,7 @@
             <div id="sus-branch" class="value" style="font-size:14px;"></div>
           </div>
         </div>
+        <div id="sus-explanation" style="margin-top:12px;white-space:pre-line;line-height:1.7;font-size:13px;color:#444;background:#fafafa;border:1px solid #eee;border-radius:6px;padding:10px 12px;"></div>
         <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:12px;">
           <div class="result-card" style="flex:1;min-width:120px;"><div class="label">股利支付率</div><div id="sus-payout" class="value"></div></div>
           <div class="result-card" style="flex:1;min-width:120px;"><div class="label">经营现金流覆盖</div><div id="sus-cf-cov" class="value"></div></div>
@@ -883,6 +884,9 @@
       document.getElementById('sus-score').textContent = s.score == null ? '评分不足' : (s.score.toFixed(2) + ' / 2.0');
       const branchMap = { finance: '银行/保险专项', 'general-fallback': '通用（银行专项缺失）', general: '通用六维' };
       document.getElementById('sus-branch').textContent = branchMap[s.branch] || s.branch;
+
+      // 结论说明（白话）
+      document.getElementById('sus-explanation').textContent = (s.explanation || []).join('\n');
 
       const m = s.metrics || {};
       document.getElementById('sus-payout').textContent = m.payout_ratio == null ? '无' : (m.payout_ratio * 100).toFixed(1) + '%';

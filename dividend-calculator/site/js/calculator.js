@@ -693,6 +693,149 @@
     return result;
   }
 
+  /* ── 结论说明（对齐 Python explain_sustainability，双端逐字一致） ── */
+  function _r1(v) { return Math.round(v * 10) / 10; }
+  function _r2(v) { return Math.round(v * 100) / 100; }
+  /* 小数→百分数 1 位小数 */
+  function _pct1(v) { return _r1(v * 100).toFixed(1); }
+  /* 净利润同比带符号 */
+  function _yoyStr(v) {
+    return (v >= 0 ? '+' : '') + _r1(v).toFixed(1) + '%';
+  }
+
+  var SUS_EXPLAIN_DIMS = ['cf_coverage', 'payout', 'profitability', 'balance_sheet', 'dividend_history', 'industry'];
+  var SUS_EXPLAIN_DIMS_FIN = ['capital_adequacy', 'net_interest_margin', 'npl', 'provision'];
+
+  function _weakDimText(k, s, m) {
+    switch (k) {
+      case 'cf_coverage':
+        if (m.cf_coverage == null) return null;
+        return '现金流覆盖 ' + _r2(m.cf_coverage).toFixed(2) + ' 倍' +
+          (s === 0 ? '，分红花的钱超过真正赚到的现金，可能吃老本' : '，刚好够分红，余粮不多');
+      case 'payout':
+        if (m.payout_ratio == null) return null;
+        return '股利支付率 ' + _pct1(m.payout_ratio) + '%' +
+          (s === 0 ? '，利润几乎全拿去分红了' : '，分红比例偏高');
+      case 'profitability':
+        if (m.roe_latest == null) return null;
+        return '盈利稳定性：ROE ' + _r2(m.roe_latest).toFixed(2) + '%、净利润同比 ' + _yoyStr(m.net_profit_yoy == null ? 0 : m.net_profit_yoy) +
+          (s === 0 ? '，盈利在下滑，分红难持续' : '，盈利一般');
+      case 'balance_sheet':
+        if (m.debt_ratio == null) return null;
+        return '资产负债率 ' + _pct1(m.debt_ratio) + '%' +
+          (s === 0 ? '，负债偏高，财务压力大' : '，负债水平一般');
+      case 'dividend_history':
+        if (m.consecutive_dividend_years == null) return null;
+        return '连续分红 ' + parseInt(m.consecutive_dividend_years) + ' 年' +
+          (s === 0 ? '，历史较短' : '，尚不算长期稳定');
+      case 'industry':
+        if (s === 0) return '属强周期行业，盈利随景气波动大，高分红难年年保证';
+        return null; // 中性行业不赘述
+      case 'capital_adequacy':
+        if (m.capital_adequacy == null) return null;
+        return '资本充足率 ' + _r2(m.capital_adequacy).toFixed(2) + '%' +
+          (s === 0 ? '，低于监管红线，分红受限' : '，一般');
+      case 'net_interest_margin':
+        if (m.net_interest_margin == null) return null;
+        return '净息差 ' + _r2(m.net_interest_margin).toFixed(2) + '%' +
+          (s === 0 ? '，盈利承压' : '，一般');
+      case 'npl':
+        if (m.npl_ratio == null) return null;
+        return '不良贷款率 ' + _r2(m.npl_ratio).toFixed(2) + '%' +
+          (s === 0 ? '，资产质量堪忧' : '，偏高');
+      case 'provision':
+        if (m.provision_coverage == null) return null;
+        return '拨贷比 ' + _r2(m.provision_coverage).toFixed(2) + '%' +
+          (s === 0 ? '，风险缓冲不足' : '，一般');
+      default:
+        return null;
+    }
+  }
+
+  function _strongDimText(k, m) {
+    switch (k) {
+      case 'cf_coverage':
+        if (m.cf_coverage == null) return null;
+        return '现金流覆盖 ' + _r2(m.cf_coverage).toFixed(2) + ' 倍（充裕）';
+      case 'payout':
+        if (m.payout_ratio == null) return null;
+        return '支付率 ' + _pct1(m.payout_ratio) + '%（健康）';
+      case 'profitability':
+        if (m.roe_latest == null) return null;
+        return '盈利稳健（ROE ' + _r2(m.roe_latest).toFixed(2) + '%、净利润同比 ' + _yoyStr(m.net_profit_yoy == null ? 0 : m.net_profit_yoy) + '%）';
+      case 'balance_sheet':
+        if (m.debt_ratio == null) return null;
+        return '资产负债率 ' + _pct1(m.debt_ratio) + '%（稳健）';
+      case 'dividend_history':
+        if (m.consecutive_dividend_years == null) return null;
+        return '连续分红 ' + parseInt(m.consecutive_dividend_years) + ' 年（稳定）';
+      case 'industry':
+        return '属防御/成熟行业（盈利稳定）';
+      case 'capital_adequacy':
+        if (m.capital_adequacy == null) return null;
+        return '资本充足率 ' + _r2(m.capital_adequacy).toFixed(2) + '%（充足）';
+      case 'net_interest_margin':
+        if (m.net_interest_margin == null) return null;
+        return '净息差 ' + _r2(m.net_interest_margin).toFixed(2) + '%（健康）';
+      case 'npl':
+        if (m.npl_ratio == null) return null;
+        return '不良贷款率 ' + _r2(m.npl_ratio).toFixed(2) + '%（很低）';
+      case 'provision':
+        if (m.provision_coverage == null) return null;
+        return '拨贷比 ' + _r2(m.provision_coverage).toFixed(2) + '%（充足）';
+      default:
+        return null;
+    }
+  }
+
+  /* 可持续性结论白话说明：首行结论+一句话总结，随后分条理由
+   * （致命红旗 → 警示红旗 → 弱维度 → 优势项），末尾缺失数据说明。
+   * 未触发 / 未评估时返回空数组。 */
+  function explainSustainability(sus) {
+    if (!sus || !sus.triggered || sus.verdict === '未评估') return [];
+    var lines = [];
+    var head;
+    if (sus.verdict === '不可持续') {
+      head = (sus.fatal_flags && sus.fatal_flags.length)
+        ? '存在致命问题，当前分红水平大概率维持不下去'
+        : '分红金额与盈利/现金流明显不匹配，长期难以为继';
+    } else if (sus.verdict === '偏弱') {
+      head = '分红有一定基础，但存在隐忧，长期分红能力可能打折扣';
+    } else {
+      head = (sus.branch === 'finance')
+        ? '银行核心经营指标全部健康，分红能力扎实'
+        : '盈利与现金流足以支撑当前分红';
+    }
+    lines.push('结论：' + sus.verdict + ' — ' + head);
+
+    var n = 1;
+    var m = sus.metrics || {};
+    (sus.fatal_flags || []).slice(0, 3).forEach(function (f) { lines.push((n++) + '. ' + f); });
+
+    if (!(sus.fatal_flags || []).length) {
+      (sus.warning_flags || []).slice(0, 3).forEach(function (w) { lines.push((n++) + '. ' + w); });
+
+      var order = (sus.branch === 'finance') ? SUS_EXPLAIN_DIMS_FIN : SUS_EXPLAIN_DIMS;
+      var weak = [], strong = [];
+      order.forEach(function (k) {
+        var s = (sus.dimension_scores || {})[k];
+        if (s == null) return;
+        if (s <= 1) weak.push([s, k]); else strong.push(k);
+      });
+      weak.sort(function (a, b) { return a[0] - b[0]; });
+      weak.slice(0, 3).forEach(function (wk) {
+        var t = _weakDimText(wk[1], wk[0], m);
+        if (t) lines.push((n++) + '. ' + t);
+      });
+      if (sus.verdict !== '不可持续') {
+        var st = strong.slice(0, 2).map(function (k) { return _strongDimText(k, m); }).filter(Boolean);
+        if (st.length) lines.push((n++) + '. 优势项：' + st.join('、'));
+      }
+    }
+    if (sus.notes && sus.notes.length) lines.push('注：' + sus.notes.join('；'));
+    return lines;
+  }
+
   function round2(v) { return Math.round(v * 100) / 100; }
 
   /* Python str(float) 风格: 1.0 → "1.0", 2.332 → "2.332", 7.9 → "7.9" */
@@ -715,6 +858,7 @@
     classifyIndustry: classifyIndustry,
     computePr: computePr,
     assessSustainability: assessSustainability,
+    explainSustainability: explainSustainability,
     round2: round2,
     CYCLICAL_INDUSTRIES: CYCLICAL_INDUSTRIES,
     TECH_INDUSTRIES: TECH_INDUSTRIES,

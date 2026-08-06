@@ -38,6 +38,7 @@ module.exports = function formatResult(r) {
     sustainability_interest_coverage: _m(r, 'interest_coverage'),
     sustainability_consecutive_years: _m(r, 'consecutive_dividend_years'),
     sustainability_payout_ratio: _m(r, 'payout_ratio'),
+    sustainability_explanation: r.sustainability ? (r.sustainability.explanation || []).join('\n') : null,
   };
 };
 

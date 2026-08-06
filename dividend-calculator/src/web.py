@@ -13,7 +13,7 @@ sys.path.insert(0, str(project_root))
 from src.analysis import run_stock_analysis
 from src.dividend import DividendResult, calculate_true_dividend_yield
 from src.pr import PRResult
-from src.sustainability_calculator import SustainabilityResult
+from src.sustainability_calculator import SustainabilityResult, explain_sustainability
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,7 @@ def serialize_sustainability(result: SustainabilityResult) -> dict:
         "metrics": {k: v for k, v in result.metrics.items()},
         "branch": result.branch,
         "notes": list(result.notes),
+        "explanation": explain_sustainability(result),
     }
 
 

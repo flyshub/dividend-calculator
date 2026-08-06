@@ -110,6 +110,24 @@
 | `metrics` | dict | 支撑数据（payout_ratio、operating_cf、capex、free_cash_flow、cf_coverage、fcf_coverage、debt_ratio、interest_coverage、roe_latest、net_profit_yoy、consecutive_dividend_years、银行专项等） |
 | `branch` | str | general / finance / general-fallback |
 | `notes` | list[str] | 缺失数据说明 |
+| `explanation` | list[str] | **结论白话说明**（`explain_sustainability()` / JS `explainSustainability()` 生成，双端逐字一致） |
+
+### 3.1 结论说明（explanation）输出格式
+
+对每个结论生成一行「白话结论 + 分条理由」，供 UI 卡片 / CLI / API 直接展示：
+
+```
+结论：{verdict} — {一句话总结}
+N. {致命红旗理由}            ← 有致命红旗时优先，且不再赘列维度
+N. {情境红旗理由}            ← 无致命红旗时
+N. {弱维度白话（≤3 条）}     ← 维度分 0/1，带支撑数值，按分升序
+N. 优势项：{强维度（≤2 条）} ← 偏弱/可持续时列出，带支撑数值
+注：{缺失数据说明}           ← notes 非空时
+```
+
+- 一句话总结按 verdict/branch 固定模板：不可持续 →「存在致命问题，当前分红水平大概率维持不下去」（无红旗时 →「分红金额与盈利/现金流明显不匹配，长期难以为继」）；偏弱 →「分红有一定基础，但存在隐忧，长期分红能力可能打折扣」；可持续 → 银行「银行核心经营指标全部健康，分红能力扎实」/ 其他「盈利与现金流足以支撑当前分红」。
+- 维度白话模板见 `src/sustainability_calculator.py::_weak_dim_text/_strong_dim_text`（JS 同款模板于 `site/js/calculator.js::_weakDimText/_strongDimText`），数字用 `_r1/_r2` 半舍入后格式化，双端输出必须逐字一致（`scripts/verify_js_vs_python.py` 的 `sustainability_explanation` 字段对拍）。
+- 例（601919 偏弱）：`结论：偏弱 — 分红有一定基础，但存在隐忧，长期分红能力可能打折扣` / `1. 盈利稳定性：ROE 13.17%、净利润同比 -37.1%，盈利在下滑，分红难持续` / `2. 属强周期行业，盈利随景气波动大，高分红难年年保证` / `3. 连续分红 5 年，尚不算长期稳定` / `4. 优势项：现金流覆盖 2.98 倍（充裕）、支付率 49.5%（健康）`。
 
 ---
 

@@ -85,6 +85,7 @@
         history: div.sustainabilityHistory,
         industry: industry,
       });
+      sustainability.explanation = Calculator.explainSustainability(sustainability);
     }
 
     return {

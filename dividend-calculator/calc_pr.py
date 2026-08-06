@@ -29,7 +29,7 @@ sys.path.insert(0, _project_root)
 
 from src.analysis import run_stock_analysis
 from src.pr import PRResult
-from src.sustainability_calculator import SustainabilityResult
+from src.sustainability_calculator import SustainabilityResult, explain_sustainability
 
 
 def _fmt_money(value):
@@ -194,6 +194,13 @@ def print_sustainability(yield_pct, result: SustainabilityResult):
     score_str = f"综合评分 {result.score:.2f}/2.0" if result.score is not None else "评分不足"
     branch_str = "（银行/保险专项）" if result.branch == "finance" else ""
     print(f"  结论: {verdict_label}   {score_str}{branch_str}")
+
+    explanation = explain_sustainability(result)
+    if explanation:
+        print()
+        print("  ── 结论说明 ──")
+        for line in explanation:
+            print(f"    {line}")
 
     if result.dimension_scores:
         print()

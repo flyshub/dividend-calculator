@@ -38,7 +38,7 @@ FIELDS_NUMERIC = [
     "sustainability_payout_ratio",
 ]
 FIELDS_STR = ["dividend_year", "valuation_zone", "pr_warning", "industry", "is_loss_stock", "explanation",
-              "sustainability_verdict"]
+              "sustainability_verdict", "sustainability_explanation"]
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +250,10 @@ def compute_python(raw: dict) -> dict:
     result["sustainability_interest_coverage"] = sus_m.get("interest_coverage")
     result["sustainability_consecutive_years"] = sus_m.get("consecutive_dividend_years")
     result["sustainability_payout_ratio"] = sus_m.get("payout_ratio")
+    from src.sustainability_calculator import explain_sustainability
+    result["sustainability_explanation"] = (
+        "\n".join(explain_sustainability(sus)) if sus is not None else None
+    )
     return result
 
 

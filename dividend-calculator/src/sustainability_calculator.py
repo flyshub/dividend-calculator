@@ -12,6 +12,7 @@
   Layer 3  情境红旗（不否决，但降一档 + 列入理由）
   结论三档：可持续 / 偏弱 / 不可持续
 """
+import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -617,3 +618,187 @@ def assess_sustainability(*,
     )
     result.verdict = _verdict_from_score(score, result.warning_flags)
     return result
+
+
+# ---------------------------------------------------------------------------
+# 结论说明（对齐 JS explainSustainability，双端逐字一致）
+# ---------------------------------------------------------------------------
+
+def _r1(v: float) -> float:
+    """1 位小数 half-up（对齐 JS Math.round(v*10)/10）"""
+    return math.floor(v * 10 + 0.5) / 10
+
+
+def _r2(v: float) -> float:
+    """2 位小数 half-up（对齐 JS Math.round(v*100)/100）"""
+    return math.floor(v * 100 + 0.5) / 100
+
+
+def _pct1(v: float) -> str:
+    """小数 → 百分数 1 位小数"""
+    return f"{_r1(v * 100):.1f}"
+
+
+def _yoy_str(v: float) -> str:
+    """净利润同比带符号"""
+    return ("+" if v >= 0 else "") + f"{_r1(v):.1f}" + "%"
+
+
+SUS_EXPLAIN_DIMS = ["cf_coverage", "payout", "profitability", "balance_sheet",
+                    "dividend_history", "industry"]
+SUS_EXPLAIN_DIMS_FIN = ["capital_adequacy", "net_interest_margin", "npl", "provision"]
+
+
+def _weak_dim_text(k: str, s: int, m: dict) -> Optional[str]:
+    if k == "cf_coverage":
+        if m.get("cf_coverage") is None:
+            return None
+        return (f"现金流覆盖 {_r2(m['cf_coverage']):.2f} 倍" +
+                ("，分红花的钱超过真正赚到的现金，可能吃老本" if s == 0 else "，刚好够分红，余粮不多"))
+    if k == "payout":
+        if m.get("payout_ratio") is None:
+            return None
+        return (f"股利支付率 {_pct1(m['payout_ratio'])}%" +
+                ("，利润几乎全拿去分红了" if s == 0 else "，分红比例偏高"))
+    if k == "profitability":
+        if m.get("roe_latest") is None:
+            return None
+        yoy = m.get("net_profit_yoy")
+        return (f"盈利稳定性：ROE {_r2(m['roe_latest']):.2f}%、净利润同比 {_yoy_str(0 if yoy is None else yoy)}" +
+                ("，盈利在下滑，分红难持续" if s == 0 else "，盈利一般"))
+    if k == "balance_sheet":
+        if m.get("debt_ratio") is None:
+            return None
+        return (f"资产负债率 {_pct1(m['debt_ratio'])}%" +
+                ("，负债偏高，财务压力大" if s == 0 else "，负债水平一般"))
+    if k == "dividend_history":
+        if m.get("consecutive_dividend_years") is None:
+            return None
+        return (f"连续分红 {int(m['consecutive_dividend_years'])} 年" +
+                ("，历史较短" if s == 0 else "，尚不算长期稳定"))
+    if k == "industry":
+        if s == 0:
+            return "属强周期行业，盈利随景气波动大，高分红难年年保证"
+        return None
+    if k == "capital_adequacy":
+        if m.get("capital_adequacy") is None:
+            return None
+        return (f"资本充足率 {_r2(m['capital_adequacy']):.2f}%" +
+                ("，低于监管红线，分红受限" if s == 0 else "，一般"))
+    if k == "net_interest_margin":
+        if m.get("net_interest_margin") is None:
+            return None
+        return (f"净息差 {_r2(m['net_interest_margin']):.2f}%" +
+                ("，盈利承压" if s == 0 else "，一般"))
+    if k == "npl":
+        if m.get("npl_ratio") is None:
+            return None
+        return (f"不良贷款率 {_r2(m['npl_ratio']):.2f}%" +
+                ("，资产质量堪忧" if s == 0 else "，偏高"))
+    if k == "provision":
+        if m.get("provision_coverage") is None:
+            return None
+        return (f"拨贷比 {_r2(m['provision_coverage']):.2f}%" +
+                ("，风险缓冲不足" if s == 0 else "，一般"))
+    return None
+
+
+def _strong_dim_text(k: str, m: dict) -> Optional[str]:
+    if k == "cf_coverage":
+        if m.get("cf_coverage") is None:
+            return None
+        return f"现金流覆盖 {_r2(m['cf_coverage']):.2f} 倍（充裕）"
+    if k == "payout":
+        if m.get("payout_ratio") is None:
+            return None
+        return f"支付率 {_pct1(m['payout_ratio'])}%（健康）"
+    if k == "profitability":
+        if m.get("roe_latest") is None:
+            return None
+        yoy = m.get("net_profit_yoy")
+        return (f"盈利稳健（ROE {_r2(m['roe_latest']):.2f}%、"
+                f"净利润同比 {_yoy_str(0 if yoy is None else yoy)}%）")
+    if k == "balance_sheet":
+        if m.get("debt_ratio") is None:
+            return None
+        return f"资产负债率 {_pct1(m['debt_ratio'])}%（稳健）"
+    if k == "dividend_history":
+        if m.get("consecutive_dividend_years") is None:
+            return None
+        return f"连续分红 {int(m['consecutive_dividend_years'])} 年（稳定）"
+    if k == "industry":
+        return "属防御/成熟行业（盈利稳定）"
+    if k == "capital_adequacy":
+        if m.get("capital_adequacy") is None:
+            return None
+        return f"资本充足率 {_r2(m['capital_adequacy']):.2f}%（充足）"
+    if k == "net_interest_margin":
+        if m.get("net_interest_margin") is None:
+            return None
+        return f"净息差 {_r2(m['net_interest_margin']):.2f}%（健康）"
+    if k == "npl":
+        if m.get("npl_ratio") is None:
+            return None
+        return f"不良贷款率 {_r2(m['npl_ratio']):.2f}%（很低）"
+    if k == "provision":
+        if m.get("provision_coverage") is None:
+            return None
+        return f"拨贷比 {_r2(m['provision_coverage']):.2f}%（充足）"
+    return None
+
+
+def explain_sustainability(result: "SustainabilityResult") -> List[str]:
+    """可持续性结论白话说明：首行结论+一句话总结，随后分条理由
+    （致命红旗 → 警示红旗 → 弱维度 → 优势项），末尾缺失数据说明。
+    未触发 / 未评估时返回空列表。"""
+    if not result.triggered or result.verdict == "未评估":
+        return []
+
+    lines: List[str] = []
+    if result.verdict == "不可持续":
+        head = ("存在致命问题，当前分红水平大概率维持不下去"
+                if result.fatal_flags else "分红金额与盈利/现金流明显不匹配，长期难以为继")
+    elif result.verdict == "偏弱":
+        head = "分红有一定基础，但存在隐忧，长期分红能力可能打折扣"
+    else:
+        head = ("银行核心经营指标全部健康，分红能力扎实"
+                if result.branch == "finance" else "盈利与现金流足以支撑当前分红")
+    lines.append(f"结论：{result.verdict} — {head}")
+
+    n = 1
+    m = result.metrics or {}
+    for f in (result.fatal_flags or [])[:3]:
+        lines.append(f"{n}. {f}")
+        n += 1
+
+    if not (result.fatal_flags or []):
+        for w in (result.warning_flags or [])[:3]:
+            lines.append(f"{n}. {w}")
+            n += 1
+
+        order = SUS_EXPLAIN_DIMS_FIN if result.branch == "finance" else SUS_EXPLAIN_DIMS
+        weak: List[Tuple[int, str]] = []
+        strong: List[str] = []
+        for k in order:
+            s = (result.dimension_scores or {}).get(k)
+            if s is None:
+                continue
+            if s <= 1:
+                weak.append((s, k))
+            else:
+                strong.append(k)
+        weak.sort(key=lambda x: x[0])
+        for s, k in weak[:3]:
+            t = _weak_dim_text(k, s, m)
+            if t:
+                lines.append(f"{n}. {t}")
+                n += 1
+        if result.verdict != "不可持续":
+            st = [_strong_dim_text(k, m) for k in strong[:2]]
+            st = [t for t in st if t]
+            if st:
+                lines.append(f"{n}. 优势项：{'、'.join(st)}")
+                n += 1
+    if result.notes:
+        lines.append("注：" + "；".join(result.notes))
+    return lines
