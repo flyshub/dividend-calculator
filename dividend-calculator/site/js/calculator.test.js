@@ -172,3 +172,95 @@ test('parseFinancials ROE中位数与TTM', () => {
   assert.equal(r.roe5yMedian, 13.5);  // 4个年报 [12,13,13.5,15.9] 取中间位 → 13.5
   assert.ok(Math.abs(r.netProfitTtm - (67.61 + 345.03 - 51.81)) < 1e-6);
 });
+
+// ---- assessSustainability（对齐 tests/test_sustainability_calculator.py）----
+function healthyFin() {
+  return {
+    year: 2025, net_profit: 345e8, net_profit_yoy: 7.0,
+    operating_cf: 605e8, investing_cf: -312e8,
+    total_assets: 5620e8, total_liabilities: 2918e8,
+    debt_ratio: 52.0, interest_debt_ratio: 51.5, interest_coverage: 6.37, roe: 16.0,
+    capital_adequacy_ratio: null, net_interest_margin: null, npl_ratio: null, provision_coverage: null,
+  };
+}
+function healthyHistory() {
+  return { consecutive_years: 15, ever_cut: false, latest_year_amount: 214e8, history_mean_amount: 200e8 };
+}
+
+test('assessSustainability 健康股→可持续', () => {
+  const r = Calc.assessSustainability({
+    dividend_yield_before_tax: 4.5, dividend_total: 214e8,
+    latest: healthyFin(), history: healthyHistory(), industry: '公用事业-电力-水电',
+  });
+  assert.equal(r.triggered, true);
+  assert.equal(r.verdict, '可持续');
+  assert.ok(r.score >= 1.5);
+  assert.deepEqual(r.fatal_flags, []);
+});
+
+test('assessSustainability 未达阈值不触发', () => {
+  const r = Calc.assessSustainability({
+    dividend_yield_before_tax: 3.5, dividend_total: 214e8,
+    latest: healthyFin(), history: healthyHistory(), industry: '公用事业',
+  });
+  assert.equal(r.triggered, false);
+  assert.equal(r.verdict, '未评估');
+});
+
+test('assessSustainability 亏损却分红→不可持续', () => {
+  const fin = healthyFin(); fin.net_profit = -10e8; fin.net_profit_yoy = -120.0;
+  const r = Calc.assessSustainability({
+    dividend_yield_before_tax: 5.0, dividend_total: 214e8,
+    latest: fin, history: healthyHistory(), industry: '煤炭',
+  });
+  assert.equal(r.verdict, '不可持续');
+  assert.ok(r.fatal_flags.some(f => f.includes('净利润为负')));
+  assert.equal(r.score, 0.0);
+});
+
+test('assessSustainability 支付率>100%→不可持续', () => {
+  const fin = healthyFin(); fin.net_profit = 100e8;
+  const r = Calc.assessSustainability({
+    dividend_yield_before_tax: 5.0, dividend_total: 214e8,
+    latest: fin, history: healthyHistory(), industry: '煤炭',
+  });
+  assert.equal(r.verdict, '不可持续');
+  assert.ok(r.fatal_flags.some(f => f.includes('股利支付率') && f.includes('> 100%')));
+});
+
+test('assessSustainability 周期股顶点→情境红旗降档', () => {
+  const fin = healthyFin();
+  fin.net_profit = 100e8; fin.net_profit_yoy = -25.0; fin.roe = 18.0; fin.interest_coverage = 8.0;
+  const r = Calc.assessSustainability({
+    dividend_yield_before_tax: 6.0, dividend_total: 90e8,
+    latest: fin, history: healthyHistory(), industry: '煤炭',
+  });
+  assert.ok(r.warning_flags.some(w => w.includes('周期')));
+});
+
+test('assessSustainability 银行走金融分支', () => {
+  const bankFin = {
+    year: 2025, net_profit: 1500e8, net_profit_yoy: 1.5,
+    operating_cf: 4514e8, investing_cf: null,
+    total_assets: 12e12, total_liabilities: 11e12, debt_ratio: 87.8,
+    interest_debt_ratio: null, interest_coverage: null, roe: 14.0,
+    capital_adequacy_ratio: 16.5, net_interest_margin: 1.87, npl_ratio: 0.95, provision_coverage: 200.0,
+  };
+  const r = Calc.assessSustainability({
+    dividend_yield_before_tax: 5.0, dividend_total: 350e8,
+    latest: bankFin, history: { consecutive_years: 12, ever_cut: false, latest_year_amount: 350e8, history_mean_amount: 340e8 },
+    industry: '银行',
+  });
+  assert.equal(r.branch, 'finance');
+  assert.ok('capital_adequacy' in r.dimension_scores);
+  assert.ok(r.score >= 1.5);
+});
+
+test('assessSustainability 财务缺失→不可持续', () => {
+  const r = Calc.assessSustainability({
+    dividend_yield_before_tax: 5.0, dividend_total: 214e8,
+    latest: null, history: null, industry: '公用事业',
+  });
+  assert.equal(r.verdict, '不可持续');
+  assert.ok(r.fatal_flags.some(f => f.includes('缺少财务数据')));
+});

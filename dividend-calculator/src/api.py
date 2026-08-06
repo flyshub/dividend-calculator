@@ -157,43 +157,59 @@ def _get_monthly_prices(stock_code: str) -> list:
 # ────────────────────────────────────────────────────────────────
 
 def _get_all_dividend_records(stock_code: str) -> list:
-    """获取全部分红记录（含除权除息日），按除权日升序"""
+    """获取全部分红记录（含除权除息日），按除权日升序。
+
+    主：mootdx xdxr；mootdx 不可用或无数据时降级东财分红明细
+    （RPT_SHAREBONUS_DET），保证走势图股息率在 mootdx 失效时仍有数据。
+
+    注意：此降级服务于走势图数据链路（historical-data），复用 sustainability 模块的
+    东财取数能力，本身不属于股息可持续性功能的 spec 范围，属独立的健壮性增强。
+    """
+    # 主：mootdx xdxr
     try:
         from .datasource.mootdx_source import get_quotes_client
         client = get_quotes_client()
         xdxr_df = client.xdxr(symbol=stock_code)
-        if xdxr_df is None or xdxr_df.empty:
-            return []
+        if xdxr_df is not None and not xdxr_df.empty:
+            xdxr_df = xdxr_df[xdxr_df['category'] == 1]
+            if not xdxr_df.empty:
+                results = []
+                for _, row in xdxr_df.iterrows():
+                    try:
+                        y, m, d = int(row['year']), int(row['month']), int(row['day'])
+                    except (ValueError, KeyError):
+                        continue
 
-        xdxr_df = xdxr_df[xdxr_df['category'] == 1]
-        if xdxr_df.empty:
-            return []
+                    fenhong = round(float(row.get('fenhong', 0) or 0), 4)
+                    if fenhong <= 0:
+                        continue
 
-        results = []
-        for _, row in xdxr_df.iterrows():
-            try:
-                y, m, d = int(row['year']), int(row['month']), int(row['day'])
-            except (ValueError, KeyError):
-                continue
+                    ex_div_date = f"{y:04d}-{m:02d}-{d:02d}"
+                    result = infer_fiscal_year(y, m)
+                    report_time = result.report_time
+                    results.append(DividendRecord(
+                        ex_dividend_date=ex_div_date,
+                        dividend_per_10=fenhong,
+                        report_time=report_time,
+                    ))
 
-            fenhong = round(float(row.get('fenhong', 0) or 0), 4)
-            if fenhong <= 0:
-                continue
-
-            ex_div_date = f"{y:04d}-{m:02d}-{d:02d}"
-            result = infer_fiscal_year(y, m)
-            report_time = result.report_time
-            results.append(DividendRecord(
-                ex_dividend_date=ex_div_date,
-                dividend_per_10=fenhong,
-                report_time=report_time,
-            ))
-
-        results.sort(key=lambda r: r.ex_dividend_date)
-        logger.debug("通过 mootdx xdxr 获取分红记录 %s: %d 条", stock_code, len(results))
-        return results
+                if results:
+                    results.sort(key=lambda r: r.ex_dividend_date)
+                    logger.debug("通过 mootdx xdxr 获取分红记录 %s: %d 条", stock_code, len(results))
+                    return results
     except Exception as e:
-        logger.warning("获取分红记录失败 %s: %s", stock_code, e)
+        logger.warning("mootdx 获取分红记录失败 %s: %s", stock_code, e)
+
+    # 降级：东财分红明细（与 site/js datasources.js 同源）
+    try:
+        from .sustainability import fetch_dividend_rows, parse_dividend_rows
+        rows = fetch_dividend_rows(stock_code)
+        records, _ = parse_dividend_rows(rows)
+        records.sort(key=lambda r: r.ex_dividend_date or "")
+        logger.debug("东财降级获取分红记录 %s: %d 条", stock_code, len(records))
+        return records
+    except Exception as e:
+        logger.warning("东财分红记录降级失败 %s: %s", stock_code, e)
         return []
 
 

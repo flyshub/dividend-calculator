@@ -92,6 +92,19 @@
     });
   }
 
+  /* ── 东财现金流量表（RPT_F10_FINANCE_GCASHFLOW，含 CONSTRUCT_LONG_ASSET 资本开支）── */
+  function fetchCashflow(stockCode) {
+    var market = stockCode[0] === '6' ? '.SH' : '.SZ';
+    var secucode = stockCode + market;
+    var url = 'https://datacenter.eastmoney.com/api/data/v1/get?sortColumns=REPORT_DATE&sortTypes=-1' +
+      '&pageSize=100&pageNumber=1&reportName=RPT_F10_FINANCE_GCASHFLOW&columns=ALL' +
+      '&filter=(SECUCODE%3D%22' + secucode + '%22)';
+    return jsonFetch(url).then(function (d) {
+      var result = d.result;
+      return (result && result.data) || [];
+    });
+  }
+
   /* ── 东财行业（datacenter RPT_F10_BASIC_ORGINFO，CORS ✓）
    * EM2016 为东财行业（如"公用事业-电力-水电"），INDUSTRYCSRC1 为证监会分类。
    * 优先 EM2016（含简洁行业词，利于关键字匹配）。 */
@@ -173,6 +186,7 @@
     fetchMonthlyPrices: fetchMonthlyPrices,
     fetchDividendRecords: fetchDividendRecords,
     fetchFinancials: fetchFinancials,
+    fetchCashflow: fetchCashflow,
     fetchIndustry: fetchIndustry,
     lookupStockCodeByName: lookupStockCodeByName,
     parseSmartbox: parseSmartbox,

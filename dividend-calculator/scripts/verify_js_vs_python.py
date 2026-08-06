@@ -29,8 +29,16 @@ FIELDS_NUMERIC = [
     "dividend_yield_after_tax_10", "dividend_yield_after_tax_20",
     "pr_basic", "pr_corrected", "pr_pb", "payout_ratio", "n_factor",
     "roe_latest", "roe_5y_median", "net_profit_ttm", "net_profit_annual",
+    "sustainability_triggered", "sustainability_score",
+    # 衍生指标拍平（来自 sustainability.metrics）——防止双端在 FCF/coverage 公式上发散
+    # 却恰好落入同一 verdict/score 档、bug 被掩盖
+    "sustainability_cf_coverage", "sustainability_fcf_coverage",
+    "sustainability_free_cash_flow", "sustainability_debt_ratio",
+    "sustainability_interest_coverage", "sustainability_consecutive_years",
+    "sustainability_payout_ratio",
 ]
-FIELDS_STR = ["dividend_year", "valuation_zone", "pr_warning", "industry", "is_loss_stock", "explanation"]
+FIELDS_STR = ["dividend_year", "valuation_zone", "pr_warning", "industry", "is_loss_stock", "explanation",
+              "sustainability_verdict"]
 
 
 # ---------------------------------------------------------------------------
@@ -99,11 +107,22 @@ def fetch_industry(code: str) -> str:
     return rows[0].get("EM2016") or rows[0].get("INDUSTRYCSRC1") or "未知行业"
 
 
+def fetch_cashflow_rows(code: str) -> list:
+    market = ".SH" if code.startswith("6") else ".SZ"
+    url = ("https://datacenter.eastmoney.com/api/data/v1/get?sortColumns=REPORT_DATE&sortTypes=-1"
+           f"&pageSize=100&pageNumber=1&reportName=RPT_F10_FINANCE_GCASHFLOW&columns=ALL"
+           f'&filter=(SECUCODE%3D%22{code}{market}%22)')
+    r = requests.get(url, headers=UA, timeout=15)
+    d = r.json()
+    return (d.get("result") or {}).get("data") or []
+
+
 def fetch_raw(code: str) -> dict:
     return {
         "quote": fetch_tencent_quote(code),
         "dividend_rows": fetch_dividend_rows(code),
         "financial_rows": fetch_financial_rows(code),
+        "cashflow_rows": fetch_cashflow_rows(code),
         "industry": fetch_industry(code),
     }
 
@@ -168,7 +187,33 @@ def compute_python(raw: dict) -> dict:
     total_market_cap = quote["price"] * total_shares
     yld = (total_div / total_market_cap * 100) if total_market_cap > 0 else 0.0
 
-    return {
+    # 5. 股息可持续性（与 JS assessSustainability 相同算法，纯函数消费相同 raw）
+    # JS 端 computeFromRaw 仅在 yields[0] > 4 时调用 assessSustainability，
+    # 故 yield ≤ 阈值时 sustainability 为 None（镜像该门控）。
+    from src.sustainability import parse_dividend_rows, assess_for_stock
+    sus = None
+    sus_triggered = None
+    sus_verdict = None
+    sus_score = None
+    if yld > 4:  # 与 JS app.js 的 `yields[0] > 4` 门控一致
+        div_records, em_year = parse_dividend_rows(raw["dividend_rows"])
+        sus_year = year if year else em_year
+        sus = assess_for_stock(
+            stock_code=quote["stock_code"],
+            total_shares=total_shares,
+            dividend_total=total_div,
+            dividend_yield_before_tax=yld,
+            latest_dividend_year=sus_year,
+            industry=raw["industry"],
+            dividend_records=div_records,
+            financial_rows=raw["financial_rows"],
+            cashflow_rows=raw.get("cashflow_rows"),
+        )
+        sus_triggered = 1 if sus.triggered else 0
+        sus_verdict = sus.verdict
+        sus_score = sus.score
+
+    result = {
         "current_price": quote["price"],
         "total_shares": total_shares,
         "pe_ttm": quote["pe_ttm"],
@@ -192,7 +237,20 @@ def compute_python(raw: dict) -> dict:
         "net_profit_annual": net_annual,
         "industry": raw["industry"],
         "is_loss_stock": is_loss,
+        "sustainability_triggered": sus_triggered,
+        "sustainability_verdict": sus_verdict,
+        "sustainability_score": sus_score,
     }
+    # 衍生指标拍平（sus 可能为 None，对应字段也为 None，双端一致）
+    sus_m = sus.metrics if sus else {}
+    result["sustainability_cf_coverage"] = sus_m.get("cf_coverage")
+    result["sustainability_fcf_coverage"] = sus_m.get("fcf_coverage")
+    result["sustainability_free_cash_flow"] = sus_m.get("free_cash_flow")
+    result["sustainability_debt_ratio"] = sus_m.get("debt_ratio")
+    result["sustainability_interest_coverage"] = sus_m.get("interest_coverage")
+    result["sustainability_consecutive_years"] = sus_m.get("consecutive_dividend_years")
+    result["sustainability_payout_ratio"] = sus_m.get("payout_ratio")
+    return result
 
 
 def _parse_financials(rows: list) -> dict:
@@ -266,8 +324,12 @@ JS_RUNNER = PROJECT_ROOT / "site" / "js" / "verify_raw.js"
 
 
 def run_js(fixture_path: str) -> dict:
-    out = subprocess.run(["node", str(JS_RUNNER), fixture_path], capture_output=True, text=True, check=True)
-    return json.loads(out.stdout)
+    # 捕获原始字节再 UTF-8 解码，避免 Windows 默认 GBK 损坏中文（行业/verdict 等）
+    out = subprocess.run(
+        ["node", str(JS_RUNNER), fixture_path],
+        capture_output=True, check=True,
+    )
+    return json.loads(out.stdout.decode("utf-8"))
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +353,8 @@ def main():
         raw = fetch_raw(code)
         fixture["stocks"][code] = raw
 
-    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, dir="/tmp") as f:
+    # Windows 默认用 GBK 写文件会损坏中文，强制 UTF-8
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, dir="/tmp", encoding="utf-8") as f:
         json.dump(fixture, f, ensure_ascii=False)
         fixture_path = f.name
 

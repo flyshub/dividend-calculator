@@ -15,12 +15,21 @@
 import os
 import sys
 
+# Windows 控制台默认 GBK 编码无法输出 emoji，强制 stdout/stderr 用 UTF-8
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+        sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
 # Ensure project root is on sys.path
 _project_root = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _project_root)
 
 from src.analysis import run_stock_analysis
 from src.pr import PRResult
+from src.sustainability_calculator import SustainabilityResult
 
 
 def _fmt_money(value):
@@ -131,6 +140,91 @@ def print_result(result: PRResult):
     print()
 
 
+def _verdict_emoji(verdict: str) -> str:
+    return {"可持续": " 🟢", "偏弱": " 🟡", "不可持续": " 🔴", "未评估": ""}.get(verdict, "")
+
+
+def _dimension_label(key: str) -> str:
+    return {
+        "cf_coverage": "现金流覆盖",
+        "payout": "股利支付率",
+        "profitability": "盈利稳定性",
+        "balance_sheet": "资产负债表",
+        "dividend_history": "分红历史",
+        "industry": "行业属性",
+        "capital_adequacy": "资本充足率",
+        "net_interest_margin": "净息差",
+        "npl": "不良贷款率",
+        "provision": "拨备覆盖率",
+    }.get(key, key)
+
+
+def _format_metrics_lines(metrics: dict) -> list:
+    """把支撑数据指标格式化为可打印行列表（仅输出有值的指标）。"""
+    lines = []
+    specs = [
+        ("payout_ratio", "股利支付率", lambda v: f"{v*100:.1f}%"),
+        ("cf_coverage", "现金流覆盖", lambda v: f"{v:.2f}x"),
+        ("fcf_coverage", "自由现金流覆盖", lambda v: f"{v:.2f}x"),
+        ("debt_ratio", "资产负债率", lambda v: f"{v:.1f}%"),
+        ("interest_coverage", "利息保障倍数", lambda v: f"{v:.2f}x"),
+        ("roe_latest", "ROE(最新)", lambda v: f"{v:.2f}%"),
+        ("net_profit_yoy", "净利润同比", lambda v: f"{v:.1f}%"),
+        ("consecutive_dividend_years", "连续分红年数", lambda v: f"{int(v)} 年"),
+    ]
+    for key, label, fmt in specs:
+        v = metrics.get(key)
+        if v is not None:
+            lines.append(f"  {label:<14}: {fmt(v)}")
+    return lines
+
+
+def print_sustainability(yield_pct, result: SustainabilityResult):
+    """格式化输出股息可持续性评估结果。"""
+    print("=" * 60)
+    print(f"  股息可持续性分析 - 税前股息率 {yield_pct:.2f}%")
+    print("=" * 60)
+
+    if not result.triggered:
+        print(f"  股息率未超过阈值，未做可持续性评估（{'; '.join(result.notes) or ''}）")
+        print()
+        return
+
+    verdict_label = result.verdict + _verdict_emoji(result.verdict)
+    score_str = f"综合评分 {result.score:.2f}/2.0" if result.score is not None else "评分不足"
+    branch_str = "（银行/保险专项）" if result.branch == "finance" else ""
+    print(f"  结论: {verdict_label}   {score_str}{branch_str}")
+
+    if result.dimension_scores:
+        print()
+        print("  ── 各维度评分 ──")
+        for k, v in result.dimension_scores.items():
+            print(f"  {_dimension_label(k):　<6}: {v} 分")
+
+    metrics_lines = _format_metrics_lines(result.metrics)
+    if metrics_lines:
+        print()
+        print("  ── 支撑数据 ──")
+        for line in metrics_lines:
+            print(line)
+
+    if result.fatal_flags:
+        print()
+        print("  ── 🔴 致命红旗（不可持续）──")
+        for f in result.fatal_flags:
+            print(f"    - {f}")
+
+    if result.warning_flags:
+        print()
+        print("  ── 🟠 情境警示 ──")
+        for w in result.warning_flags:
+            print(f"    - {w}")
+
+    print()
+    print("  评分区间: ≥1.5可持续 | 1.0~1.5偏弱 | <1.0不可持续（情境警示降一档）")
+    print()
+
+
 def main():
     if len(sys.argv) < 2:
         print("用法: python calc_pr.py <股票代码>")
@@ -159,6 +253,10 @@ def main():
 
     # 输出
     print_result(result)
+
+    # 股息可持续性（仅高股息率触发时输出）
+    if analysis.sustainability is not None and analysis.sustainability.triggered:
+        print_sustainability(analysis.dividend_yield_before_tax, analysis.sustainability)
 
 
 if __name__ == "__main__":

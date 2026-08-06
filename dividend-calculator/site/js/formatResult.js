@@ -27,5 +27,21 @@ module.exports = function formatResult(r) {
     net_profit_annual: r.pr.net_profit_annual,
     industry: r.pr.industry,
     is_loss_stock: r.pr.is_loss_stock,
+    // 股息可持续性（仅高股息触发时非 null）。衍生指标拍平——防止双端公式发散被 verdict 掩盖
+    sustainability_triggered: r.sustainability ? (r.sustainability.triggered ? 1 : 0) : null,
+    sustainability_verdict: r.sustainability ? r.sustainability.verdict : null,
+    sustainability_score: r.sustainability ? r.sustainability.score : null,
+    sustainability_cf_coverage: _m(r, 'cf_coverage'),
+    sustainability_fcf_coverage: _m(r, 'fcf_coverage'),
+    sustainability_free_cash_flow: _m(r, 'free_cash_flow'),
+    sustainability_debt_ratio: _m(r, 'debt_ratio'),
+    sustainability_interest_coverage: _m(r, 'interest_coverage'),
+    sustainability_consecutive_years: _m(r, 'consecutive_dividend_years'),
+    sustainability_payout_ratio: _m(r, 'payout_ratio'),
   };
 };
+
+/* 从 sustainability.metrics 取字段，sustainability 为 null 时返回 null */
+function _m(r, key) {
+  return (r.sustainability && r.sustainability.metrics) ? r.sustainability.metrics[key] : null;
+}

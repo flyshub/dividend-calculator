@@ -13,6 +13,7 @@ sys.path.insert(0, str(project_root))
 from src.analysis import run_stock_analysis
 from src.dividend import DividendResult, calculate_true_dividend_yield
 from src.pr import PRResult
+from src.sustainability_calculator import SustainabilityResult
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,21 @@ INDEX_FILE = STATIC_DIR / "index.html"
 def serialize_pr_result(result: PRResult) -> dict:
     """序列化市赚率计算结果为 JSON"""
     return asdict(result)
+
+
+def serialize_sustainability(result: SustainabilityResult) -> dict:
+    """序列化可持续性评估结果为 JSON（字段名与 JS 端对齐）。"""
+    return {
+        "triggered": result.triggered,
+        "verdict": result.verdict,
+        "score": result.score,
+        "fatal_flags": list(result.fatal_flags),
+        "warning_flags": list(result.warning_flags),
+        "dimension_scores": dict(result.dimension_scores),
+        "metrics": {k: v for k, v in result.metrics.items()},
+        "branch": result.branch,
+        "notes": list(result.notes),
+    }
 
 
 def serialize_result(result: DividendResult) -> dict:
@@ -129,7 +145,13 @@ class DividendRequestHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"success": False, "error": "无法获取股票数据，请检查股票代码"})
             return
 
-        self._send_json(200, {"success": True, "data": serialize_pr_result(analysis.pr_result)})
+        data = serialize_pr_result(analysis.pr_result)
+        data["dividend_yield_before_tax"] = analysis.dividend_yield_before_tax
+        data["sustainability"] = (
+            serialize_sustainability(analysis.sustainability)
+            if analysis.sustainability is not None else None
+        )
+        self._send_json(200, {"success": True, "data": data})
 
     def _handle_historical_data(self, query: str):
         from datetime import datetime

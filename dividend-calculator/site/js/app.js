@@ -26,6 +26,7 @@
         Promise.resolve(quote),
         DS.fetchDividendRecords(input),
         DS.fetchFinancials(input),
+        DS.fetchCashflow(input),
         DS.fetchIndustry(input).catch(function () { return null; }),
       ]);
     }).then(function (results) {
@@ -33,7 +34,8 @@
         quote: results[0],
         dividend_rows: results[1],
         financial_rows: results[2],
-        industry: results[3] || '未知行业',
+        cashflow_rows: results[3],
+        industry: results[4] || '未知行业',
       });
     });
   }
@@ -43,6 +45,7 @@
     var quote = raw.quote;
     var dividendRows = raw.dividend_rows || [];
     var financeRows = raw.financial_rows || [];
+    var cashflowRows = raw.cashflow_rows || [];
     var industry = raw.industry || '未知行业';
 
     var totalShares = quote.total_shares || quote.a_shares || 0;
@@ -69,6 +72,19 @@
       prWarning = prWarning
         ? prWarning + '；该股为亏损股，市赚率不适用'
         : '该股为亏损股，市赚率不适用';
+    }
+
+    /* 股息可持续性：仅税前股息率 > 4% 时评估（对齐 Python analysis.py） */
+    var sustainability = null;
+    if (yields[0] > 4) {
+      sustainability = Calculator.assessSustainability({
+        dividend_yield_before_tax: yields[0],
+        dividend_total: div.totalDividend > 0 ? div.totalDividend : null,
+        latest: fin.sustainabilityFin,
+        cashflow_rows: cashflowRows,
+        history: div.sustainabilityHistory,
+        industry: industry,
+      });
     }
 
     return {
@@ -106,6 +122,7 @@
         net_profit_annual: fin.netProfitAnnual,
         industry: industry,
       },
+      sustainability: sustainability,
     };
   }
 

@@ -360,6 +360,39 @@
         <p id="chart-note" class="note" style="margin-top:8px;font-size:12px;"></p>
       </div>
 
+      <div class="result-card full hidden" id="sustainability-card">
+        <div class="label">股息可持续性分析</div>
+        <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;">
+          <div class="result-card" style="flex:1;min-width:160px;">
+            <div class="label">可持续性结论</div>
+            <div id="sus-verdict" class="value" style="font-size:22px;"></div>
+          </div>
+          <div class="result-card" style="flex:1;min-width:120px;">
+            <div class="label">综合评分</div>
+            <div id="sus-score" class="value" style="font-size:18px;"></div>
+          </div>
+          <div class="result-card" style="flex:1;min-width:120px;">
+            <div class="label">判断分支</div>
+            <div id="sus-branch" class="value" style="font-size:14px;"></div>
+          </div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:12px;">
+          <div class="result-card" style="flex:1;min-width:120px;"><div class="label">股利支付率</div><div id="sus-payout" class="value"></div></div>
+          <div class="result-card" style="flex:1;min-width:120px;"><div class="label">经营现金流覆盖</div><div id="sus-cf-cov" class="value"></div></div>
+          <div class="result-card" style="flex:1;min-width:120px;"><div class="label">自由现金流覆盖</div><div id="sus-fcf-cov" class="value"></div></div>
+          <div class="result-card" style="flex:1;min-width:120px;"><div class="label">资产负债率</div><div id="sus-debt" class="value"></div></div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:12px;">
+          <div class="result-card" style="flex:1;min-width:120px;"><div class="label">ROE（最新）</div><div id="sus-roe" class="value"></div></div>
+          <div class="result-card" style="flex:1;min-width:120px;"><div class="label">净利润同比</div><div id="sus-np-yoy" class="value"></div></div>
+          <div class="result-card" style="flex:1;min-width:120px;"><div class="label">连续分红年数</div><div id="sus-consecutive" class="value"></div></div>
+          <div class="result-card" style="flex:1;min-width:120px;"><div class="label">各维度评分</div><div id="sus-dims" class="value" style="font-size:13px;"></div></div>
+        </div>
+        <p id="sus-fatal" class="warning" style="margin-top:12px;"></p>
+        <p id="sus-warnings" class="explanation" style="margin-top:8px;color:#b8860b;"></p>
+        <p id="sus-notes" class="note" style="margin-top:6px;font-size:12px;"></p>
+      </div>
+
       <div class="result-card full hidden" id="pr-card">
         <div class="label">市赚率分析</div>
         <div style="display:flex;flex-wrap:wrap;gap:12px;">
@@ -475,6 +508,8 @@
       if (chartCard) chartCard.classList.add('hidden');
       const prCard = document.getElementById('pr-card');
       if (prCard) prCard.classList.add('hidden');
+      const susCard = document.getElementById('sustainability-card');
+      if (susCard) susCard.classList.add('hidden');
       if (chartInstance) { chartInstance.dispose(); chartInstance = null; }
       if (chartResizeHandler) { window.removeEventListener('resize', chartResizeHandler); chartResizeHandler = null; }
     }
@@ -830,6 +865,64 @@
       if (prCard) prCard.classList.remove('hidden');
     }
 
+    var SUS_VERDICT_COLOR = { '可持续': '#1a7f37', '偏弱': '#b8860b', '不可持续': '#cf222e', '未评估': '#666' };
+    var SUS_DIM_LABEL = {
+      cf_coverage: '经营现金流覆盖', payout: '股利支付率', profitability: '盈利稳定性',
+      balance_sheet: '资产负债表', dividend_history: '分红历史', industry: '行业属性',
+      capital_adequacy: '资本充足率', net_interest_margin: '净息差', npl: '不良贷款率', provision: '拨备覆盖率',
+    };
+
+    function renderSustainability(s) {
+      const card = document.getElementById('sustainability-card');
+      if (!s || !s.triggered) { card.classList.add('hidden'); return; }
+
+      const verdictEl = document.getElementById('sus-verdict');
+      verdictEl.textContent = s.verdict;
+      verdictEl.style.color = SUS_VERDICT_COLOR[s.verdict] || '#666';
+
+      document.getElementById('sus-score').textContent = s.score == null ? '评分不足' : (s.score.toFixed(2) + ' / 2.0');
+      const branchMap = { finance: '银行/保险专项', 'general-fallback': '通用（银行专项缺失）', general: '通用六维' };
+      document.getElementById('sus-branch').textContent = branchMap[s.branch] || s.branch;
+
+      const m = s.metrics || {};
+      document.getElementById('sus-payout').textContent = m.payout_ratio == null ? '无' : (m.payout_ratio * 100).toFixed(1) + '%';
+      document.getElementById('sus-cf-cov').textContent = m.cf_coverage == null ? '无' : m.cf_coverage.toFixed(2) + 'x';
+      document.getElementById('sus-fcf-cov').textContent = m.fcf_coverage == null ? '无' : m.fcf_coverage.toFixed(2) + 'x';
+      document.getElementById('sus-debt').textContent = m.debt_ratio == null ? '无' : m.debt_ratio.toFixed(1) + '%';
+      document.getElementById('sus-roe').textContent = m.roe_latest == null ? '无' : m.roe_latest.toFixed(2) + '%';
+      document.getElementById('sus-np-yoy').textContent = m.net_profit_yoy == null ? '无' : m.net_profit_yoy.toFixed(1) + '%';
+      document.getElementById('sus-consecutive').textContent = m.consecutive_dividend_years == null ? '无' : parseInt(m.consecutive_dividend_years) + ' 年';
+
+      // 各维度评分
+      var dims = [];
+      for (var k in (s.dimension_scores || {})) {
+        dims.push((SUS_DIM_LABEL[k] || k) + ':' + s.dimension_scores[k]);
+      }
+      document.getElementById('sus-dims').textContent = dims.join('  ');
+
+      // 致命红旗
+      const fatalEl = document.getElementById('sus-fatal');
+      if (s.fatal_flags && s.fatal_flags.length) {
+        fatalEl.textContent = '🔴 致命红旗：\n' + s.fatal_flags.map(function (f) { return '  • ' + f; }).join('\n');
+        fatalEl.classList.remove('hidden');
+      } else {
+        fatalEl.classList.add('hidden');
+      }
+      // 情境警示
+      const warnEl = document.getElementById('sus-warnings');
+      if (s.warning_flags && s.warning_flags.length) {
+        warnEl.textContent = '🟠 情境警示：\n' + s.warning_flags.map(function (w) { return '  • ' + w; }).join('\n');
+        warnEl.classList.remove('hidden');
+      } else {
+        warnEl.textContent = '';
+        warnEl.classList.add('hidden');
+      }
+      // 缺失说明
+      document.getElementById('sus-notes').textContent = (s.notes && s.notes.length) ? '注：' + s.notes.join('；') : '';
+
+      card.classList.remove('hidden');
+    }
+
     function renderResult(data) {
       const si = data.stock_info;
       const di = data.dividend;
@@ -875,6 +968,7 @@
           dividend_total: di.total_dividend,
         }));
       }
+      if (data.sustainability) renderSustainability(data.sustainability);
     }
 
     async function calculate(stock) {
