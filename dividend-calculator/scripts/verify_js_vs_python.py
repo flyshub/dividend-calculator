@@ -28,7 +28,7 @@ FIELDS_NUMERIC = [
     "total_dividend", "dividend_yield_before_tax",
     "dividend_yield_after_tax_10", "dividend_yield_after_tax_20",
     "pr_basic", "pr_corrected", "pr_pb", "payout_ratio", "n_factor",
-    "roe_latest", "roe_5y_median", "net_profit_ttm", "net_profit_annual",
+    "roe_latest", "roe_5y_median", "net_profit_latest_period", "net_profit_annual",
     "sustainability_triggered", "sustainability_score",
     # 衍生指标拍平（来自 sustainability.metrics）——防止双端在 FCF/coverage 公式上发散
     # 却恰好落入同一 verdict/score 档、bug 被掩盖
@@ -233,7 +233,7 @@ def compute_python(raw: dict) -> dict:
         "n_factor": n_factor,
         "roe_latest": fin["roe_latest"],
         "roe_5y_median": fin["roe_5y_median"],
-        "net_profit_ttm": fin["net_profit_ttm"],
+        "net_profit_latest_period": fin["net_profit_latest_period"],
         "net_profit_annual": net_annual,
         "industry": raw["industry"],
         "is_loss_stock": is_loss,
@@ -279,7 +279,7 @@ def _parse_financials(rows: list) -> dict:
                 net_profit_annual = float(r["PARENTNETPROFIT"])
                 break
 
-    net_profit_ttm = None
+    net_profit_latest_period = None
     dated = sorted(
         [{"date": (r.get("REPORT_DATE") or "")[:10], "np": float(r["PARENTNETPROFIT"])}
          for r in rows if len((r.get("REPORT_DATE") or "")[:10]) == 10 and _num(r.get("PARENTNETPROFIT")) is not None],
@@ -301,14 +301,14 @@ def _parse_financials(rows: list) -> dict:
                     prev_same = d["np"]
                     break
             if prev_year is not None and prev_same is not None:
-                net_profit_ttm = latest["np"] + prev_year - prev_same
+                net_profit_latest_period = latest["np"] + prev_year - prev_same
         else:
-            net_profit_ttm = latest["np"]
+            net_profit_latest_period = latest["np"]
 
     return {
         "roe_latest": roe_latest,
         "roe_5y_median": roe_5y_median,
-        "net_profit_ttm": net_profit_ttm,
+        "net_profit_latest_period": net_profit_latest_period,
         "net_profit_annual": net_profit_annual,
     }
 

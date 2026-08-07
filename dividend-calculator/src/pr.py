@@ -57,7 +57,7 @@ class PRResult:
     pb: Optional[float]                   # 市净率
     roe_latest: Optional[float]           # 最新年报 ROE（百分比，如 15.9）
     roe_5y_median: Optional[float]        # 5年 ROE 中位数（百分比）
-    net_profit_ttm: Optional[float]       # TTM 净利润（元）
+    net_profit_latest_period: Optional[float]  # 最新报告期累计净利润（元），非 TTM；仅展示
     net_profit_annual: Optional[float]    # 最新年报净利润（元）
     dividend_total: Optional[float]       # 最新财年现金分红总额（元）
     payout_ratio: Optional[float]         # 股利支付率（0~1）
@@ -236,25 +236,52 @@ def _get_financial_ths(stock_code: str) -> Tuple[
         ]
         roe_5y_median = float(sorted(roe_5y_vals)[len(roe_5y_vals) // 2]) if roe_5y_vals else None
 
-        # TTM 净利润：季度数据最近4个季度求和
-        net_profit_ttm = None
+        # 最新报告期累计净利润（非 TTM；仅展示）：对齐 JS 真 TTM 算法
+        # TTM = 最新累计 + 上年全年 − 上年同期（最新为年报时 TTM=全年）
+        net_profit_latest_period = None
         try:
             df_q = ak.stock_financial_abstract_ths(symbol=stock_code, indicator="按报告期")
-            if not df_q.empty and len(df_q) >= 4:
-                last4 = df_q.tail(4)
-                net_profit_ttm = sum(_amount_to_float(v) for v in last4["净利润"])
+            if not df_q.empty and "报告期" in df_q.columns:
+                dated = []
+                for _, row in df_q.iterrows():
+                    rp = str(row["报告期"]).strip()
+                    if len(rp) == 10 and rp[4] == "-" and rp[7] == "-":
+                        dated.append((rp, _amount_to_float(row["净利润"])))
+                dated.sort(key=lambda x: x[0])
+                if len(dated) >= 2:
+                    latest_date, latest_np = dated[-1]
+                    latest_year = int(latest_date[:4])
+                    latest_md = latest_date[5:]
+                    prev_year = None
+                    prev_same = None
+                    for d, np in reversed(dated[:-1]):
+                        if d[5:] == "12-31" and d[:4] != str(latest_year):
+                            prev_year = np
+                            break
+                    if latest_md != "12-31":
+                        target_prev = f"{latest_year - 1}-{latest_md}"
+                        for d, np in dated[:-1]:
+                            if d == target_prev:
+                                prev_same = np
+                                break
+                        if prev_year is not None and prev_same is not None:
+                            net_profit_latest_period = latest_np + prev_year - prev_same
+                        else:
+                            net_profit_latest_period = None  # 数据不全不猜，置 None
+                    else:
+                        net_profit_latest_period = latest_np  # 最新为年报 → 全年
         except Exception as e:
             errors.append(f"同花顺季度财报获取失败: {e}")
 
         logger.debug(
-            "同花顺财报 %s: ROE最新=%.2f%% ROE5Y中位=%.2f%% TTM净利润=%.2f亿 年报净利润=%.2f亿",
+            "同花顺财报 %s: ROE最新=%.2f%% ROE5Y中位=%.2f%% 最新报告期净利润=%.2f亿 年报净利润=%.2f亿",
             stock_code,
             roe_latest,
             roe_5y_median or -1,
-            (net_profit_ttm or 0) / 1e8,
+            (net_profit_latest_period or 0) / 1e8,
             net_profit_annual / 1e8,
         )
-        return roe_latest, roe_5y_median, net_profit_ttm, net_profit_annual, "同花顺（akshare）", errors
+        return roe_latest, roe_5y_median, net_profit_latest_period, net_profit_annual, "同花顺（akshare）", errors
 
     except Exception as e:
         errors.append(f"同花顺财报获取失败: {e}")
@@ -293,26 +320,27 @@ def _get_financial(stock_code: str) -> Tuple[
             if np_years:
                 net_profit_annual = np_history[np_years[0]]
 
-        # TTM 净利润：finance() 提供最新季度累计
-        net_profit_ttm = None
+        # 最新报告期累计净利润（非 TTM；仅展示）：finance() 是最新报告期快照，
+        # 无历史期次（无上年同期），无法构造真 TTM（审查 #5）
+        net_profit_latest_period = None
         try:
             client = get_quotes_client()
             fin = client.finance(symbol=stock_code)
             if fin is not None and len(fin) > 0 and 'jinglirun' in fin.columns:
-                net_profit_ttm = float(fin['jinglirun'].iloc[0])
+                net_profit_latest_period = float(fin['jinglirun'].iloc[0])
         except Exception as e:
-            errors.append(f"finance TTM 获取失败: {e}")
+            errors.append(f"finance 快照获取失败: {e}")
 
         if roe_latest is not None:
             logger.debug(
-                "mootdx F10 财报 %s: ROE最新=%.2f%% ROE5Y中位=%.2f%% TTM净利润=%.2f亿 年报净利润=%.2f亿",
+                "mootdx F10 财报 %s: ROE最新=%.2f%% ROE5Y中位=%.2f%% 最新报告期净利润=%.2f亿 年报净利润=%.2f亿",
                 stock_code,
                 roe_latest,
                 roe_5y_median or -1,
-                (net_profit_ttm or 0) / 1e8,
+                (net_profit_latest_period or 0) / 1e8,
                 (net_profit_annual or 0) / 1e8,
             )
-            return roe_latest, roe_5y_median, net_profit_ttm, net_profit_annual, "mootdx F10", errors
+            return roe_latest, roe_5y_median, net_profit_latest_period, net_profit_annual, "mootdx F10", errors
 
         errors.append("mootdx F10 未获取到有效 ROE 数据")
     except Exception as e:
@@ -386,7 +414,7 @@ def calculate_pr(
         stock_name = tencent_name
 
     # 2. 获取 ROE 和净利润
-    roe_latest, roe_5y_median, net_profit_ttm, net_profit_annual, fin_src, errs = _get_financial(stock_code)
+    roe_latest, roe_5y_median, net_profit_latest_period, net_profit_annual, fin_src, errs = _get_financial(stock_code)
     all_errors.extend(errs)
 
     # 3. 获取行业分类
@@ -439,7 +467,7 @@ def calculate_pr(
         pb=pb,
         roe_latest=roe_latest,
         roe_5y_median=roe_5y_median,
-        net_profit_ttm=net_profit_ttm,
+        net_profit_latest_period=net_profit_latest_period,
         net_profit_annual=net_profit_annual,
         dividend_total=dividend_total,
         payout_ratio=payout_ratio,

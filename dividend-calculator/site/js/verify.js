@@ -17,7 +17,7 @@ Promise.all(codes.map(function (code) {
   return App.analyzeStock(code).then(function (r) {
     var out = formatResult(r);
     out.total_dividend = Math.round(out.total_dividend * 100) / 100;
-    out.net_profit_ttm = out.net_profit_ttm == null ? null : Math.round(out.net_profit_ttm * 100) / 100;
+    out.net_profit_latest_period = out.net_profit_latest_period == null ? null : Math.round(out.net_profit_latest_period * 100) / 100;
     out.net_profit_annual = out.net_profit_annual == null ? null : Math.round(out.net_profit_annual * 100) / 100;
     return out;
   }).catch(function (err) {

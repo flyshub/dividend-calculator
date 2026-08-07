@@ -426,7 +426,7 @@
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:12px;">
           <div class="result-card" style="flex:1;min-width:120px;">
-            <div class="label">TTM净利润</div>
+            <div class="label">最新报告期净利润</div>
             <div id="pr-profit-ttm" class="value"></div>
           </div>
           <div class="result-card" style="flex:1;min-width:120px;">
@@ -833,7 +833,7 @@
       document.getElementById('pr-valuation').textContent = d.valuation_zone || '';
       document.getElementById('pr-pe-pb').textContent = fmtNum(d.pe_ttm, 2) + ' / ' + fmtNum(d.pb, 2);
       document.getElementById('pr-roe').textContent = fmtNum(d.roe_latest, 2) + '% / ' + fmtNum(d.roe_5y_median, 2) + '%';
-      document.getElementById('pr-profit-ttm').textContent = formatRmbYi(d.net_profit_ttm);
+      document.getElementById('pr-profit-ttm').textContent = formatRmbYi(d.net_profit_latest_period);
       document.getElementById('pr-profit-annual').textContent = formatRmbYi(d.net_profit_annual);
       document.getElementById('pr-dividend-total').textContent = formatRmbYi(d.dividend_total);
       document.getElementById('pr-payout').textContent = d.payout_ratio == null ? '无' : formatPercent(d.payout_ratio * 100);
@@ -850,7 +850,7 @@
       explanation += '\n  修正版: ' + fmtNum(d.pr_corrected, 3) + '（对亏损股/周期股/N倍增长股进行修正）';
       explanation += '\n  PB版: ' + fmtNum(d.pr_pb, 3);
       explanation += '\n估值区间: ' + (d.valuation_zone || '无') + '（市赚率≤0.5低估，0.5-0.7合理偏低，0.7-1.0合理，>1.0高估）';
-      explanation += '\n净利润: TTM ' + (Number(d.net_profit_ttm || 0) / 1e8).toFixed(2) + '亿, 年度 ' + (Number(d.net_profit_annual || 0) / 1e8).toFixed(2) + '亿';
+      explanation += '\n净利润: 最新报告期 ' + (Number(d.net_profit_latest_period || 0) / 1e8).toFixed(2) + '亿, 年度 ' + (Number(d.net_profit_annual || 0) / 1e8).toFixed(2) + '亿';
       explanation += '\n分红率: ' + (d.payout_ratio == null ? '无' : Number(d.payout_ratio * 100).toFixed(1) + '%（近一年分红总额 / 年度净利润）');
       if (d.is_loss_stock) explanation += '\n⚠️ 该公司处于亏损状态，市赚率参考价值有限';
       document.getElementById('pr-explanation').textContent = explanation;

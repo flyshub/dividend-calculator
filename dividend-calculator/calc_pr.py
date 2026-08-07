@@ -107,7 +107,7 @@ def print_result(result: PRResult):
     print(f"  PB:            {_fmt_pr(result.pb)}")
     print(f"  ROE (最新年报): {_fmt_pct(result.roe_latest)}")
     print(f"  ROE (5年中位):  {_fmt_pct(result.roe_5y_median)}")
-    print(f"  TTM净利润:      {_fmt_money(result.net_profit_ttm)}")
+    print(f"  最新报告期净利润:{_fmt_money(result.net_profit_latest_period)}")
     print(f"  年报净利润:      {_fmt_money(result.net_profit_annual)}")
     print(f"  现金分红总额:    {_fmt_money(result.dividend_total)}")
     print(f"  股利支付率:     {_fmt_pct(result.payout_ratio * 100 if result.payout_ratio is not None else None)}")

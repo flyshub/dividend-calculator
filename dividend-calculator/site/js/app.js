@@ -119,7 +119,7 @@
         is_loss_stock: pr.is_loss_stock,
         roe_latest: fin.roeLatest,
         roe_5y_median: fin.roe5yMedian,
-        net_profit_ttm: fin.netProfitTtm,
+        net_profit_latest_period: fin.netProfitTtm,
         net_profit_annual: fin.netProfitAnnual,
         industry: industry,
       },

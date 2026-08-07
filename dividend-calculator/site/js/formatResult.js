@@ -23,7 +23,7 @@ module.exports = function formatResult(r) {
     n_factor: r.pr.n_factor,
     roe_latest: r.pr.roe_latest,
     roe_5y_median: r.pr.roe_5y_median,
-    net_profit_ttm: r.pr.net_profit_ttm,
+    net_profit_latest_period: r.pr.net_profit_latest_period,
     net_profit_annual: r.pr.net_profit_annual,
     industry: r.pr.industry,
     is_loss_stock: r.pr.is_loss_stock,
