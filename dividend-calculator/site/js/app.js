@@ -114,6 +114,8 @@
         pr_pb: pr.pr_pb,
         valuation_zone: pr.valuation_zone,
         pr_warning: prWarning,
+        pe_ttm: quote.pe_ttm,
+        pb: quote.pb,
         payout_ratio: pr.payout_ratio,
         n_factor: pr.n_factor,
         is_loss_stock: pr.is_loss_stock,
