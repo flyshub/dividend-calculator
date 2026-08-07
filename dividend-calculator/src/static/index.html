@@ -316,7 +316,7 @@
         <div class="label">TTM 股息率（近12个月实际派发）</div>
         <div id="ttm-yield" class="value yield"></div>
         <div id="ttm-period" class="note" style="margin-top:2px;font-size:11px;"></div>
-        <div class="note" style="margin-top:4px;font-size:11px;color:#667085;">TTM 按近12个月实际派发的分红计算；与主口径相同是因为 A 股分红节奏下，近12个月派发的恰好是最近完整财年的分红，跨年后 TTM 会随窗口滚动变化。</div>
+        <div id="ttm-note" class="note" style="margin-top:4px;font-size:11px;color:#667085;"></div>
       </div>
 
       <div class="result-card">
@@ -827,6 +827,17 @@
       if (data.dividend_yield_ttm_before_tax != null) {
         ttmYieldEl.textContent = formatPercent(data.dividend_yield_ttm_before_tax);
         ttmPeriodEl.textContent = '期间 ' + (data.ttm_period || '') + ' | 来源 ' + (data.ttm_source || '');
+        // TTM 与主口径差异说明（动态）
+        const mainY = Number(data.dividend_yield_before_tax || 0);
+        const ttmY = Number(data.dividend_yield_ttm_before_tax || 0);
+        const ttmNote = document.getElementById('ttm-note');
+        if (Math.abs(ttmY - mainY) < 0.005) {
+          ttmNote.textContent = '与主口径相同：A 股分红节奏下，近12个月派发的恰好是最近完整财年的分红。';
+        } else if (ttmY > mainY) {
+          ttmNote.textContent = '高于主口径：近12个月窗口内包含了新财年的分红（如半年报派息），主口径只统计到最近完整财年。';
+        } else {
+          ttmNote.textContent = '低于主口径：部分分红已滑出近12个月窗口（跨年后 TTM 滚动更新）。';
+        }
         ttmCard.classList.remove('hidden');
       } else {
         ttmCard.classList.add('hidden');
