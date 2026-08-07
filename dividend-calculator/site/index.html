@@ -779,11 +779,11 @@
         }).map(function (r) {
           var y = r.REPORT_DATE ? r.REPORT_DATE.slice(0, 4) : '';
           var m = r.REPORT_DATE ? r.REPORT_DATE.slice(5, 7) : '';
-          var isAnnual = !(m === '06' || m === '09');
+          var isAnnual = (m === '12'); /* 对齐 calculator.js：仅 12 月报告期为年报，6/9/3 月为中期分配 */
           return {
             ex_dividend_date: r.EX_DIVIDEND_DATE.slice(0, 10),
             dividend_per_10: r.PRETAX_BONUS_RMB,
-            report_time: y + (isAnnual ? '年报' : '半年报'),
+            report_time: y + (isAnnual ? '年报' : '中期分配'),
           };
         });
         return {

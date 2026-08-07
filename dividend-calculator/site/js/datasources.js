@@ -122,6 +122,49 @@
     });
   }
 
+  /* ── 近1年股价涨跌幅（腾讯 fqkline 前复权日K，250根）──
+   * 返回小数（如 -0.30 表示跌 30%），失败返回 null（评估降级继续） */
+  function fetchPriceChange1y(stockCode) {
+    var prefix = stockCode[0] === '6' ? 'sh'
+      : (stockCode[0] === '8' || stockCode[0] === '4' || stockCode.slice(0, 2) === '92' ? 'bj' : 'sz');
+    var url = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=' + prefix + stockCode + ',day,,,250,qfq';
+    return jsonFetch(url).then(function (d) {
+      var data = d.data || {};
+      var node = data[prefix + stockCode] || {};
+      var rows = node.qfqday || node.day || [];
+      if (!rows || rows.length < 2) return null;
+      /* #40：实测请求 250 根返回 251 根，rows[0] 即约 1 年前的窗口起点，最后一行即最新。
+       * 用首尾两行算一年涨跌幅——按索引 245 会取到仅 1 周前，把一年窗口算成周涨跌。 */
+      var last = Number(rows[rows.length - 1][2]);
+      var past = Number(rows[0][2]);
+      if (!isFinite(last) || !isFinite(past) || past <= 0) return null;
+      return (last - past) / past;
+    }).catch(function () { return null; });
+  }
+
+  /* ── 前十大股东合计持股比例（东财 RPT_F10_EH_HOLDERS）──
+   * HOLD_NUM_RATIO 为百分数（如 12.5 = 12.5%），求和后 /100 转小数（如 0.62）。
+   * 对齐 Python sustainability_calculator: top10_holding 为小数（阈值 0.50，显示 ×100%）。
+   * 数据缺失/全部为空值 → 返回 null（与 Python total==0 返回 None 一致，避免 0 参与集中度判分）。 */
+  function fetchTop10Holding(stockCode) {
+    var suffix = stockCode[0] === '6' ? 'SH'
+      : (stockCode[0] === '8' || stockCode[0] === '4' || stockCode.slice(0, 2) === '92' ? 'BJ' : 'SZ');
+    var url = 'https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_EH_HOLDERS' +
+      '&columns=ALL&filter=(SECUCODE%3D%22' + stockCode + '.' + suffix + '%22)' +
+      '&pageNumber=1&pageSize=10&sortTypes=-1&sortColumns=END_DATE';
+    return jsonFetch(url).then(function (d) {
+      var rows = (d.result && d.result.data) || [];
+      if (!rows.length) return null;
+      var sum = 0;
+      for (var i = 0; i < rows.length; i++) {
+        var v = Number(rows[i].HOLD_NUM_RATIO);
+        if (isFinite(v)) sum += v;
+      }
+      if (!(sum > 0)) return null;
+      return sum / 100.0;
+    }).catch(function () { return null; });
+  }
+
   /* ── 股票名称→代码（smartbox.gtimg.cn）
    * 浏览器: script 标签 JSONP（读取全局 v_hint）
    * Node: 直接 fetch + 解析 \u 转义 */
@@ -188,6 +231,8 @@
     fetchFinancials: fetchFinancials,
     fetchCashflow: fetchCashflow,
     fetchIndustry: fetchIndustry,
+    fetchPriceChange1y: fetchPriceChange1y,
+    fetchTop10Holding: fetchTop10Holding,
     lookupStockCodeByName: lookupStockCodeByName,
     parseSmartbox: parseSmartbox,
     IS_NODE: IS_NODE,

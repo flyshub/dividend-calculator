@@ -1,10 +1,10 @@
 """
-股息可持续性 — 数据获取层
+股息可持续性 — 解析 + 编排层
 
-全部走东方财富 datacenter HTTP 接口（与 site/js/datasources.js 同源），不依赖 mootdx：
-  - 财务：RPT_F10_FINANCE_MAINFINADATA（columns=ALL，含现金流/负债/银行专项）
-  - 分红明细：RPT_SHAREBONUS_DET（全历史除权记录）
-  - 行业：RPT_F10_BASIC_ORGINFO（EM2016 东财行业）
+数据取数（东财 datacenter / 腾讯 HTTP）已抽取到 eastmoney_fetcher.py（#43 L6）：
+本模块保留解析纯函数（parse_financial_rows / parse_dividend_rows /
+select_latest_annual / aggregate_dividend_history）与编排入口
+（assess_for_stock / assess_with_auto_fetch），取数函数从 eastmoney_fetcher import。
 
 设计理由：
   1. 东财 HTTP 全球可用，mootdx 通达信协议在部分环境受限；
@@ -19,9 +19,15 @@ import re
 from datetime import datetime
 from typing import List, Optional, Tuple
 
-import requests
-
 from .datasource.base import DividendRecord
+from .eastmoney_fetcher import (
+    fetch_cashflow_rows,
+    fetch_dividend_rows,
+    fetch_financial_rows,
+    fetch_industry,
+    fetch_price_change_1y,
+    fetch_top10_holding,
+)
 from .sustainability_calculator import (
     AnnualFinancial,
     CUT_WINDOW_YEARS,
@@ -31,39 +37,6 @@ from .sustainability_calculator import (
 )
 
 logger = logging.getLogger(__name__)
-
-_UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-
-# 东财财务接口（host: datacenter.eastmoney.com）
-_FINANCE_URL = (
-    "https://datacenter.eastmoney.com/api/data/v1/get"
-    "?sortColumns=REPORT_DATE&sortTypes=-1&pageSize=100&pageNumber=1"
-    "&reportName=RPT_F10_FINANCE_MAINFINADATA&columns=ALL"
-    '&filter=(SECUCODE%3D"{secucode}")'
-)
-
-# 东财分红明细接口（host: datacenter-web.eastmoney.com，与 JS 同源）
-_DIVIDEND_URL = (
-    "https://datacenter-web.eastmoney.com/api/data/v1/get"
-    "?sortColumns=REPORT_DATE&sortTypes=-1&pageSize=100&pageNumber=1"
-    "&reportName=RPT_SHAREBONUS_DET&columns=ALL"
-    '&filter=(SECURITY_CODE%3D"{code}")'
-)
-
-# 东财行业接口
-_INDUSTRY_URL = (
-    "https://datacenter-web.eastmoney.com/api/data/v1/get"
-    "?reportName=RPT_F10_BASIC_ORGINFO&columns=ALL"
-    '&filter=(SECUCODE%3D"{secucode}")'
-)
-
-# 东财现金流量表接口（含真正的资本开支 CONSTRUCT_LONG_ASSET；MAINFINADATA 无此字段）
-_CASHFLOW_URL = (
-    "https://datacenter.eastmoney.com/api/data/v1/get"
-    "?sortColumns=REPORT_DATE&sortTypes=-1&pageSize=100&pageNumber=1"
-    "&reportName=RPT_F10_FINANCE_GCASHFLOW&columns=ALL"
-    '&filter=(SECUCODE%3D"{secucode}")'
-)
 
 # 东财财务字段名 → AnnualFinancial 语义（实地验证 600036 招行/600887 伊利确认真实存在）
 # 注意：东财字段命名有坑——NON_PERFORMING_LOAN 是"不良贷款余额"(元)非比率，
@@ -167,7 +140,7 @@ def parse_dividend_rows(rows: List[dict]) -> Tuple[List[DividendRecord], Optiona
     records: List[DividendRecord] = []
     date_re = re.compile(r"(\d{4})-(\d{2})")
 
-    for row in rows:
+    for row in (rows or []):  # None（取数失败）按空处理，不抛（api.py 降级路径传入 None）
         progress = str(row.get("ASSIGN_PROGRESS") or "")
         # T5：仅保留已实施分红（含"实施"但排除"未实施"/"预案"/"预披露"/"批准"等未落地状态）
         if not _is_implemented(progress):
@@ -181,9 +154,10 @@ def parse_dividend_rows(rows: List[dict]) -> Tuple[List[DividendRecord], Optiona
             continue
         year = int(m.group(1))
         month = int(m.group(2))
-        # 与 JS 一致：12/3/4月为年报，6/9月为半年报
-        is_annual = month not in (6, 9)
-        label = f"{year}年报" if is_annual else f"{year}半年报"
+        # 与 JS 一致（#37 M4）：仅 12 月报告期是完整财年年报；3/6/9 月为中期分配
+        # （季度分红监管扩散，3/4 月 Q1 分红不构成完整财年）
+        is_annual = month == 12
+        label = f"{year}年报" if is_annual else f"{year}中期分配"
 
         ex_date = str(row.get("EX_DIVIDEND_DATE") or "")[:10]
         records.append(DividendRecord(
@@ -223,8 +197,11 @@ def aggregate_dividend_history(records: List[DividendRecord],
         return DividendHistory(consecutive_years=0, ever_cut=False,
                                latest_year_amount=None, history_mean_amount=None)
 
-    # 按财年聚合分红总额（元）
+    # 按财年聚合分红总额（元）——全部记录（含中期分配）参与总额/连续年数
     year_amount: dict = {}
+    # 仅年报记录聚合——ever_cut 相邻年削减比较只用同类型（年报）口径（#39 M6），
+    # 避免半年报 3 元 vs 上年年报 8 元被误判为削减
+    annual_amount: dict = {}
     for rec in records:
         ym = re.match(r"(\d{4})", rec.report_time or "")
         if not ym:
@@ -232,6 +209,11 @@ def aggregate_dividend_history(records: List[DividendRecord],
         year = ym.group(1)
         amount = rec.dividend_per_10 / 10.0 * total_shares
         year_amount[year] = year_amount.get(year, 0.0) + amount
+        # 仅年报记录参与削减比较（#39 M6）。排除"半年报"子串：旧 label「半年报」
+        # 含「年报」子串，遗留数据会被误判为年报——与 JS（indexOf('半年报') === -1）完全一致
+        _t = rec.report_time or ""
+        if "年报" in _t and "半年报" not in _t:
+            annual_amount[year] = annual_amount.get(year, 0.0) + amount
 
     if not year_amount:
         return DividendHistory(consecutive_years=0, ever_cut=False,
@@ -270,13 +252,14 @@ def aggregate_dividend_history(records: List[DividendRecord],
     # 近 CUT_WINDOW_YEARS 年窗口（含最新财年）内相邻年分红降幅 > 30% 视为曾削减。
     # 窗口之外的久远波动（如行业早期调整）对当前分红可持续性无参考价值，
     # 避免连年提升分红的股票（如伊利 2016~2025 逐年递增）被早期低基数误判。
+    # 只比较年报口径（annual_amount）：中期分配不参与削减比较（#39 M6）。
     window_start = int(target_year) - (CUT_WINDOW_YEARS - 1)
-    asc = sorted(year_amount.keys())
+    asc = sorted(annual_amount.keys())
     for i in range(1, len(asc)):
         prev_y, cur_y = asc[i - 1], asc[i]
         if int(cur_y) < window_start:
             continue  # 仅检查窗口内相邻年
-        prev, cur = year_amount[prev_y], year_amount[cur_y]
+        prev, cur = annual_amount[prev_y], annual_amount[cur_y]
         if prev > 0 and cur < prev * 0.7:
             ever_cut = True
             break
@@ -291,51 +274,8 @@ def aggregate_dividend_history(records: List[DividendRecord],
 
 
 # ---------------------------------------------------------------------------
-# 网络层（单独隔离）
+# 网络层（#43 L6：已抽取到 eastmoney_fetcher.py，本模块只保留解析与编排）
 # ---------------------------------------------------------------------------
-
-def _fetch_eastmoney_rows(url: str, stock_code: str, label: str) -> List[dict]:
-    """东财 datacenter GET 统一封装：请求 → 取 result.data → 失败 warning 返空。"""
-    try:
-        resp = requests.get(url, headers=_UA, timeout=15)
-        resp.raise_for_status()
-        return (resp.json().get("result") or {}).get("data") or []
-    except Exception as e:
-        logger.warning("东财%s接口获取失败 %s: %s", label, stock_code, e)
-        return []
-
-
-def _secucode(stock_code: str) -> str:
-    """6 开头上交所，否则深交所。"""
-    market = ".SH" if stock_code.startswith("6") else ".SZ"
-    return f"{stock_code}{market}"
-
-
-def fetch_financial_rows(stock_code: str) -> List[dict]:
-    """东财财务行。"""
-    return _fetch_eastmoney_rows(_FINANCE_URL.format(secucode=_secucode(stock_code)),
-                                 stock_code, "财务")
-
-
-def fetch_dividend_rows(stock_code: str) -> List[dict]:
-    """东财分红明细行。"""
-    return _fetch_eastmoney_rows(_DIVIDEND_URL.format(code=stock_code), stock_code, "分红")
-
-
-def fetch_industry(stock_code: str) -> str:
-    """东财行业字符串（EM2016 优先，降级 INDUSTRYCSRC1）。"""
-    rows = _fetch_eastmoney_rows(_INDUSTRY_URL.format(secucode=_secucode(stock_code)),
-                                 stock_code, "行业")
-    if not rows:
-        return ""
-    return rows[0].get("EM2016") or rows[0].get("INDUSTRYCSRC1") or ""
-
-
-def fetch_cashflow_rows(stock_code: str) -> List[dict]:
-    """东财现金流量表行（含 CONSTRUCT_LONG_ASSET 资本开支）。"""
-    return _fetch_eastmoney_rows(_CASHFLOW_URL.format(secucode=_secucode(stock_code)),
-                                 stock_code, "现金流量表")
-
 
 def merge_capex(financials: List[AnnualFinancial],
                 cashflow_rows: List[dict]) -> List[AnnualFinancial]:
@@ -377,11 +317,17 @@ def assess_for_stock(*,
                      financial_rows: Optional[List[dict]] = None,
                      cashflow_rows: Optional[List[dict]] = None,
                      price_change_1y: Optional[float] = None,
-                     top10_holding: Optional[float] = None) -> SustainabilityResult:
+                     top10_holding: Optional[float] = None,
+                     dividend_fetch_failed: bool = False) -> SustainabilityResult:
     """可持续性评估编排入口：取数据 → 喂纯评估器。
 
     dividend_records / industry / financial_rows / cashflow_rows 可外部注入（verify 复用），
     未注入时现场走东财 HTTP 取数。
+
+    dividend_fetch_failed（#38 M5）：网络取数路径（assess_with_auto_fetch）下
+    分红记录为空时无法区分"真无分红"与"取数失败"，由调用方置 True 后本函数
+    强制 history=None（走评估器历史缺失分支）并追加显式失败 note，避免
+    网络失败被静默当成"0 年连续分红"的负面结论。
     """
     if dividend_yield_before_tax is None or dividend_yield_before_tax <= 0:
         return SustainabilityResult(triggered=False, verdict="未评估", score=None,
@@ -397,10 +343,13 @@ def assess_for_stock(*,
     financials = merge_capex(financials, cashflow_rows)
     latest = select_latest_annual(financials, latest_dividend_year)
 
-    # 分红历史
-    history = aggregate_dividend_history(dividend_records, latest_dividend_year, total_shares)
+    # 分红历史（#38 M5：取数失败 → history=None 走缺失分支，而非 0 年负面结论）
+    if dividend_fetch_failed and not dividend_records:
+        history = None
+    else:
+        history = aggregate_dividend_history(dividend_records, latest_dividend_year, total_shares)
 
-    return assess_sustainability(
+    result = assess_sustainability(
         dividend_yield_before_tax=dividend_yield_before_tax,
         dividend_total=dividend_total,
         latest=latest,
@@ -410,6 +359,9 @@ def assess_for_stock(*,
         top10_holding=top10_holding,
         current_year=datetime.now().year,
     )
+    if dividend_fetch_failed and not dividend_records:
+        result.notes.append("分红历史数据获取失败，历史维度不参与评分")
+    return result
 
 
 def assess_with_auto_fetch(stock_code: str,
@@ -419,20 +371,32 @@ def assess_with_auto_fetch(stock_code: str,
                           latest_dividend_year: Optional[str],
                           industry: Optional[str] = None,
                           dividend_rows: Optional[List[dict]] = None,
-                          financial_rows: Optional[List[dict]] = None) -> SustainabilityResult:
-    """全自取数版编排：财务/分红/行业全走东财，不依赖外部传入 mootdx 数据。
+                          financial_rows: Optional[List[dict]] = None,
+                          price_change_1y: Optional[float] = None,
+                          top10_holding: Optional[float] = None) -> SustainabilityResult:
+    """全自取数版编排：财务/分红/行业/近1年涨跌/股东集中度全走 HTTP 取数。
 
     供 analysis.py 调用 —— 可持续性模块自洽，无需 pr.py 的 mootdx 行业、
     也无需 dividend.py 的 mootdx 分红记录。
+    price_change_1y / top10_holding 可选注入（测试用），默认 None 现场自取；
+    网络失败返回 None 不阻塞评估（#40 B1）。
     """
     if not industry or industry in ("未知行业", "无", ""):
         # 上游（pr.py 走 mootdx）行业不可用时，走东财重取，保证银行/周期判定准确
         industry = fetch_industry(stock_code)
     if dividend_rows is None:
         dividend_rows = fetch_dividend_rows(stock_code)
-    records, em_latest_year = parse_dividend_rows(dividend_rows)
+    # #38 M5：fetch_dividend_rows 网络失败返回 None（区别于真无分红的 []）
+    if dividend_rows is None:
+        records, em_latest_year = [], None
+    else:
+        records, em_latest_year = parse_dividend_rows(dividend_rows)
     # 分红财年：优先用外部传入（来自股息率口径），否则用东财分红明细推断
     div_year = latest_dividend_year or em_latest_year
+    if price_change_1y is None:
+        price_change_1y = fetch_price_change_1y(stock_code)
+    if top10_holding is None:
+        top10_holding = fetch_top10_holding(stock_code)
 
     return assess_for_stock(
         stock_code=stock_code,
@@ -442,7 +406,10 @@ def assess_with_auto_fetch(stock_code: str,
         latest_dividend_year=div_year,
         industry=industry,
         dividend_records=records,
+        dividend_fetch_failed=dividend_rows is None,  # 仅取数失败置位；records=[]（真无分红）不置
         financial_rows=financial_rows,
+        price_change_1y=price_change_1y,
+        top10_holding=top10_holding,
     )
 
 
@@ -451,11 +418,7 @@ __all__ = [
     "parse_dividend_rows",
     "select_latest_annual",
     "aggregate_dividend_history",
-    "fetch_financial_rows",
-    "fetch_cashflow_rows",
     "merge_capex",
-    "fetch_dividend_rows",
-    "fetch_industry",
     "assess_for_stock",
     "assess_with_auto_fetch",
 ]

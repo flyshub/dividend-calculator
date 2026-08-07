@@ -29,7 +29,7 @@ from .pr_calculator import (
     classify_valuation,
     classify_industry,
 )
-from .sustainability import fetch_industry as fetch_eastmoney_industry
+from .eastmoney_fetcher import fetch_industry as fetch_eastmoney_industry
 
 logger = logging.getLogger(__name__)
 

@@ -343,7 +343,7 @@ def score_finance_branch(latest: AnnualFinancial) -> Dict[str, int]:
     各项有值才计分；全部缺失返回空 dict（由调用方降级）。
     """
     scores: Dict[str, int] = {}
-    # 资本充足率（>10.5 满意/8~10.5 一般/<8 危险，监管红线 8%）
+    # 资本充足率（#42 L5 注释修正：≥12 满意 / 10.5~12 一般 / <10.5 危险——实际代码 <10.5 计 0 分）
     if latest.capital_adequacy_ratio is not None:
         car = latest.capital_adequacy_ratio
         scores["capital_adequacy"] = 2 if car >= 12 else (1 if car >= 10.5 else 0)
@@ -450,13 +450,15 @@ def check_warning_flags(latest: AnnualFinancial,
 # ---------------------------------------------------------------------------
 
 # 防御性行业（现金流稳定，高分红可持续性更强）
+# 关键词用专名（#42 L3）：'电力行业' 而非 '电力'，避免 '电力设备' 被误判防御；
+# '化工行业' 而非 '化工'，避免 '化学制药' 被误判周期。
 DEFENSIVE_INDUSTRIES = (
-    "公用事业", "电力", "水务", "燃气", "高速公路", "铁路", "港口", "机场",
+    "公用事业", "电力行业", "水务", "燃气", "高速公路", "铁路", "港口", "机场",
     "食品饮料", "白酒", "乳品", "家电", "医药", "超市", "运营商", "电信",
 )
 
 CYCLICAL_INDUSTRIES = (
-    "煤炭", "钢铁", "有色金属", "石油", "化工", "航运", "建材",
+    "煤炭", "钢铁", "有色金属", "石油", "化工行业", "航运", "建材",
     "水泥", "玻璃", "造纸", "养殖", "房地产", "工程机械", "船舶",
     "化肥", "农药", "化纤", "橡胶", "塑料",
 )
@@ -563,6 +565,11 @@ def assess_sustainability(*,
 
     # 衍生指标（封装为 DerivedMetrics，避免在各 check 函数间重复传同一组值）
     metrics = DerivedMetrics.from_inputs(latest, dividend_total)
+    # 统一存小数（#41 L2 / #41 复审）：debt_ratio_decimal() 优先（含 LIABILITY/TOTAL_ASSETS 推算），
+    # 否则 debt_ratio(百分数)/100；_weak_dim_text/_pct1 按小数 ×100 输出。
+    # 显式 None 判断而非 `or`：避免零负债（debt_ratio_decimal()==0.0）被 falsy 吞成 None。
+    _dr = latest.debt_ratio_decimal()
+    debt_ratio_value = _dr if _dr is not None else (latest.debt_ratio / 100.0 if latest.debt_ratio is not None else None)
     result.metrics.update({
         "payout_ratio": metrics.payout_ratio,
         "operating_cf": latest.operating_cf,
@@ -570,7 +577,7 @@ def assess_sustainability(*,
         "free_cash_flow": metrics.fcf,
         "fcf_coverage": metrics.fcf_coverage,
         "cf_coverage": metrics.cf_coverage,
-        "debt_ratio": latest.debt_ratio_decimal() if latest.debt_ratio is None else latest.debt_ratio,
+        "debt_ratio": debt_ratio_value,
         "interest_coverage": latest.interest_coverage,
         "roe_latest": latest.roe,
         "net_profit": latest.net_profit,

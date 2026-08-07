@@ -28,6 +28,9 @@
         DS.fetchFinancials(input),
         DS.fetchCashflow(input),
         DS.fetchIndustry(input).catch(function () { return null; }),
+        /* #40: 情境红旗数据（被动高股息/输血式分红），失败传 null 降级，不阻塞主展示 */
+        DS.fetchPriceChange1y(input),
+        DS.fetchTop10Holding(input),
       ]);
     }).then(function (results) {
       return computeFromRaw({
@@ -36,6 +39,8 @@
         financial_rows: results[2],
         cashflow_rows: results[3],
         industry: results[4] || '未知行业',
+        price_change_1y: results[5],
+        top10_holding: results[6],
       });
     });
   }
@@ -85,6 +90,8 @@
         cashflow_rows: cashflowRows,
         history: div.sustainabilityHistory,
         industry: industry,
+        price_change_1y: raw.price_change_1y != null ? raw.price_change_1y : null,
+        top10_holding: raw.top10_holding != null ? raw.top10_holding : null,
       });
       sustainability.explanation = Calculator.explainSustainability(sustainability);
     }

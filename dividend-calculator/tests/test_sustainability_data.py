@@ -206,7 +206,7 @@ def test_parse_dividend_rows_skips_preset():
 
 
 def test_parse_dividend_rows_distinguishes_annual():
-    """年报(12月) vs 半年报(6/9月)。"""
+    """年报(12月) vs 中期分配(6/9/3月)。"""
     rows = [
         {"REPORT_DATE": "2025-12-31", "PRETAX_BONUS_RMB": 5.0, "ASSIGN_PROGRESS": "实施", "EX_DIVIDEND_DATE": "2026-07-01"},
         {"REPORT_DATE": "2025-06-30", "PRETAX_BONUS_RMB": 2.0, "ASSIGN_PROGRESS": "实施", "EX_DIVIDEND_DATE": "2025-12-01"},
@@ -216,7 +216,7 @@ def test_parse_dividend_rows_distinguishes_annual():
     assert year == "2025"  # 最新有年报的财年
     labels = [r.report_time for r in records]
     assert "2025年报" in labels
-    assert "2025半年报" in labels
+    assert "2025中期分配" in labels
 
 
 def test_parse_dividend_rows_empty():
@@ -292,3 +292,264 @@ def test_assess_for_stock_bank_finance_branch():
     assert result.branch == "finance"
     assert "capital_adequacy" in result.dimension_scores
     assert result.score is not None and result.score >= 1.5
+
+
+# ---------------------------------------------------------------------------
+# #39 M6：ever_cut 仅年报口径比较（中期分配不参与削减判定）
+# ---------------------------------------------------------------------------
+
+def test_ever_cut_ignores_interim_dividends():
+    """年报10 → 年报8+中期3：ever_cut 仅比较年报，8 ≥ 10×0.7 → 不判削减（#39）。"""
+    recs = [
+        DividendRecord("2024-07-01", 10.0, "2024年报"),
+        DividendRecord("2025-07-01", 8.0, "2025年报"),
+        DividendRecord("2025-12-01", 3.0, "2025中期分配"),
+    ]
+    h = aggregate_dividend_history(recs, "2025", 1e9)
+    assert h.ever_cut is False
+    # 中期分配仍计入当年总额（year_amount 保持现状）
+    assert h.latest_year_amount == pytest.approx(11.0e8)
+
+
+def test_ever_cut_detects_annual_cut():
+    """年报10 → 年报6：仅年报比较，6 < 10×0.7 → 判削减（#39）。"""
+    recs = [
+        DividendRecord("2024-07-01", 10.0, "2024年报"),
+        DividendRecord("2025-07-01", 6.0, "2025年报"),
+    ]
+    h = aggregate_dividend_history(recs, "2025", 1e9)
+    assert h.ever_cut is True
+
+
+def test_ever_cut_mixed_annual_and_interim():
+    """年报10+中期3 → 年报6：年度总额含中期仍可能削减，但比较用年报口径。"""
+    recs = [
+        DividendRecord("2024-07-01", 10.0, "2024年报"),
+        DividendRecord("2024-12-01", 3.0, "2024中期分配"),
+        DividendRecord("2025-07-01", 6.0, "2025年报"),
+    ]
+    h = aggregate_dividend_history(recs, "2025", 1e9)
+    assert h.ever_cut is True  # 年报 6 < 10×0.7
+
+
+def test_ever_cut_legacy_halfyear_label_not_annual():
+    """旧 label「半年报」含「年报」子串：遗留数据不应被算进年报口径（#39 复审）。"""
+    recs = [
+        DividendRecord("2024-07-01", 10.0, "2024年报"),
+        DividendRecord("2025-07-01", 8.0, "2025年报"),
+        DividendRecord("2025-12-01", 3.0, "2025半年报"),  # 旧格式遗留数据
+    ]
+    h = aggregate_dividend_history(recs, "2025", 1e9)
+    assert h.ever_cut is False  # 8 ≥ 10×0.7，半年报不参与削减比较
+    # 总额仍含半年报（year_amount 保持现状）
+    assert h.latest_year_amount == pytest.approx(11.0e8)
+
+
+# ---------------------------------------------------------------------------
+# #38 M5：分红历史取数失败 → history=None + 显式 note
+# ---------------------------------------------------------------------------
+
+def test_assess_for_stock_dividend_fetch_failed_note():
+    """网络取数路径分红记录为空 → 强制 history=None + 显式失败 note（非静默 0 年）。"""
+    rows = _make_finance_rows()
+    result = assess_for_stock(
+        stock_code="600900",
+        total_shares=1e9,
+        dividend_total=10e8,
+        dividend_yield_before_tax=5.0,
+        latest_dividend_year="2025",
+        industry="公用事业",
+        dividend_records=[],
+        dividend_fetch_failed=True,
+        financial_rows=rows,
+    )
+    assert result.triggered is True
+    assert any("分红历史数据获取失败" in n for n in result.notes)
+
+
+def test_assess_for_stock_empty_records_no_failure_note():
+    """注入空 records 且未标记失败（纯函数路径）→ 不追加失败 note。"""
+    rows = _make_finance_rows()
+    result = assess_for_stock(
+        stock_code="600900",
+        total_shares=1e9,
+        dividend_total=10e8,
+        dividend_yield_before_tax=5.0,
+        latest_dividend_year="2025",
+        industry="公用事业",
+        dividend_records=[],
+        financial_rows=rows,
+    )
+    assert not any("分红历史数据获取失败" in n for n in result.notes)
+
+
+# ---------------------------------------------------------------------------
+# #42 L3：行业关键词专名匹配（电力设备 ≠ 电力行业，化学制药 ≠ 化工）
+# ---------------------------------------------------------------------------
+
+def test_industry_proper_names_no_false_match():
+    from src.sustainability_calculator import _classify_industry
+
+    # 电力设备（东财 EM2016 行业名）不应被"电力"误判为防御
+    is_bank, is_cyclical, is_defensive = _classify_industry("电力设备")
+    assert is_defensive is False
+    # 电力行业（mootdx/证监会行业名）应判防御
+    _, _, is_defensive = _classify_industry("电力行业")
+    assert is_defensive is True
+    # 化学制药（含"化工"子串）不应被"化工"误判为周期
+    _, is_cyclical, _ = _classify_industry("化学制药")
+    assert is_cyclical is False
+
+
+# ---------------------------------------------------------------------------
+# #40 B1 边界：fetch_price_change_1y / fetch_top10_holding / _secucode
+# ---------------------------------------------------------------------------
+
+class _FakeResp:
+    """模拟 requests.Response（json 由调用方注入）。"""
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._payload
+
+
+def test_fetch_price_change_1y_window_calculation(monkeypatch):
+    """#40：用 rows[0]（窗口起点，约 1 年前）与 rows[-1]（最新）算 1 年变化率。"""
+    import src.eastmoney_fetcher as emf
+
+    rows = [
+        ["2025-08-07", "42.5", "42.424"],   # 窗口起点收盘 42.424
+        ["2026-01-05", "45.0", "45.0"],
+        ["2026-08-07", "38.2", "38.80"],    # 最新收盘 38.80（腾讯返回字符串）
+    ]
+    payload = {"data": {"sh600036": {"qfqday": rows}}}
+
+    def fake_get(url, **kwargs):
+        assert "sh600036" in url
+        return _FakeResp(payload)
+
+    monkeypatch.setattr(emf.requests, "get", fake_get)
+    result = emf.fetch_price_change_1y("600036")
+    assert result == pytest.approx((38.80 - 42.424) / 42.424)
+
+
+def test_fetch_price_change_1y_too_few_rows(monkeypatch):
+    """K 线不足 2 根 → None（无窗口可算）。"""
+    import src.eastmoney_fetcher as emf
+
+    payload = {"data": {"sh600036": {"qfqday": [["2026-08-07", "10", "10"]]}}}
+    monkeypatch.setattr(emf.requests, "get", lambda *a, **k: _FakeResp(payload))
+    assert emf.fetch_price_change_1y("600036") is None
+
+
+def test_fetch_price_change_1y_bj_prefix(monkeypatch):
+    """北交所代码 → bj 前缀（#40 复审：6→sh，8/4/92→bj，其余→sz）。"""
+    import src.eastmoney_fetcher as emf
+
+    seen = {}
+
+    def fake_get(url, **kwargs):
+        seen["key"] = url.split("param=")[1].split(",")[0]
+        payload = {"data": {seen["key"]: {"qfqday": [["a", "10", "10"], ["b", "20", "20"]]}}}
+        return _FakeResp(payload)
+
+    monkeypatch.setattr(emf.requests, "get", fake_get)
+    assert emf.fetch_price_change_1y("830799") == pytest.approx(1.0)
+    assert seen["key"] == "bj830799"
+
+
+def test_fetch_top10_holding_empty_data(monkeypatch):
+    """前十大股东数据为空 → None（不返回 0，避免参与集中度判分）。"""
+    import src.eastmoney_fetcher as emf
+
+    payload = {"result": {"data": []}}
+    monkeypatch.setattr(emf.requests, "get", lambda *a, **k: _FakeResp(payload))
+    assert emf.fetch_top10_holding("600036") is None
+
+
+def test_fetch_top10_holding_all_ratios_missing(monkeypatch):
+    """HOLD_NUM_RATIO 全缺失 → None（total==0 不返回 0）。"""
+    import src.eastmoney_fetcher as emf
+
+    payload = {"result": {"data": [{"END_DATE": "2026-06-30"}, {"END_DATE": "2026-03-31"}]}}
+    monkeypatch.setattr(emf.requests, "get", lambda *a, **k: _FakeResp(payload))
+    assert emf.fetch_top10_holding("600036") is None
+
+
+def test_secucode_bj_mapping():
+    """北交所（8/4/92 开头）→ .BJ；6 → .SH；其余 → .SZ。"""
+    from src.eastmoney_fetcher import _secucode
+
+    assert _secucode("830799") == "830799.BJ"
+    assert _secucode("920099") == "920099.BJ"
+    assert _secucode("600036") == "600036.SH"
+    assert _secucode("000001") == "000001.SZ"
+
+
+# ---------------------------------------------------------------------------
+# #38 M5：fetch_dividend_rows None/[] 语义 + assess_with_auto_fetch 接线
+# ---------------------------------------------------------------------------
+
+def test_fetch_dividend_rows_failure_returns_none(monkeypatch):
+    """网络异常 → None（取数失败），区别于真无分红的 []。"""
+    import requests
+    import src.eastmoney_fetcher as emf
+
+    def boom(*a, **k):
+        raise requests.ConnectionError("network down")
+
+    monkeypatch.setattr(emf.requests, "get", boom)
+    assert emf.fetch_dividend_rows("600036") is None
+
+
+def test_fetch_dividend_rows_empty_data_returns_list(monkeypatch):
+    """请求成功但无分红数据 → []（真无分红，不判失败）。"""
+    import src.eastmoney_fetcher as emf
+
+    payload = {"result": {"data": []}}
+    monkeypatch.setattr(emf.requests, "get", lambda *a, **k: _FakeResp(payload))
+    assert emf.fetch_dividend_rows("600036") == []
+
+
+def test_assess_with_auto_fetch_empty_rows_no_failure_note(monkeypatch):
+    """注入 dividend_rows=[]（真无分红）→ 不置失败标记、不加失败 note。"""
+    from src import sustainability as sus
+
+    monkeypatch.setattr(sus, "fetch_price_change_1y", lambda code: None)
+    monkeypatch.setattr(sus, "fetch_top10_holding", lambda code: None)
+    result = sus.assess_with_auto_fetch(
+        stock_code="600900",
+        total_shares=1e9,
+        dividend_total=10e8,
+        dividend_yield_before_tax=5.0,
+        latest_dividend_year="2025",
+        industry="公用事业",
+        dividend_rows=[],          # 真无分红
+        financial_rows=_make_finance_rows(),
+    )
+    assert result.triggered is True
+    assert not any("分红历史数据获取失败" in n for n in result.notes)
+
+
+def test_assess_with_auto_fetch_failure_marks_note(monkeypatch):
+    """fetch_dividend_rows 返回 None（网络失败）→ 置失败标记 + note + history 缺失。"""
+    from src import sustainability as sus
+
+    monkeypatch.setattr(sus, "fetch_price_change_1y", lambda code: None)
+    monkeypatch.setattr(sus, "fetch_top10_holding", lambda code: None)
+    monkeypatch.setattr(sus, "fetch_dividend_rows", lambda code: None)  # 网络失败
+    result = sus.assess_with_auto_fetch(
+        stock_code="600900",
+        total_shares=1e9,
+        dividend_total=10e8,
+        dividend_yield_before_tax=5.0,
+        latest_dividend_year="2025",
+        industry="公用事业",
+        financial_rows=_make_finance_rows(),
+    )
+    assert result.triggered is True
+    assert any("分红历史数据获取失败" in n for n in result.notes)

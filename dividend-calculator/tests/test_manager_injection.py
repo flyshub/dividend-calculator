@@ -1,6 +1,8 @@
 """测试 DataSourceManager 依赖注入（消除全局单例泄漏）"""
 from unittest.mock import MagicMock
 
+import pytest
+
 from src.datasource import DataSourceManager
 from src.datasource.base import DataSource
 
@@ -29,6 +31,14 @@ class FakeSource(DataSource):
 
 class TestManagerInjection:
     """测试 sources 注入"""
+
+    @pytest.fixture(autouse=True)
+    def _clear_cross_check_cache(self):
+        """#44 L7：跨源验证结果按 stock_code 模块级缓存 60s——逐测试清空，
+        避免前一个测试（同为 600900）缓存的比对结论污染后续断言的 warnings。"""
+        from src.datasource import _cross_check_cache
+        _cross_check_cache.clear()
+        yield
 
     def test_default_sources_registered(self):
         """不传 sources 时，注册默认数据源"""

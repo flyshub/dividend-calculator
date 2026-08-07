@@ -3,7 +3,7 @@
 两套语义：
 - 除权月口径（utils.infer_fiscal_year）：财年归属，3-8月除权→上年年报
 - 报告期月口径（sustainability.parse_dividend_rows / dividend._parse_fhps_detail）：
-  报告期类型，12/3/4月→年报，6/9月→半年报
+  报告期类型，12月→年报，其余月份（3/4/6/9 等）→中期分配（#37 M4）
 
 差异来自**输入信号不同**（除权日 vs 报告期），非规则本身。本文件固化
 「正常场景一致」+「已知不一致场景」，防止未来被静默破坏。
@@ -41,16 +41,19 @@ class TestConsistentScenarios:
         assert _report_period_label(_rows_for_report_period("2025-12-31")) == "2025年报"
 
     def test_april_exdiv_with_mar_report(self):
-        """4月除权（→上年年报）× 报告期3-31（→上年年报）：一致"""
+        """4月除权（→上年年报）× 报告期3-31（→中期分配，非年报）
+
+        #37 M4 后 3 月报告期不再归年报：两套口径由此分叉（除权口径仍判上年年报）。
+        """
         fy = infer_fiscal_year(2026, 4)
         assert (fy.year, fy.is_annual) == (2025, True)
-        assert _report_period_label(_rows_for_report_period("2025-03-31")) == "2025年报"
+        assert _report_period_label(_rows_for_report_period("2025-03-31")) == "2025中期分配"
 
     def test_oct_exdiv_with_sep_report(self):
-        """10月除权（→当年中报）× 报告期6-30（→当年半年报）：语义一致（中报/半年报同义）"""
+        """10月除权（→当年中报）× 报告期6-30（→当年中期分配）：均为非年报，语义一致"""
         fy = infer_fiscal_year(2026, 10)
         assert (fy.year, fy.is_annual) == (2026, False)
-        assert _report_period_label(_rows_for_report_period("2026-06-30")) == "2026半年报"
+        assert _report_period_label(_rows_for_report_period("2026-06-30")) == "2026中期分配"
         # 两套口径都标记为非年报
         assert fy.is_annual is False
 
@@ -70,17 +73,17 @@ class TestKnownDivergence:
         assert fy.is_annual != True  # 中报 vs 年报，is_annual 不同
 
     def test_q1_special_dividend(self):
-        """Q1 特别分红：报告期 3-31（→年报）在 9-12 月除权（→当年中报）
+        """Q1 特别分红：报告期 3-31（→中期分配，非年报）在 9-12 月除权（→当年中报）
 
         A 股少数公司 Q1 即分红，真实存在的差异场景。
         """
-        assert _report_period_label(_rows_for_report_period("2025-03-31")) == "2025年报"
+        assert _report_period_label(_rows_for_report_period("2025-03-31")) == "2025中期分配"
         fy = infer_fiscal_year(2025, 10)  # 若除权在 10 月 → 2025中报
         assert (fy.year, fy.is_annual) == (2025, False)
 
     def test_midyear_special_dividend(self):
-        """年中特别分红：报告期 6-30（→半年报）在次年 4 月除权（→上年年报）"""
-        assert _report_period_label(_rows_for_report_period("2025-06-30")) == "2025半年报"
+        """年中特别分红：报告期 6-30（→中期分配，非年报）在次年 4 月除权（→上年年报）"""
+        assert _report_period_label(_rows_for_report_period("2025-06-30")) == "2025中期分配"
         fy = infer_fiscal_year(2026, 4)  # 次年4月除权 → 2025年报
         assert (fy.year, fy.is_annual) == (2025, True)
 
@@ -104,11 +107,11 @@ class TestReportPeriodConsistency:
         assert details[0].report_time == "2025年报"
         assert _report_period_label(_rows_for_report_period("2025-12-31")) == "2025年报"
 
-        # 6-30 → 半年报
+        # 6-30 → 中期分配
         df_half = pd.DataFrame([{
             "报告期": "2025-06-30", "方案进度": "实施",
             "现金分红-现金分红比例": 5.0,
         }])
         total2, year2, details2, _ = _parse_fhps_detail(df_half, stock_info)
-        assert details2[0].report_time == "2025半年报"
-        assert _report_period_label(_rows_for_report_period("2025-06-30")) == "2025半年报"
+        assert details2[0].report_time == "2025中期分配"
+        assert _report_period_label(_rows_for_report_period("2025-06-30")) == "2025中期分配"

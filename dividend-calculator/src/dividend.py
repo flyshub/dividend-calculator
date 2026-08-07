@@ -182,23 +182,12 @@ def _parse_fhps_detail(
         if dp10 != dp10 or dp10 <= 0:  # NaN check (NaN != NaN is True)
             continue
 
-        # 判断年报/中报：12月是年报，6月（或9月）是半年报
-        if m == 12 or m in (3, 4):
-            is_annual = True
-            label = f"{y}年报"
-            fiscal_year = y
-        elif m in (6, 9):
-            is_annual = False
-            label = f"{y}半年报"
-            fiscal_year = y
-        else:
-            # 特殊月份（1/2/5/7/8/10/11）报告期：防御性归为年报。
-            # 真实 A 股分红几乎不会落在这些报告期（年报分红在 12/3/4 月，
-            # 中报在 6/9 月）；与 JS calculator.js:64 同口径。
-            # 该行为已被 tests/test_regression_snapshot.py 锁定（#23）。
-            is_annual = True
-            label = f"{y}年报"
-            fiscal_year = y
+        # 判断年报/中报（#37 M4）：仅 12 月报告期是完整财年年报；
+        # 其余月份（3/4 月 Q1、6/9 月半年报）均为中期分配，不构成完整财年。
+        # 季度分红监管扩散下，防御性收紧为 month == 12（与 JS calculator.js 同步）。
+        is_annual = (m == 12)
+        label = f"{y}年报" if is_annual else f"{y}中期分配"
+        fiscal_year = y
 
         yearly[fiscal_year]['total'] += dp10
         yearly[fiscal_year]['has_annual'] = yearly[fiscal_year]['has_annual'] or is_annual

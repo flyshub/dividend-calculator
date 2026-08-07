@@ -6,6 +6,7 @@ get_dividend_history: mootdx xdxr（尚未提取到 adapter）
 get_historical_data: 月度价格 + 分红记录聚合（尚未提取到 adapter）
 """
 import logging
+import math
 from typing import Optional
 
 import requests
@@ -184,7 +185,8 @@ def _get_all_dividend_records(stock_code: str) -> list:
                         continue
 
                     fenhong = round(float(row.get('fenhong', 0) or 0), 4)
-                    if fenhong <= 0:
+                    # NaN 防护（#34 M1）：NaN <= 0 为 False 会穿透导致 json.dumps 输出非法 JSON
+                    if math.isnan(fenhong) or fenhong <= 0:
                         continue
 
                     ex_div_date = f"{y:04d}-{m:02d}-{d:02d}"
@@ -205,7 +207,8 @@ def _get_all_dividend_records(stock_code: str) -> list:
 
     # 降级：东财分红明细（与 site/js datasources.js 同源）
     try:
-        from .sustainability import fetch_dividend_rows, parse_dividend_rows
+        from .eastmoney_fetcher import fetch_dividend_rows
+        from .sustainability import parse_dividend_rows
         rows = fetch_dividend_rows(stock_code)
         records, _ = parse_dividend_rows(rows)
         records.sort(key=lambda r: r.ex_dividend_date or "")

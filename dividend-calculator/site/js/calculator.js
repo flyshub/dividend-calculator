@@ -60,9 +60,9 @@
       if (!m) continue;
       var y = parseInt(m[1], 10);
       var month = parseInt(m[2], 10);
-      /* 与 Python 一致: 12/3/4月为年报，6/9月为半年报，其余月份也按年报 */
-      var isAnnual = !(month === 6 || month === 9);
-      var label = isAnnual ? (y + '年报') : (y + '半年报');
+      /* 与 Python 一致: 仅12月为年报（完整财年），3/6/9月为中期分配 */
+      var isAnnual = (month === 12);
+      var label = isAnnual ? (y + '年报') : (y + '中期分配');
 
       if (!yearly[y]) yearly[y] = { total: 0, hasAnnual: false, details: [] };
       yearly[y].total += dp10;
@@ -141,6 +141,18 @@
     Object.keys(yearly).forEach(function (y) {
       yearAmount[y] = (yearly[y].total / 10.0) * totalShares;
     });
+    /* 仅年报记录参与 ever_cut（#39）：yearly[y].details 含 {report_time, dividend_per_10}，
+     * report_time 为 'YYYY年报'/'YYYY半年报'（注意 '半年报' 含 '年报' 子串，需双重判断）。
+     * 半年报混入会掩盖相邻年降幅（如 2025 年报 8 元 + 半年报 3 元被当作 11 元）。 */
+    var annualAmount = {};
+    Object.keys(yearly).forEach(function (y) {
+      var sum10 = 0;
+      (yearly[y].details || []).forEach(function (d) {
+        var t = String(d.report_time || '');
+        if (t.indexOf('年报') !== -1 && t.indexOf('半年报') === -1) sum10 += Number(d.dividend_per_10) || 0;
+      });
+      annualAmount[y] = (sum10 / 10.0) * totalShares;
+    });
     var yearsSorted = Object.keys(yearAmount).map(Number).sort(function (a, b) { return b - a; });
     if (!yearsSorted.length) {
       return { consecutive_years: 0, ever_cut: false, latest_year_amount: null, history_mean_amount: null };
@@ -166,20 +178,21 @@
       recent3.forEach(function (y) { s3 += yearAmount[y]; });
       history3yMean = s3 / recent3.length;
     }
-    /* 曾削减：近 CUT_WINDOW_YEARS 年窗口（含最新财年）内相邻年降幅 > 30%（对齐 Python aggregate_dividend_history） */
-    /* 注意用 baseYear（最新财年，含 fallback）而非 tgt——tgt 在 consecutive 计数时已被递减 */
+    /* 曾削减：近 CUT_WINDOW_YEARS 年窗口（含最新财年）内相邻年降幅 > 30%（对齐 Python aggregate_dividend_history）。
+     * 仅年报金额参与比较（#39）。注意用 baseYear（最新财年，含 fallback）而非 tgt——tgt 在 consecutive 计数时已被递减 */
     var windowStart = baseYear - (SUS_CUT_WINDOW_YEARS - 1);
-    var asc = yearsSorted.slice().sort(function (a, b) { return a - b; }).map(String);
+    var annualAsc = Object.keys(annualAmount).map(Number).sort(function (a, b) { return a - b; });
     var everCut = false;
-    for (var i = 1; i < asc.length; i++) {
-      var prevY = asc[i - 1], curY = asc[i];
-      if (parseInt(curY, 10) < windowStart) continue; /* 仅检查窗口内相邻年 */
-      var prev = yearAmount[prevY], cur = yearAmount[curY];
+    for (var i = 1; i < annualAsc.length; i++) {
+      var prevY = annualAsc[i - 1], curY = annualAsc[i];
+      if (curY < windowStart) continue; /* 仅检查窗口内相邻年 */
+      var prev = annualAmount[String(prevY)], cur = annualAmount[String(curY)];
       if (prev > 0 && cur < prev * 0.7) { everCut = true; break; }
     }
     return {
       consecutive_years: consecutive, ever_cut: everCut,
-      latest_year_amount: yearAmount[String(yearsSorted[0])] || null,
+      /* #35: 用 baseYear（最新有年报年，含 fallback，与 Python target_year 语义一致）而非最大年份 */
+      latest_year_amount: yearAmount[String(baseYear)] || null,
       history_mean_amount: historyMean,
       history_3y_mean: history3yMean,
     };
@@ -679,7 +692,7 @@
     result.metrics.free_cash_flow = fcf;
     result.metrics.fcf_coverage = fcfCoverage;
     result.metrics.cf_coverage = cfCoverage;
-    result.metrics.debt_ratio = (fin.debt_ratio != null) ? fin.debt_ratio : _debtRatioDecimal(fin);
+    result.metrics.debt_ratio = _debtRatioDecimal(fin);
     result.metrics.interest_coverage = fin.interest_coverage;
     result.metrics.roe_latest = fin.roe;
     result.metrics.net_profit = fin.net_profit;
@@ -737,8 +750,10 @@
       return result;
     }
     result.score = Math.round(score * 1000) / 1000;
-    /* 0-2 映射 0-100（×50，阈值1.5/1.0→75/50），对齐 Python _score_to_100 */
-    result.score_100 = Math.round(score * 50 * 10) / 10;
+    /* 0-2 映射 0-100（×50，阈值1.5/1.0→75/50），对齐 Python _score_to_100。
+     * #36: 基于已舍入的 result.score 计算（Python 为 round(score,3) 后 _score_to_100），
+     * 用未舍入 score 会差 0.1（score=1.2346 → Python 61.8 / 旧 JS 61.7） */
+    result.score_100 = Math.round(result.score * 50 * 10) / 10;
 
     /* Layer 3：情境红旗 → 降一档 */
     result.warning_flags = checkWarningFlags(fin, history, cls.isCyclical,

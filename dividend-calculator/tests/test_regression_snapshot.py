@@ -106,14 +106,14 @@ class TestFiscalYearGroupingSnapshot:
         assert details[0].report_time == "2024年报"
         assert details[0].dividend_per_10 == 5.0
 
-    def test_special_month_grouped_as_annual(self):
-        """特殊月份（3月）报告期分红 → 归年报（锁定当前行为，与 JS calculator.js:64 对齐）。"""
+    def test_special_month_grouped_as_interim(self):
+        """特殊月份（3月）报告期分红 → 归中期分配（#37 M4：仅 12 月为完整财年年报）。"""
         df = pd.DataFrame([
             {"报告期": "2025-03-31", "方案进度": "实施", "现金分红-现金分红比例": 3.0},
         ])
         total, year, details, _ = _parse_fhps_detail(df, self._info())
-        assert year == "2025"
-        assert details[0].report_time == "2025年报"  # 特殊月份归年报（防御分支）
+        assert year == "2025"  # 无年报时回退到最新有数据的财年
+        assert details[0].report_time == "2025中期分配"  # 3 月归中期分配，非年报
 
     def test_quarterly_accumulated_grouping(self):
         """Q1+中报+Q3 同财年累加：2024-03-31 + 2024-06-30 + 2024-09-30 归 2024 财年。"""
@@ -124,8 +124,9 @@ class TestFiscalYearGroupingSnapshot:
         ])
         total, year, details, _ = _parse_fhps_detail(df, self._info())
         assert year == "2024"
-        # 3条明细，同财年累加
+        # 3条明细，同财年累加；均为中期分配（非年报）
         assert len(details) == 3
+        assert all(d.report_time == "2024中期分配" for d in details)
         assert sum(d.dividend_per_10 for d in details) == pytest.approx(4.5)
 
 

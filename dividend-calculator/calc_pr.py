@@ -166,7 +166,7 @@ def _format_metrics_lines(metrics: dict) -> list:
         ("payout_ratio", "股利支付率", lambda v: f"{v*100:.1f}%"),
         ("cf_coverage", "现金流覆盖", lambda v: f"{v:.2f}x"),
         ("fcf_coverage", "自由现金流覆盖", lambda v: f"{v:.2f}x"),
-        ("debt_ratio", "资产负债率", lambda v: f"{v:.1f}%"),
+        ("debt_ratio", "资产负债率", lambda v: f"{v*100:.1f}%"),
         ("interest_coverage", "利息保障倍数", lambda v: f"{v:.2f}x"),
         ("roe_latest", "ROE(最新)", lambda v: f"{v:.2f}%"),
         ("net_profit_yoy", "净利润同比", lambda v: f"{v:.1f}%"),

@@ -6,6 +6,7 @@
   腾讯行情（HTTP）    → PE_TTM/PB/总股本（已验证准确）
 """
 import logging
+import time
 from typing import Optional, List, Tuple
 
 from .base import StockInfo, DividendDetail, DataSource
@@ -14,6 +15,12 @@ logger = logging.getLogger(__name__)
 from .mootdx_source import MootdxSource
 from .sina_source import SinaSource
 from .tencent_source import TencentSource
+
+# 跨源交叉验证结果缓存（#44 L7）：key=stock_code → (monotonic 时间戳, 比对结果)。
+# _cross_check 在 get_stock_info 主链路同步调用 mootdx quotes+finance，较慢；
+# 60s TTL 内复用比对结论（price/shares diff 是否已产生 warning），避免重复网络调用。
+_cross_check_cache: dict = {}
+_CROSS_CHECK_TTL = 60.0
 
 
 class DataSourceManager:
@@ -70,9 +77,18 @@ class DataSourceManager:
 
         主源为 tencent/sina 时，best-effort 用 mootdx 取 price + zongguben 比对，
         相对差超阈值追加 StockInfo.warnings。所有异常只跳过不抛（非阻塞）。
+        结果按 stock_code 缓存 60s（#44 L7）：warnings 是**实例属性**，TTL 内命中时
+        必须把缓存的比对结论重放到当次新建的 StockInfo 实例，不能只跳过——否则
+        第二次调用响应会丢失跨源不一致告警（行为回归）。
         """
         if primary_name == "mootdx":
             return  # 主源已是 mootdx，无独立第二源
+        now = time.monotonic()
+        cached = _cross_check_cache.get(stock_code)
+        if cached is not None and now - cached[0] < _CROSS_CHECK_TTL:
+            info.warnings.extend(cached[1])  # 重放缓存的比对结论（幂等：同一代码同一 TTL 内只比对一次）
+            return
+        found: List[str] = []
         try:
             from .mootdx_source import get_quotes_client
             client = get_quotes_client()
@@ -91,19 +107,21 @@ class DataSourceManager:
             if m_price > 0 and info.current_price > 0:
                 rel = abs(m_price - info.current_price) / info.current_price
                 if rel > self.PRICE_DIFF_THRESHOLD:
-                    info.warnings.append(
+                    found.append(
                         f"价格跨源不一致: {primary_name}={info.current_price:.2f}, "
                         f"mootdx={m_price:.2f}（相对差 {rel*100:.1f}%，可能为行情时差）"
                     )
             if m_shares is not None and m_shares > 0 and info.total_shares > 0:
                 rel = abs(m_shares - info.total_shares) / info.total_shares
                 if rel > self.SHARES_DIFF_THRESHOLD:
-                    info.warnings.append(
+                    found.append(
                         f"总股本跨源不一致: {primary_name}={info.total_shares:.0f}, "
                         f"mootdx={m_shares:.0f}"
                     )
+            _cross_check_cache[stock_code] = (now, found)  # #44 L7：仅成功比对后缓存
         except Exception as e:
             logger.debug("跨源交叉验证跳过 %s: %s", stock_code, e)
+        info.warnings.extend(found)
 
     def get_latest_dividend(
         self,

@@ -6,6 +6,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
 const Calc = require(path.join(__dirname, 'calculator.js'));
+const DS = require(path.join(__dirname, 'datasources.js'));
 
 function round2(v) { return Math.round(v * 100) / 100; }
 
@@ -119,18 +120,20 @@ test('parseDividendRecords 排除预披露', () => {
   assert.equal(r.year, '2024');
   assert.equal(r.totalDividend, 3 / 10 * 1000);
 });
-test('parseDividendRecords 非标月份(5/7/8/10/11)按年报', () => {
-  // 对齐 _parse_fhps_detail: 6/9月为半年报，其余月份均为年报
+test('parseDividendRecords 仅12月为年报，3/6/9月为中期分配 (#37)', () => {
+  // 对齐 Python: 仅 REPORT_DATE 12月为年报（完整财年），3/6/9月等为中期分配
   const rows = [
-    { REPORT_DATE: '2025-07-31 00:00:00', PRETAX_BONUS_RMB: 4, ASSIGN_PROGRESS: '实施分配' },
+    { REPORT_DATE: '2025-12-31 00:00:00', PRETAX_BONUS_RMB: 4, ASSIGN_PROGRESS: '实施分配' },
     { REPORT_DATE: '2025-06-30 00:00:00', PRETAX_BONUS_RMB: 2, ASSIGN_PROGRESS: '实施分配' },
     { REPORT_DATE: '2025-09-30 00:00:00', PRETAX_BONUS_RMB: 1, ASSIGN_PROGRESS: '实施分配' },
+    { REPORT_DATE: '2025-03-31 00:00:00', PRETAX_BONUS_RMB: 3, ASSIGN_PROGRESS: '实施分配' },
   ];
   const r = Calc.parseDividendRecords(rows, 1000);
   assert.equal(r.year, '2025');
-  // 07月(年报) + 06月(半年报) + 09月(半年报) → 财年 2025 有年报
+  // 仅 12月(年报)，6/9/3月均为中期分配 → 财年 2025 有年报
   assert.equal(r.details.filter(d => d.report_time === '2025年报').length, 1);
-  assert.equal(r.totalDividend, (4 + 2 + 1) / 10 * 1000);
+  assert.equal(r.details.filter(d => d.report_time === '2025中期分配').length, 3);
+  assert.equal(r.totalDividend, (4 + 2 + 1 + 3) / 10 * 1000);
 });
 test('parseDividendRecords 无分红', () => {
   const r = Calc.parseDividendRecords([], 1000);
@@ -258,6 +261,26 @@ test('assessSustainability 银行走金融分支', () => {
   assert.ok(r.score >= 1.5);
 });
 
+test('assessSustainability score_100 基于已舍入 score 计算 (#36)', () => {
+  // 银行分支 3 项专项 (2,2,1) → 原始 score=5/3≈1.6667
+  // 旧实现用未舍入 score: Math.round(1.6667*500)/10 = 83.3；
+  // 新实现基于 round(score,3)=1.667: Math.round(1.667*500)/10 = 83.4（对齐 Python _score_to_100）
+  const fin = {
+    year: 2025, net_profit: 1500e8, net_profit_yoy: 1.5,
+    operating_cf: 4514e8, investing_cf: null,
+    total_assets: 12e12, total_liabilities: 11e12, debt_ratio: 87.8,
+    interest_debt_ratio: null, interest_coverage: null, roe: 14.0,
+    capital_adequacy_ratio: 16.5, net_interest_margin: 1.87, npl_ratio: 1.5, provision_coverage: null,
+  };
+  const r = Calc.assessSustainability({
+    dividend_yield_before_tax: 5.0, dividend_total: 350e8,
+    latest: fin, history: { consecutive_years: 12, ever_cut: false, latest_year_amount: 350e8, history_mean_amount: 340e8 },
+    industry: '银行',
+  });
+  assert.equal(r.score, 1.667);    // round(5/3, 3)
+  assert.equal(r.score_100, 83.4); // 由已舍入 score 映射，非原始 score
+});
+
 test('assessSustainability 财务缺失→不可持续', () => {
   const r = Calc.assessSustainability({
     dividend_yield_before_tax: 5.0, dividend_total: 214e8,
@@ -323,10 +346,13 @@ test('explainSustainability 未触发→空数组', () => {
 /* ── aggregateDividendHistory（对齐 Python aggregate_dividend_history，近10年窗口） ── */
 
 function yearlyFromYearAmount(obj) {
-  /* {year: dp10值} → _aggregateDividendHistory 期望的 yearly 结构 */
+  /* {year: dp10值} → _aggregateDividendHistory 期望的 yearly 结构（默认视为年报记录） */
   const yearly = {};
   Object.keys(obj).forEach(function (y) {
-    yearly[y] = { total: obj[y] * 10.0 }; /* total 是每10股，内部 /10 * shares */
+    yearly[y] = {
+      total: obj[y] * 10.0, /* total 是每10股，内部 /10 * shares */
+      details: [{ report_time: y + '年报', dividend_per_10: obj[y] * 10.0 }],
+    };
   });
   return yearly;
 }
@@ -351,4 +377,162 @@ test('aggregateDividendHistory 削减落在窗口首年计入 ever_cut', () => {
   for (let y = 2014; y <= 2025; y++) amt[y] = (y === 2016 ? 2.0 : 5.0); /* 2016 削减，跨立窗口起点 2016 */
   const h = Calc.aggregateDividendHistory(yearlyFromYearAmount(amt), '2025', 1e9);
   assert.equal(h.ever_cut, true);
+});
+
+test('aggregateDividendHistory latest_year_amount 用 target_year 而非最大年份 (#35)', () => {
+  // 2026 仅半年报、2025 有年报 → target_year=2025，latest_year_amount 取 2025 年报额而非 2026 半年报额
+  const yearly = {
+    2026: { total: 30, details: [{ report_time: '2026中期分配', dividend_per_10: 30 }] },
+    2025: { total: 80, details: [{ report_time: '2025年报', dividend_per_10: 80 }] },
+    2024: { total: 100, details: [{ report_time: '2024年报', dividend_per_10: 100 }] },
+  };
+  const h = Calc.aggregateDividendHistory(yearly, '2025', 1e9);
+  assert.equal(h.latest_year_amount, (80 / 10) * 1e9);
+});
+
+test('aggregateDividendHistory ever_cut 仅年报参与，半年报混入不误报 (#39)', () => {
+  // 2024年报10元 + 2025年报8元 + 2025半年报3元：年报降幅 8/10=0.8 ≥ 0.7 → 无削减
+  const yearly = {
+    2025: { total: 110, details: [
+      { report_time: '2025年报', dividend_per_10: 80 },
+      { report_time: '2025中期分配', dividend_per_10: 30 },
+    ] },
+    2024: { total: 100, details: [{ report_time: '2024年报', dividend_per_10: 100 }] },
+  };
+  const h = Calc.aggregateDividendHistory(yearly, '2025', 1e9);
+  assert.equal(h.ever_cut, false);
+});
+
+test('aggregateDividendHistory ever_cut 年报降幅>30% 计入 (#39)', () => {
+  // 2024年报10元 + 2025年报6元：6 < 10×0.7 → 削减
+  const yearly = {
+    2025: { total: 60, details: [{ report_time: '2025年报', dividend_per_10: 60 }] },
+    2024: { total: 100, details: [{ report_time: '2024年报', dividend_per_10: 100 }] },
+  };
+  const h = Calc.aggregateDividendHistory(yearly, '2025', 1e9);
+  assert.equal(h.ever_cut, true);
+});
+
+test('aggregateDividendHistory ever_cut 半年报不得掩盖真实削减 (#39)', () => {
+  // 2024年报10元 + 2025年报6元 + 2025半年报5元：含半年报看 2025=11元 似无削减，
+  // 仅年报口径 6 < 10×0.7 → 仍应判削减
+  const yearly = {
+    2025: { total: 110, details: [
+      { report_time: '2025年报', dividend_per_10: 60 },
+      { report_time: '2025半年报', dividend_per_10: 50 },
+    ] },
+    2024: { total: 100, details: [{ report_time: '2024年报', dividend_per_10: 100 }] },
+  };
+  const h = Calc.aggregateDividendHistory(yearly, '2025', 1e9);
+  assert.equal(h.ever_cut, true);
+});
+
+/* ── datasources.js 数据源函数（#40，mock 全局 fetch 直测）── */
+
+function mockFetch(jsonResult) {
+  const orig = global.fetch;
+  global.fetch = function () {
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(jsonResult) });
+  };
+  return orig;
+}
+
+test('fetchPriceChange1y 用窗口首尾收盘价计算一年涨跌 (#40)', async () => {
+  // 模拟实测：请求 250 根返回 251 根，rows[0] 约 1 年前，末行最新
+  const rows = [];
+  for (let i = 0; i < 250; i++) rows.push(['2025-07-28', '42.424', '42.424', '42.424', '42.424']);
+  rows[0][2] = '42.424';              // 窗口起点（约 1 年前）
+  rows[rows.length - 1][2] = '38.80'; // 最新收盘
+  const orig = mockFetch({ data: { sh600000: { qfqday: rows } } });
+  try {
+    const v = await DS.fetchPriceChange1y('600000');
+    assert.ok(Math.abs(v - (38.80 - 42.424) / 42.424) < 1e-9, `实际 ${v}`);
+    assert.ok(v < 0); // 下跌 → 被动高股息红旗可达（-30% 阈值非死代码）
+  } finally {
+    global.fetch = orig;
+  }
+});
+
+test('fetchPriceChange1y 数据不足/非法返回 null (#40)', async () => {
+  const cases = [
+    { data: { sh600000: { qfqday: [] } } },                              // 空数组
+    { data: { sh600000: { qfqday: [['2026-08-07', '38', '38']] } } },    // 单根
+    { data: { sh600000: { qfqday: [['2025-07-28', '0', '0'], ['2026-08-07', '38', '38']] } } }, // past<=0
+    { data: {} },                                                        // 无节点
+    null,                                                                // 响应异常 → catch → null
+  ];
+  for (const c of cases) {
+    const orig = mockFetch(c);
+    try {
+      assert.equal(await DS.fetchPriceChange1y('600000'), null);
+    } finally {
+      global.fetch = orig;
+    }
+  }
+});
+
+test('fetchPriceChange1y 前缀 sh/bj/sz (#40)', async () => {
+  const urls = [];
+  const orig = global.fetch;
+  global.fetch = function (url) {
+    urls.push(url);
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: {} }) });
+  };
+  try {
+    await DS.fetchPriceChange1y('600000');
+    await DS.fetchPriceChange1y('920001');
+    await DS.fetchPriceChange1y('000001');
+    assert.ok(urls[0].includes('sh600000'));
+    assert.ok(urls[1].includes('bj920001'));
+    assert.ok(urls[2].includes('sz000001'));
+  } finally {
+    global.fetch = orig;
+  }
+});
+
+test('fetchTop10Holding 百分数求和转小数 (#40)', async () => {
+  const orig = mockFetch({ result: { data: [
+    { HOLD_NUM_RATIO: 12.5 }, { HOLD_NUM_RATIO: 8.2 }, { HOLD_NUM_RATIO: '3.30' },
+  ] } });
+  try {
+    const v = await DS.fetchTop10Holding('600000');
+    assert.equal(v, (12.5 + 8.2 + 3.3) / 100);
+  } finally {
+    global.fetch = orig;
+  }
+});
+
+test('fetchTop10Holding 空数据/全空值返回 null (#40)', async () => {
+  const cases = [
+    { result: { data: [] } },                                            // 空数据
+    { result: { data: [{ HOLD_NUM_RATIO: null }, { HOLD_NUM_RATIO: '--' }] } }, // 全空值 → sum=0
+    {},                                                                    // 无 result
+  ];
+  for (const c of cases) {
+    const orig = mockFetch(c);
+    try {
+      assert.equal(await DS.fetchTop10Holding('600000'), null);
+    } finally {
+      global.fetch = orig;
+    }
+  }
+});
+
+test('fetchTop10Holding 后缀 SH/BJ/SZ (#40)', async () => {
+  const urls = [];
+  const orig = global.fetch;
+  global.fetch = function (url) {
+    urls.push(url);
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ result: { data: [] } }) });
+  };
+  try {
+    await DS.fetchTop10Holding('600000');
+    await DS.fetchTop10Holding('920001');
+    await DS.fetchTop10Holding('000001');
+    assert.ok(urls[0].includes('600000.SH'));
+    assert.ok(urls[1].includes('920001.BJ'));
+    assert.ok(urls[2].includes('000001.SZ'));
+  } finally {
+    global.fetch = orig;
+  }
 });
