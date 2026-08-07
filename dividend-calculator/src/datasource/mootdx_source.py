@@ -9,6 +9,7 @@ mootdx 数据源适配器 — 基于通达信协议（pytdx）
 通达信协议是二进制协议，全球可用，不依赖东方财富服务器。
 """
 import logging
+import math
 import re
 from typing import Optional, List, Tuple, Dict
 from collections import OrderedDict
@@ -167,7 +168,7 @@ class MootdxSource:
                 continue
 
             fenhong = round(float(row.get('fenhong', 0) or 0), 4)
-            if fenhong <= 0:
+            if math.isnan(fenhong) or fenhong <= 0:
                 continue
 
             result = infer_fiscal_year(y, m)
