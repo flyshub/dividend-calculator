@@ -343,6 +343,12 @@
         <div id="dividend-source" class="value" style="font-size:16px;"></div>
       </div>
 
+      <div class="result-card full" id="ttm-card">
+        <div class="label">TTM 股息率（近12个月实际派发）</div>
+        <div id="ttm-yield" class="value yield"></div>
+        <div id="ttm-period" class="note" style="margin-top:4px;font-size:12px;"></div>
+      </div>
+
       <div class="result-card full">
         <div class="label">分红明细</div>
         <table>
@@ -372,6 +378,7 @@
           <div class="result-card" style="flex:1;min-width:120px;">
             <div class="label">综合评分</div>
             <div id="sus-score" class="value" style="font-size:18px;"></div>
+            <div id="sus-score-100" class="note" style="margin-top:2px;font-size:12px;"></div>
           </div>
           <div class="result-card" style="flex:1;min-width:120px;">
             <div class="label">判断分支</div>
@@ -812,6 +819,17 @@
       document.getElementById('market-cap').textContent = formatRmbYi(data.total_market_cap);
       document.getElementById('total-dividend').textContent = formatRmbYi(data.total_dividend);
       document.getElementById('dividend-source').textContent = data.dividend_source || '未知';
+      // TTM 股息率（#19）：近12个月实际派发
+      const ttmCard = document.getElementById('ttm-card');
+      const ttmYieldEl = document.getElementById('ttm-yield');
+      const ttmPeriodEl = document.getElementById('ttm-period');
+      if (data.dividend_yield_ttm_before_tax != null) {
+        ttmYieldEl.textContent = formatPercent(data.dividend_yield_ttm_before_tax);
+        ttmPeriodEl.textContent = '期间 ' + (data.ttm_period || '') + ' | 来源 ' + (data.ttm_source || '');
+        ttmCard.classList.remove('hidden');
+      } else {
+        ttmCard.classList.add('hidden');
+      }
       document.getElementById('explanation').textContent = data.explanation || '';
       document.getElementById('no-dividend-warning').classList.toggle('hidden', data.has_dividend);
 
@@ -913,6 +931,7 @@
       verdictEl.textContent = s.verdict;
       verdictEl.style.color = SUS_VERDICT_COLOR[s.verdict] || '#666';
       document.getElementById('sus-score').textContent = s.score == null ? '评分不足' : (Number(s.score).toFixed(2) + ' / 2.0');
+      document.getElementById('sus-score-100').textContent = s.score_100 == null ? '' : ('评分 ' + Number(s.score_100).toFixed(1) + ' / 100');
       const branchMap = { finance: '银行/保险专项', 'general-fallback': '通用（银行专项缺失）', general: '通用六维' };
       document.getElementById('sus-branch').textContent = branchMap[s.branch] || s.branch;
       document.getElementById('sus-explanation').textContent = (s.explanation || []).join('\n');

@@ -341,6 +341,12 @@
         <div id="no-dividend-warning" class="warning hidden">当前结果没有有效分红数据，请以计算说明为准。</div>
       </div>
 
+      <div class="result-card full" id="ttm-card">
+        <div class="label">TTM 股息率（近12个月实际派发）</div>
+        <div id="ttm-yield" class="value yield"></div>
+        <div id="ttm-period" class="note" style="margin-top:4px;font-size:12px;"></div>
+      </div>
+
       <div class="result-card full">
         <div class="label">分红明细</div>
         <table>
@@ -370,6 +376,7 @@
           <div class="result-card" style="flex:1;min-width:120px;">
             <div class="label">综合评分</div>
             <div id="sus-score" class="value" style="font-size:18px;"></div>
+            <div id="sus-score-100" class="note" style="margin-top:2px;font-size:12px;"></div>
           </div>
           <div class="result-card" style="flex:1;min-width:120px;">
             <div class="label">判断分支</div>
@@ -882,6 +889,7 @@
       verdictEl.style.color = SUS_VERDICT_COLOR[s.verdict] || '#666';
 
       document.getElementById('sus-score').textContent = s.score == null ? '评分不足' : (s.score.toFixed(2) + ' / 2.0');
+      document.getElementById('sus-score-100').textContent = s.score_100 == null ? '' : ('评分 ' + Number(s.score_100).toFixed(1) + ' / 100');
       const branchMap = { finance: '银行/保险专项', 'general-fallback': '通用（银行专项缺失）', general: '通用六维' };
       document.getElementById('sus-branch').textContent = branchMap[s.branch] || s.branch;
 
@@ -940,6 +948,15 @@
       document.getElementById('total-shares').textContent = formatSharesYi(si.total_shares);
       document.getElementById('market-cap').textContent = formatRmbYi(di.total_market_cap);
       document.getElementById('total-dividend').textContent = formatRmbYi(di.total_dividend);
+      /* TTM 股息率（#19）：近12个月实际派发 */
+      var ttmCard = document.getElementById('ttm-card');
+      if (di.dividend_yield_ttm_before_tax != null) {
+        document.getElementById('ttm-yield').textContent = formatPercent(di.dividend_yield_ttm_before_tax);
+        document.getElementById('ttm-period').textContent = '期间 ' + (di.ttm_period || '') + ' | 来源 ' + (di.ttm_source || '');
+        ttmCard.classList.remove('hidden');
+      } else {
+        ttmCard.classList.add('hidden');
+      }
       document.getElementById('explanation').textContent = di.explanation || '';
       document.getElementById('no-dividend-warning').classList.toggle('hidden', di.has_dividend);
 
