@@ -156,6 +156,7 @@ class SustainabilityResult:
     branch: str = "general"                  # general / finance
     notes: List[str] = field(default_factory=list)  # 缺失数据说明
     latest_annual_year: Optional[int] = None  # 最新年报财年（数据新鲜度判定用，#13）
+    score_100: Optional[float] = None  # 加权总分映射 0~100（score×50，便于排序筛选，#20）
 
 
 # ---------------------------------------------------------------------------
@@ -625,6 +626,7 @@ def assess_sustainability(*,
         )
     if result.fatal_flags:
         result.score = 0.0
+        result.score_100 = 0.0  # 致命红旗 → 0 分（#20）
         return result
 
     if score is None:
@@ -634,6 +636,9 @@ def assess_sustainability(*,
         return result
 
     result.score = round(score, 3)
+    # 0-2 线性映射到 0-100：阈值 1.5(可持续)/1.0(偏弱) 对应 75/50。
+    # 与三档 verdict 天然对齐；将来调阈值需同步调 50 系数（#20）。
+    result.score_100 = _score_to_100(result.score)
 
     # Layer 3：情境红旗 → 降一档（银行跳过证监会画像，T7）
     result.warning_flags = check_warning_flags(
@@ -651,6 +656,11 @@ def assess_sustainability(*,
 def _r1(v: float) -> float:
     """1 位小数 half-up（对齐 JS Math.round(v*10)/10）"""
     return math.floor(v * 10 + 0.5) / 10
+
+
+def _score_to_100(score: float) -> float:
+    """0-2 加权分映射到 0-100（score×50）。显式 half-up，对齐 JS Math.round（#20）。"""
+    return math.floor(score * 50 * 10 + 0.5) / 10
 
 
 def _staleness_note(latest_annual_year: int, current_year: int) -> Optional[str]:

@@ -32,6 +32,7 @@ def serialize_sustainability(result: SustainabilityResult) -> dict:
         "triggered": result.triggered,
         "verdict": result.verdict,
         "score": result.score,
+        "score_100": result.score_100,
         "fatal_flags": list(result.fatal_flags),
         "warning_flags": list(result.warning_flags),
         "dimension_scores": dict(result.dimension_scores),
