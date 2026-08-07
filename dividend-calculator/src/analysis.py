@@ -44,7 +44,7 @@ def run_stock_analysis(stock_input: str) -> Optional[StockAnalysisResult]:
         return None
 
     stock_code = stock_info.stock_code
-    dividend_total, dividend_year, _, _ = get_latest_full_year_dividend(stock_code, stock_info)
+    dividend_total, dividend_year, _, _, _ = get_latest_full_year_dividend(stock_code, stock_info)
 
     pr_result = calculate_pr(
         stock_code=stock_code,

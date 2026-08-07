@@ -339,6 +339,11 @@
       </div>
 
       <div class="result-card full">
+        <div class="label">分红数据来源</div>
+        <div id="dividend-source" class="value" style="font-size:16px;"></div>
+      </div>
+
+      <div class="result-card full">
         <div class="label">分红明细</div>
         <table>
           <thead>
@@ -806,6 +811,7 @@
       document.getElementById('total-shares').textContent = formatSharesYi(data.total_shares);
       document.getElementById('market-cap').textContent = formatRmbYi(data.total_market_cap);
       document.getElementById('total-dividend').textContent = formatRmbYi(data.total_dividend);
+      document.getElementById('dividend-source').textContent = data.dividend_source || '未知';
       document.getElementById('explanation').textContent = data.explanation || '';
       document.getElementById('no-dividend-warning').classList.toggle('hidden', data.has_dividend);
 

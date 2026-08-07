@@ -33,6 +33,7 @@ class DividendResult:
     dividend_details: List[DividendDetail]
     explanation: str
     warnings: List[str] = field(default_factory=list)  # 数据完整性软校验（审查 #4）
+    dividend_source: str = ""  # 分红数据来源（mootdx / akshare fhps_detail_em / akshare cninfo，#16）
 
 
 def calculate_dividend_yield(
@@ -72,7 +73,7 @@ def get_latest_full_year_dividend(
         total_div, year, details, expl = manager.get_latest_dividend(stock_code, stock_info)
         if total_div > 0:
             logger.info("通过数据源管理器获取分红数据成功: %s %s年", stock_code, year)
-            return total_div, year, details, expl
+            return total_div, year, details, expl, "mootdx"
     except Exception as e:
         logger.debug("数据源管理器（mootdx）获取分红失败: %s", e)
 
@@ -84,7 +85,7 @@ def get_latest_full_year_dividend(
             total_div, year, details, expl = _parse_fhps_detail(fhps_df, stock_info)
             if total_div > 0:
                 logger.info("通过akshare fhps_detail_em获取分红数据成功: %s %s年", stock_code, year)
-                return total_div, year, details, expl
+                return total_div, year, details, expl, "akshare fhps_detail_em"
     except Exception as e:
         logger.debug("akshare fhps_detail_em 获取分红失败: %s", e)
 
@@ -101,11 +102,11 @@ def get_latest_full_year_dividend(
             )
             if total_div > 0:
                 logger.info("通过akshare cninfo获取分红数据成功: %s %s年", stock_code, year)
-                return total_div, year, details, expl
+                return total_div, year, details, expl, "akshare cninfo"
     except Exception as e:
         logger.debug("akshare cninfo 获取分红失败: %s", e)
 
-    return 0.0, None, [], "所有数据源都无法获取分红数据"
+    return 0.0, None, [], "所有数据源都无法获取分红数据", "无"
 
 
 def _parse_fhps_detail(
@@ -252,8 +253,8 @@ def calculate_true_dividend_yield(
         stock_code = stock_info.stock_code
         total_market_cap = stock_info.current_price * stock_info.total_shares
 
-        total_dividend, latest_year, dividend_details, dividend_explanation = (
-            _dividend(stock_code, stock_info)
+        total_dividend, latest_year, dividend_details, dividend_explanation, dividend_source = (
+            _unwrap_dividend_result(_dividend(stock_code, stock_info))
         )
 
         if total_dividend <= 0:
@@ -303,6 +304,7 @@ def calculate_true_dividend_yield(
             dividend_details=dividend_details,
             explanation=explanation,
             warnings=list(stock_info.warnings) + _yield_warnings(dividend_yield_before_tax),
+            dividend_source=dividend_source,
         )
 
     except Exception as e:
@@ -314,3 +316,13 @@ def _yield_warnings(yield_before_tax: Optional[float]) -> List[str]:
     """股息率越界软校验（审查 #4），返回 warning 列表。"""
     w = check_dividend_yield(yield_before_tax)
     return [w] if w else []
+
+
+def _unwrap_dividend_result(result: Tuple) -> Tuple[float, Optional[str], List[DividendDetail], str, str]:
+    """解包分红结果，兼容 4 元（DI fake）与 5 元（含 dividend_source）返回。
+
+    返回 (total_dividend, year, details, explanation, source)。
+    """
+    if len(result) == 5:
+        return result
+    return result[0], result[1], result[2], result[3], ""
