@@ -588,6 +588,7 @@ def assess_sustainability(*,
         result.metrics["missing_weight_ratio"] = missing_ratio
     result.dimension_scores = {k: (v if v is not None else 0) for k, v in dim_scores.items()}
     result.metrics["consecutive_dividend_years"] = float(history.consecutive_years)
+    result.metrics["ever_cut"] = 1.0 if history.ever_cut else 0.0
 
     # Layer 1：致命红旗（维度分已算好，否决时仍展示）
     result.fatal_flags = check_fatal_flags(
@@ -674,8 +675,13 @@ def _weak_dim_text(k: str, s: int, m: dict) -> Optional[str]:
     if k == "dividend_history":
         if m.get("consecutive_dividend_years") is None:
             return None
-        return (f"连续分红 {int(m['consecutive_dividend_years'])} 年" +
-                ("，历史较短" if s == 0 else "，尚不算长期稳定"))
+        # 0 分可能来自"近10年内曾削减"或"连续年数过短"，文案按原因区分（s==0 时）
+        if s == 0:
+            if m.get("ever_cut"):
+                return (f"连续分红 {int(m['consecutive_dividend_years'])} 年，但近 10 年内曾削减分红，"
+                        "历史稳定性存疑")
+            return f"连续分红仅 {int(m['consecutive_dividend_years'])} 年，历史较短"
+        return f"连续分红 {int(m['consecutive_dividend_years'])} 年，尚不算长期稳定"
     if k == "industry":
         if s == 0:
             return "属强周期行业，盈利随景气波动大，高分红难年年保证"

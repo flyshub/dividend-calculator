@@ -319,3 +319,29 @@ test('explainSustainability 未触发→空数组', () => {
   assert.deepStrictEqual(Calc.explainSustainability(null), []);
   assert.deepStrictEqual(Calc.explainSustainability({ triggered: false, verdict: '未评估' }), []);
 });
+
+/* ── aggregateDividendHistory（对齐 Python aggregate_dividend_history，近10年窗口） ── */
+
+function yearlyFromYearAmount(obj) {
+  /* {year: dp10值} → _aggregateDividendHistory 期望的 yearly 结构 */
+  const yearly = {};
+  Object.keys(obj).forEach(function (y) {
+    yearly[y] = { total: obj[y] * 10.0, details: [], has_annual: true }; /* total 是每10股，内部 /10 * shares */
+  });
+  return yearly;
+}
+
+test('aggregateDividendHistory 窗口外削减不计入 ever_cut', () => {
+  const amt = {};
+  for (let y = 2012; y <= 2025; y++) amt[y] = (y === 2014 ? 2.0 : 5.0); /* 2014 削减，窗口外 */
+  const h = Calc.aggregateDividendHistory(yearlyFromYearAmount(amt), '2025', 1e9);
+  assert.equal(h.consecutive_years, 14);
+  assert.equal(h.ever_cut, false);
+});
+
+test('aggregateDividendHistory 窗口内削减计入 ever_cut', () => {
+  const amt = {};
+  for (let y = 2015; y <= 2025; y++) amt[y] = (y === 2023 ? 2.0 : 5.0); /* 2023 削减，窗口内 */
+  const h = Calc.aggregateDividendHistory(yearlyFromYearAmount(amt), '2025', 1e9);
+  assert.equal(h.ever_cut, true);
+});

@@ -131,11 +131,15 @@
       recent3.forEach(function (y) { s3 += yearAmount[y]; });
       history3yMean = s3 / recent3.length;
     }
-    /* 曾削减：相邻年降幅 > 30% */
+    /* 曾削减：近10年窗口（含最新财年）内相邻年降幅 > 30%（对齐 Python aggregate_dividend_history） */
+    /* 注意用 tgtInt（最新财年）而非 tgt——tgt 在 consecutive 计数时已被递减 */
+    var windowStart = tgtInt - 9;
     var asc = yearsSorted.slice().sort(function (a, b) { return a - b; }).map(String);
     var everCut = false;
     for (var i = 1; i < asc.length; i++) {
-      var prev = yearAmount[asc[i - 1]], cur = yearAmount[asc[i]];
+      var prevY = asc[i - 1], curY = asc[i];
+      if (parseInt(curY, 10) < windowStart) continue; /* 仅检查窗口内相邻年 */
+      var prev = yearAmount[prevY], cur = yearAmount[curY];
       if (prev > 0 && cur < prev * 0.7) { everCut = true; break; }
     }
     return {
@@ -666,6 +670,7 @@
     Object.keys(dimScores).forEach(function (k) { if (dimScores[k] == null) dimScores[k] = 0; });
     result.dimension_scores = dimScores;
     result.metrics.consecutive_dividend_years = history.consecutive_years;
+    result.metrics.ever_cut = history.ever_cut ? 1 : 0;
 
     /* Layer 1：致命红旗（维度分已算好，否决时仍展示）*/
     result.fatal_flags = checkFatalFlags(payoutRatio, fcfCoverage, fin.operating_cf, fin.net_profit, dividendTotal, cls.isBank);
@@ -726,8 +731,14 @@
           (s === 0 ? '，负债偏高，财务压力大' : '，负债水平一般');
       case 'dividend_history':
         if (m.consecutive_dividend_years == null) return null;
-        return '连续分红 ' + parseInt(m.consecutive_dividend_years) + ' 年' +
-          (s === 0 ? '，历史较短' : '，尚不算长期稳定');
+        /* 0 分可能来自"近10年内曾削减"或"连续年数过短"，文案按原因区分（s===0 时） */
+        if (s === 0) {
+          if (m.ever_cut) {
+            return '连续分红 ' + parseInt(m.consecutive_dividend_years) + ' 年，但近 10 年内曾削减分红，历史稳定性存疑';
+          }
+          return '连续分红仅 ' + parseInt(m.consecutive_dividend_years) + ' 年，历史较短';
+        }
+        return '连续分红 ' + parseInt(m.consecutive_dividend_years) + ' 年，尚不算长期稳定';
       case 'industry':
         if (s === 0) return '属强周期行业，盈利随景气波动大，高分红难年年保证';
         return null; // 中性行业不赘述
@@ -859,6 +870,7 @@
     computePr: computePr,
     assessSustainability: assessSustainability,
     explainSustainability: explainSustainability,
+    aggregateDividendHistory: _aggregateDividendHistory,
     round2: round2,
     CYCLICAL_INDUSTRIES: CYCLICAL_INDUSTRIES,
     TECH_INDUSTRIES: TECH_INDUSTRIES,

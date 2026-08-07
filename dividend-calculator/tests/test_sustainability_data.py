@@ -138,7 +138,18 @@ def test_aggregate_consecutive_years():
 def test_aggregate_detects_cut():
     total_shares = 1e9
     h = aggregate_dividend_history(_div_records(), "2025", total_shares)
-    assert h.ever_cut is True  # 2023 削减
+    assert h.ever_cut is True  # 2023 削减（近 10 年窗口内）
+
+
+def test_aggregate_cut_outside_10y_window_ignored():
+    """10 年窗口之外的削减不计入 ever_cut（如伊利 2014 年波动不影响 2016~2025 连涨）。"""
+    recs = []
+    for y in range(2012, 2026):
+        dp10 = 2.0 if y == 2014 else 5.0  # 2014 削减（5→2，降幅60%），但在窗口外
+        recs.append(DividendRecord(f"{y}-07-01", dp10, f"{y}年报"))
+    h = aggregate_dividend_history(recs, "2025", 1e9)
+    assert h.consecutive_years == 14  # 2012~2025 连续
+    assert h.ever_cut is False  # 窗口外削减不计入
 
 
 def test_aggregate_latest_and_mean():

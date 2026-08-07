@@ -265,9 +265,16 @@ def aggregate_dividend_history(records: List[DividendRecord],
         history_3y_mean = sum(year_amount[yy] for yy in recent3) / len(recent3)
 
     ever_cut = False
+    # 近 10 年窗口（含最新财年）内相邻年分红降幅 > 30% 视为曾削减。
+    # 10 年以上久远的波动（如行业早期调整）对当前分红可持续性无参考价值，
+    # 避免连年提升分红的股票（如伊利 2016~2025 逐年递增）被早期低基数误判。
+    window_start = int(target_year) - 9
     asc = sorted(year_amount.keys())
     for i in range(1, len(asc)):
-        prev, cur = year_amount[asc[i - 1]], year_amount[asc[i]]
+        prev_y, cur_y = asc[i - 1], asc[i]
+        if int(cur_y) < window_start:
+            continue  # 仅检查窗口内相邻年
+        prev, cur = year_amount[prev_y], year_amount[cur_y]
         if prev > 0 and cur < prev * 0.7:
             ever_cut = True
             break
