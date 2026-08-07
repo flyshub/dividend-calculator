@@ -735,8 +735,16 @@
           (s === 0 ? '，利润几乎全拿去分红了' : '，分红比例偏高');
       case 'profitability':
         if (m.roe_latest == null) return null;
-        return '盈利稳定性：ROE ' + _r2(m.roe_latest).toFixed(2) + '%、净利润同比 ' + _yoyStr(m.net_profit_yoy == null ? 0 : m.net_profit_yoy) +
-          (s === 0 ? '，盈利在下滑，分红难持续' : '，盈利一般');
+        var yoy = m.net_profit_yoy;
+        var roe = m.roe_latest;
+        /* 0 分可能来自 ROE 过低（<10%）、利润同比下滑、或两者兼有；文案按真实成因区分 */
+        if (s === 0) {
+          if (yoy != null && yoy < 0) {
+            return '盈利稳定性：ROE ' + _r2(roe).toFixed(2) + '%、净利润同比 ' + _yoyStr(yoy) + '，盈利在下滑，分红难持续';
+          }
+          return '盈利稳定性：ROE ' + _r2(roe).toFixed(2) + '%（偏低）、净利润同比 ' + _yoyStr(yoy == null ? 0 : yoy) + '，盈利基础薄弱，分红承压';
+        }
+        return '盈利稳定性：ROE ' + _r2(roe).toFixed(2) + '%、净利润同比 ' + _yoyStr(yoy == null ? 0 : yoy) + '，盈利一般';
       case 'balance_sheet':
         if (m.debt_ratio == null) return null;
         return '资产负债率 ' + _pct1(m.debt_ratio) + '%' +

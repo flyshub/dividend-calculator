@@ -701,8 +701,16 @@ def _weak_dim_text(k: str, s: int, m: dict) -> Optional[str]:
         if m.get("roe_latest") is None:
             return None
         yoy = m.get("net_profit_yoy")
-        return (f"盈利稳定性：ROE {_r2(m['roe_latest']):.2f}%、净利润同比 {_yoy_str(0 if yoy is None else yoy)}" +
-                ("，盈利在下滑，分红难持续" if s == 0 else "，盈利一般"))
+        roe = m["roe_latest"]
+        # 0 分可能来自 ROE 过低（<10%）、利润同比下滑、或两者兼有；文案按真实成因区分
+        if s == 0:
+            if yoy is not None and yoy < 0:
+                return (f"盈利稳定性：ROE {_r2(roe):.2f}%、净利润同比 {_yoy_str(yoy)}，"
+                        "盈利在下滑，分红难持续")
+            return (f"盈利稳定性：ROE {_r2(roe):.2f}%（偏低）、净利润同比 {_yoy_str(0 if yoy is None else yoy)}，"
+                    "盈利基础薄弱，分红承压")
+        return (f"盈利稳定性：ROE {_r2(roe):.2f}%、净利润同比 {_yoy_str(0 if yoy is None else yoy)}，"
+                "盈利一般")
     if k == "balance_sheet":
         if m.get("debt_ratio") is None:
             return None
