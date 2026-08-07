@@ -363,6 +363,54 @@ def test_missing_financial_data():
     assert any("缺少财务数据" in f for f in result.fatal_flags)
 
 
+def test_data_staleness_note_fresh_year():
+    """最新年报为当前年前一年 → 无 stale note（A 股正常披露节奏）。"""
+    fin = _healthy_financial()  # year=2025
+    result = assess_sustainability(
+        dividend_yield_before_tax=5.0,
+        dividend_total=214e8,
+        latest=fin,
+        history=DividendHistory(consecutive_years=10, ever_cut=False,
+                                latest_year_amount=214e8, history_mean_amount=200e8),
+        industry="公用事业",
+        current_year=2026,
+    )
+    assert result.latest_annual_year == 2025
+    assert not any("18 个月" in n for n in result.notes)
+
+
+def test_data_staleness_note_stale_year():
+    """最新年报停在 2 年前 → stale note（超 18 个月未更新）。"""
+    fin = _healthy_financial()
+    fin.year = 2023  # 模拟停更在 2023 年报
+    result = assess_sustainability(
+        dividend_yield_before_tax=5.0,
+        dividend_total=214e8,
+        latest=fin,
+        history=DividendHistory(consecutive_years=10, ever_cut=False,
+                                latest_year_amount=214e8, history_mean_amount=200e8),
+        industry="公用事业",
+        current_year=2026,
+    )
+    assert result.latest_annual_year == 2023
+    assert any("18 个月" in n for n in result.notes)
+
+
+def test_staleness_note_current_year_none():
+    """current_year 未传时不判 stale（向后兼容，不影响既有调用）。"""
+    fin = _healthy_financial()
+    fin.year = 2020
+    result = assess_sustainability(
+        dividend_yield_before_tax=5.0,
+        dividend_total=214e8,
+        latest=fin,
+        history=DividendHistory(consecutive_years=10, ever_cut=False,
+                                latest_year_amount=214e8, history_mean_amount=200e8),
+        industry="公用事业",
+    )
+    assert not any("18 个月" in n for n in result.notes)
+
+
 def test_weak_cf_coverage_lowers_score():
     """经营现金流覆盖偏低 → 偏弱档。"""
     fin = _healthy_financial()

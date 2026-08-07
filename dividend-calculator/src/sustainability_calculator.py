@@ -155,6 +155,7 @@ class SustainabilityResult:
     metrics: Dict[str, Optional[float]] = field(default_factory=dict)  # 支撑数据
     branch: str = "general"                  # general / finance
     notes: List[str] = field(default_factory=list)  # 缺失数据说明
+    latest_annual_year: Optional[int] = None  # 最新年报财年（数据新鲜度判定用，#13）
 
 
 # ---------------------------------------------------------------------------
@@ -518,7 +519,8 @@ def assess_sustainability(*,
                           industry: str = "",
                           price_change_1y: Optional[float] = None,
                           top10_holding: Optional[float] = None,
-                          roe_series: Optional[List[float]] = None) -> SustainabilityResult:
+                          roe_series: Optional[List[float]] = None,
+                          current_year: Optional[int] = None) -> SustainabilityResult:
     """股息可持续性主评估入口（纯函数）。
 
     Args:
@@ -530,6 +532,7 @@ def assess_sustainability(*,
         price_change_1y: 近1年股价涨跌幅（小数，如 -0.3）
         top10_holding: 前十大股东合计持股比例（小数，如 0.6）
         roe_series: 多年 ROE 序列（百分数，最新在前），用于稳定性判断
+        current_year: 当前年份，用于数据新鲜度判定（#13）；None 时不判 stale
     """
     # 未达触发阈值 → 不评估
     if dividend_yield_before_tax is None or dividend_yield_before_tax <= THRESHOLD_YIELD:
@@ -549,6 +552,13 @@ def assess_sustainability(*,
         result.notes.append("财务数据缺失，无法评估可持续性")
         result.fatal_flags.append("缺少财务数据，无法判断分红是否可持续")
         return result
+
+    # 数据新鲜度判定（#13）：标注而非改判
+    result.latest_annual_year = latest.year
+    if current_year is not None:
+        stale_note = _staleness_note(latest.year, current_year)
+        if stale_note:
+            result.notes.append(stale_note)
 
     # 衍生指标（封装为 DerivedMetrics，避免在各 check 函数间重复传同一组值）
     metrics = DerivedMetrics.from_inputs(latest, dividend_total)
@@ -641,6 +651,19 @@ def assess_sustainability(*,
 def _r1(v: float) -> float:
     """1 位小数 half-up（对齐 JS Math.round(v*10)/10）"""
     return math.floor(v * 10 + 0.5) / 10
+
+
+def _staleness_note(latest_annual_year: int, current_year: int) -> Optional[str]:
+    """数据新鲜度判定（#13）：最新年报财年比当前年早 1 年以上 → 陈旧。
+
+    A 股年报法定披露截止次年 4 月 30 日：当前 2026 年时正常最新年报 = 2025
+    （2026-04 前披露）；若停在 2024 或更早 → 超 18 个月未更新，标注时效有限。
+    仅标注不改判（陈旧可能是公司真实状态，静默改结论违反数据铁律）。
+    """
+    if latest_annual_year < current_year - 1:
+        return (f"财务数据截至 {latest_annual_year} 年报，已超过 18 个月未更新，"
+                "结论时效性有限")
+    return None
 
 
 def _r2(v: float) -> float:

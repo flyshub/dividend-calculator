@@ -621,6 +621,15 @@
       return result;
     }
 
+    /* 数据新鲜度判定（#13）：标注而非改判，对齐 Python _staleness_note */
+    result.latest_annual_year = fin.year != null ? fin.year : null;
+    if (result.latest_annual_year != null) {
+      var nowYear = new Date().getFullYear();
+      if (result.latest_annual_year < nowYear - 1) {
+        result.notes.push('财务数据截至 ' + result.latest_annual_year + ' 年报，已超过 18 个月未更新，结论时效性有限');
+      }
+    }
+
     var dividendTotal = opts.dividend_total;
     // 合并现金流量表资本开支（修正 FCF 口径）
     if (opts.cashflow_rows) mergeCapex(fin, opts.cashflow_rows);

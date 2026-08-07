@@ -16,6 +16,7 @@
 import dataclasses
 import logging
 import re
+from datetime import datetime
 from typing import List, Optional, Tuple
 
 import requests
@@ -407,6 +408,7 @@ def assess_for_stock(*,
         industry=industry,
         price_change_1y=price_change_1y,
         top10_holding=top10_holding,
+        current_year=datetime.now().year,
     )
 
 
