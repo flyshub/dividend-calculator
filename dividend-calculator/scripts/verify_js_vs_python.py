@@ -49,10 +49,30 @@ FIELDS_STR = ["dividend_year", "valuation_zone", "pr_warning", "industry", "is_l
 
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
+# GitHub Actions runner 位于海外，东财 datacenter 偶发限流超时（CLAUDE.md 已知坑）
+# 统一 3 次退避重试 + 30s 读取超时，吸收瞬时网络抖动，避免 CI 假红
+import requests.adapters
+from urllib3.util.retry import Retry
+
+_HTTP = requests.Session()
+_HTTP.headers.update(UA)
+_HTTP.mount(
+    "https://",
+    requests.adapters.HTTPAdapter(
+        max_retries=Retry(total=3, connect=3, read=3, backoff_factor=1.0,
+                          status_forcelist=[500, 502, 503, 504]),
+    ),
+)
+
+
+def _get(url: str, **kwargs) -> requests.Response:
+    kwargs.setdefault("timeout", (5, 30))
+    return _HTTP.get(url, **kwargs)
+
 
 def fetch_tencent_quote(code: str) -> dict:
     prefix = "sh" if code.startswith("6") else "sz"
-    r = requests.get(f"https://qt.gtimg.cn/q={prefix}{code}", headers=UA, timeout=15)
+    r = _get(f"https://qt.gtimg.cn/q={prefix}{code}")
     r.encoding = "gbk"
     import re
     m = re.search(r'"([^"]+)"', r.text)
@@ -82,7 +102,7 @@ def fetch_dividend_rows(code: str) -> list:
     url = ("https://datacenter-web.eastmoney.com/api/data/v1/get?sortColumns=REPORT_DATE&sortTypes=-1"
            f"&pageSize=100&pageNumber=1&reportName=RPT_SHAREBONUS_DET&columns=ALL"
            f'&filter=(SECURITY_CODE%3D%22{code}%22)')
-    r = requests.get(url, headers=UA, timeout=15)
+    r = _get(url)
     d = r.json()
     return (d.get("result") or {}).get("data") or []
 
@@ -92,7 +112,7 @@ def fetch_financial_rows(code: str) -> list:
     url = ("https://datacenter.eastmoney.com/api/data/v1/get?sortColumns=REPORT_DATE&sortTypes=-1"
            f"&pageSize=100&pageNumber=1&reportName=RPT_F10_FINANCE_MAINFINADATA&columns=ALL"
            f'&filter=(SECUCODE%3D%22{code}{market}%22)')
-    r = requests.get(url, headers=UA, timeout=15)
+    r = _get(url)
     d = r.json()
     return (d.get("result") or {}).get("data") or []
 
@@ -101,7 +121,7 @@ def fetch_industry(code: str) -> str:
     market = ".SH" if code.startswith("6") else ".SZ"
     url = ("https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_F10_BASIC_ORGINFO"
            f"&columns=ALL&filter=(SECUCODE%3D%22{code}{market}%22)")
-    r = requests.get(url, headers=UA, timeout=15)
+    r = _get(url)
     d = r.json()
     rows = (d.get("result") or {}).get("data") or []
     if not rows:
@@ -114,7 +134,7 @@ def fetch_cashflow_rows(code: str) -> list:
     url = ("https://datacenter.eastmoney.com/api/data/v1/get?sortColumns=REPORT_DATE&sortTypes=-1"
            f"&pageSize=100&pageNumber=1&reportName=RPT_F10_FINANCE_GCASHFLOW&columns=ALL"
            f'&filter=(SECUCODE%3D%22{code}{market}%22)')
-    r = requests.get(url, headers=UA, timeout=15)
+    r = _get(url)
     d = r.json()
     return (d.get("result") or {}).get("data") or []
 
