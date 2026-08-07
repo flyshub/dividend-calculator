@@ -3,7 +3,7 @@
 **A 股真实股息率 + 市赚率（Graham Number）计算工具**：用「总额法」算真实股息率，用「PE/ROE」算市赚率。Python CLI / 本地 Web / 纯前端 GitHub Pages 三形态，共享同一套计算口径与数据铁律。
 
 [![Python](https://img.shields.io/badge/Python-3.9%2B-blue)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](#-许可证)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPLv3-blue.svg)](#-许可证)
 [![GitHub Pages](https://img.shields.io/badge/GitHub%20Pages-online-brightgreen)](https://flyshub.github.io/dividend-calculator/)
 [![Tests](https://img.shields.io/badge/Tests-221%20Python%20%2B%2070%20JS-green)](dividend-calculator/tests/)
 
@@ -220,4 +220,4 @@ A: 净利润 ≤0 的股票被标记为亏损股，市赚率不适用。
 
 ## 📝 许可证
 
-[MIT](https://github.com/flyshub/dividend-calculator/blob/main/LICENSE) © flyshub
+[GPL-3.0](https://github.com/flyshub/dividend-calculator/blob/main/LICENSE) © flyshub
