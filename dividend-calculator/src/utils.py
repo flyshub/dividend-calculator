@@ -316,3 +316,48 @@ def parse_dividend_df(
     )
 
     return total_dividend, str(int(target_year)), dividend_details, explanation
+
+
+def compute_ttm_dividend(
+    records: List["DividendRecord"],
+    total_shares: float,
+    as_of_date=None,
+) -> Tuple[Optional[float], Optional[str], Optional[str], int]:
+    """TTM 股息率口径（#19）：近 12 个月（按除权除息日）实际派发现金分红总额。
+
+    Args:
+        records: 分红记录列表（含 ex_dividend_date YYYY-MM-DD）
+        total_shares: 总股本（元股）
+        as_of_date: 计算基准日（默认今天）；用于测试注入固定日期
+
+    Returns:
+        (ttm_total_div, period_start, period_end, count)
+        - ttm_total_div: TTM 现金分红总额（元）；无记录返回 None
+        - period_start/end: TTM 期间（YYYY-MM-DD）
+        - count: 参与计算的派息次数
+    """
+    from datetime import date, timedelta
+    from .datasource.base import DividendRecord  # noqa: F401 类型引用
+
+    as_of = as_of_date or date.today()
+    cutoff = as_of - timedelta(days=365)
+
+    total_per_10 = 0.0
+    count = 0
+    for rec in records:
+        ex_date = getattr(rec, "ex_dividend_date", None)
+        if not ex_date:
+            continue
+        try:
+            d = date.fromisoformat(str(ex_date)[:10])
+        except ValueError:
+            continue
+        if cutoff < d <= as_of:
+            total_per_10 += float(rec.dividend_per_10)
+            count += 1
+
+    if count == 0:
+        return None, None, None, 0
+
+    ttm_total = total_per_10 / 10.0 * total_shares
+    return ttm_total, cutoff.isoformat(), as_of.isoformat(), count

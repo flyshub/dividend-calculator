@@ -101,6 +101,40 @@
     };
   }
 
+  /* TTM 股息率（#19）：近 12 个月（按除权除息日）实际派发现金分红。
+   * 对齐 Python utils.compute_ttm_dividend。返回 {ttm_dividend, period, count, source} */
+  function computeTtmDividend(rows, totalShares, asOfDate) {
+    var now = asOfDate || new Date();
+    var cutoff = new Date(now.getTime() - 365 * 24 * 3600 * 1000);
+    var totalPer10 = 0.0, count = 0;
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      /* T5：仅保留已实施分红（对齐 parseDividendRecords），排除预案/预披露 */
+      var progress = String(row.ASSIGN_PROGRESS || '');
+      if (progress.indexOf('实施') === -1 || progress.indexOf('未实施') !== -1) continue;
+      var dp10 = Number(row.PRETAX_BONUS_RMB);
+      if (!(dp10 > 0)) continue;
+      var ex = row.EX_DIVIDEND_DATE || row.ex_dividend_date;
+      if (!ex) continue;
+      var d = new Date(String(ex).slice(0, 10) + 'T00:00:00');
+      if (isNaN(d.getTime())) continue;
+      if (d > cutoff && d <= now) {
+        totalPer10 += dp10;
+        count++;
+      }
+    }
+    if (!count) return { ttm_dividend: null, period: null, count: 0, source: '无' };
+    var fmt = function (x) {
+      return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0');
+    };
+    return {
+      ttm_dividend: totalPer10 / 10.0 * totalShares,
+      period: fmt(cutoff) + '~' + fmt(now),
+      count: count,
+      source: '东财',
+    };
+  }
+
   /* 按财年聚合 → {consecutive_years, ever_cut, latest_year_amount, history_mean_amount} */
   function _aggregateDividendHistory(yearly, targetYear, totalShares) {
     var yearAmount = {};
@@ -692,6 +726,7 @@
     }
     if (result.fatal_flags.length) {
       result.score = 0.0;
+      result.score_100 = 0.0;  /* 致命红旗 → 0 分（对齐 Python #20） */
       return result;
     }
 
@@ -702,6 +737,8 @@
       return result;
     }
     result.score = Math.round(score * 1000) / 1000;
+    /* 0-2 映射 0-100（×50，阈值1.5/1.0→75/50），对齐 Python _score_to_100 */
+    result.score_100 = Math.round(score * 50 * 10) / 10;
 
     /* Layer 3：情境红旗 → 降一档 */
     result.warning_flags = checkWarningFlags(fin, history, cls.isCyclical,
@@ -880,6 +917,7 @@
     reportTime: reportTime,
     calculateDividendYield: calculateDividendYield,
     parseDividendRecords: parseDividendRecords,
+    computeTtmDividend: computeTtmDividend,
     parseFinancials: parseFinancials,
     computeBasicPR: computeBasicPR,
     computeCorrectedPR: computeCorrectedPR,

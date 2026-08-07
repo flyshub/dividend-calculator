@@ -27,9 +27,10 @@ FIELDS_NUMERIC = [
     "current_price", "total_shares", "pe_ttm", "pb",
     "total_dividend", "dividend_yield_before_tax",
     "dividend_yield_after_tax_10", "dividend_yield_after_tax_20",
+    "ttm_dividend", "dividend_yield_ttm_before_tax",
     "pr_basic", "pr_corrected", "pr_pb", "payout_ratio", "n_factor",
     "roe_latest", "roe_5y_median", "net_profit_latest_period", "net_profit_annual",
-    "sustainability_triggered", "sustainability_score",
+    "sustainability_triggered", "sustainability_score", "sustainability_score_100",
     # 衍生指标拍平（来自 sustainability.metrics）——防止双端在 FCF/coverage 公式上发散
     # 却恰好落入同一 verdict/score 档、bug 被掩盖
     "sustainability_cf_coverage", "sustainability_fcf_coverage",
@@ -38,7 +39,8 @@ FIELDS_NUMERIC = [
     "sustainability_payout_ratio",
 ]
 FIELDS_STR = ["dividend_year", "valuation_zone", "pr_warning", "industry", "is_loss_stock", "explanation",
-              "sustainability_verdict", "sustainability_explanation"]
+              "sustainability_verdict", "sustainability_explanation",
+              "ttm_period", "ttm_source"]
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +159,25 @@ def compute_python(raw: dict) -> dict:
     ])
     total_div, year, details, expl = _parse_fhps_detail(df, stock_info)
 
+    # 1b. TTM 口径（#19）：从东财行按除权日算近12个月派发，与 JS computeTtmDividend 同口径
+    from src.utils import compute_ttm_dividend
+    from src.datasource.base import DividendRecord as _DR
+    ttm_records = []
+    for r in raw["dividend_rows"]:
+        progress = str(r.get("ASSIGN_PROGRESS") or "")
+        if "实施" not in progress or "未实施" in progress:
+            continue
+        dp10 = r.get("PRETAX_BONUS_RMB")
+        if dp10 is None or dp10 <= 0:
+            continue
+        ex = str(r.get("EX_DIVIDEND_DATE") or "")
+        if not ex:
+            continue
+        ttm_records.append(_DR(ex_dividend_date=ex[:10], dividend_per_10=float(dp10), report_time=""))
+    ttm_total, ttm_start, ttm_end, ttm_count = compute_ttm_dividend(ttm_records, total_shares)
+    ttm_yield = (ttm_total / (quote["price"] * total_shares) * 100) if ttm_total is not None and quote["price"] > 0 else None
+    ttm_period = f"{ttm_start}~{ttm_end}" if ttm_start else None
+
     # 2. 财务：从东财行计算 ROE / 净利润（与 JS parseFinancials 相同算法）
     fin = _parse_financials(raw["financial_rows"])
 
@@ -224,6 +245,10 @@ def compute_python(raw: dict) -> dict:
         "dividend_yield_after_tax_10": yld * 0.9,
         "dividend_yield_after_tax_20": yld * 0.8,
         "explanation": expl,
+        "ttm_dividend": ttm_total,
+        "dividend_yield_ttm_before_tax": ttm_yield,
+        "ttm_period": ttm_period,
+        "ttm_source": "东财" if ttm_total is not None else "无",
         "pr_basic": pr_basic,
         "pr_corrected": pr_corrected,
         "pr_pb": pr_pb,
@@ -240,6 +265,7 @@ def compute_python(raw: dict) -> dict:
         "sustainability_triggered": sus_triggered,
         "sustainability_verdict": sus_verdict,
         "sustainability_score": sus_score,
+        "sustainability_score_100": sus.score_100 if sus else None,
     }
     # 衍生指标拍平（sus 可能为 None，对应字段也为 None，双端一致）
     sus_m = sus.metrics if sus else {}

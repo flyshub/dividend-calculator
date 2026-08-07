@@ -51,6 +51,7 @@
     var totalShares = quote.total_shares || quote.a_shares || 0;
 
     var div = Calculator.parseDividendRecords(dividendRows, totalShares);
+    var ttm = Calculator.computeTtmDividend(dividendRows, totalShares);
     var totalMarketCap = quote.price * totalShares;
     var yields = Calculator.calculateDividendYield(div.totalDividend, totalMarketCap);
 
@@ -107,6 +108,12 @@
         dividend_yield_after_tax_10: yields[1],
         dividend_yield_after_tax_20: yields[2],
         total_market_cap: totalMarketCap,
+        /* TTM 口径（#19）：近 12 个月实际派发，与主口径并行 */
+        ttm_dividend: ttm.ttm_dividend,
+        dividend_yield_ttm_before_tax: ttm.ttm_dividend != null && totalMarketCap > 0
+          ? ttm.ttm_dividend / totalMarketCap * 100 : null,
+        ttm_period: ttm.period,
+        ttm_source: ttm.source,
       },
       pr: {
         pr_basic: pr.pr_basic,

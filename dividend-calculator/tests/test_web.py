@@ -81,6 +81,7 @@ def test_serialize_result_all_fields_present():
         "dividend_yield_after_tax", "dividend_yield_after_tax_20",
         "latest_year", "has_dividend", "dividend_details", "explanation",
         "warnings", "dividend_source",
+        "ttm_dividend", "dividend_yield_ttm_before_tax", "ttm_period", "ttm_source",
     }
     assert set(data.keys()) == expected_keys
 

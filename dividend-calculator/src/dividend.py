@@ -11,7 +11,7 @@ from .datasource.validation import check_dividend_yield
 from .api import get_stock_info
 from .tencent_quote import fetch_tencent_quote
 from .datasource import get_data_source_manager
-from .utils import get_stock_list_cache, extract_dividend_per_10, parse_dividend_df
+from .utils import get_stock_list_cache, extract_dividend_per_10, parse_dividend_df, compute_ttm_dividend
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -34,6 +34,11 @@ class DividendResult:
     explanation: str
     warnings: List[str] = field(default_factory=list)  # 数据完整性软校验（审查 #4）
     dividend_source: str = ""  # 分红数据来源（mootdx / akshare fhps_detail_em / akshare cninfo，#16）
+    # TTM 口径（近12个月实际派发，#19）：与主口径（最近完整财年）并行，纯增量
+    ttm_dividend: Optional[float] = None            # TTM 现金分红总额（元）
+    dividend_yield_ttm_before_tax: Optional[float] = None  # TTM 税前股息率（%）
+    ttm_period: Optional[str] = None                # TTM 期间 "起-止"（YYYY-MM-DD）
+    ttm_source: str = ""                            # TTM 数据来源（mootdx xdxr / 东财）
 
 
 def calculate_dividend_yield(
@@ -109,6 +114,32 @@ def get_latest_full_year_dividend(
     return 0.0, None, [], "所有数据源都无法获取分红数据", "无"
 
 
+def get_ttm_dividend(
+    stock_code: str, stock_info: StockInfo
+) -> Tuple[Optional[float], Optional[str], Optional[str], str]:
+    """TTM 股息率口径（#19）：近 12 个月实际派发现金分红总额。
+
+    复用 api._get_all_dividend_records（mootdx xdxr → 东财 RPT_SHAREBONUS_DET，
+    含除权除息日）。失败返回 (None, None, None, '无')，绝不抛出。
+
+    Returns:
+        (ttm_total_div, period, count_note, source)
+    """
+    try:
+        from .api import _get_all_dividend_records
+        records = _get_all_dividend_records(stock_code)
+        if not records:
+            return None, None, None, "无"
+        ttm_total, start, end, count = compute_ttm_dividend(records, stock_info.total_shares)
+        if ttm_total is None:
+            return None, None, None, "无"
+        period = f"{start}~{end}" if start and end else None
+        return ttm_total, period, f"{count}次派息", "mootdx xdxr"
+    except Exception as e:
+        logger.debug("TTM 分红获取失败 %s: %s", stock_code, e)
+        return None, None, None, "无"
+
+
 def _parse_fhps_detail(
     fhps_df: pd.DataFrame, stock_info: StockInfo
 ) -> Tuple[float, Optional[str], List[DividendDetail], str]:
@@ -161,7 +192,10 @@ def _parse_fhps_detail(
             label = f"{y}半年报"
             fiscal_year = y
         else:
-            # 特殊月份：判断为年报
+            # 特殊月份（1/2/5/7/8/10/11）报告期：防御性归为年报。
+            # 真实 A 股分红几乎不会落在这些报告期（年报分红在 12/3/4 月，
+            # 中报在 6/9 月）；与 JS calculator.js:64 同口径。
+            # 该行为已被 tests/test_regression_snapshot.py 锁定（#23）。
             is_annual = True
             label = f"{y}年报"
             fiscal_year = y
@@ -231,6 +265,9 @@ def calculate_true_dividend_yield(
     dividend_provider: Optional[
         Callable[[str, StockInfo], Tuple[float, Optional[str], List[DividendDetail], str, str]]
     ] = None,
+    ttm_dividend_provider: Optional[
+        Callable[[str, StockInfo], Tuple[Optional[float], Optional[str], Optional[str], str]]
+    ] = None,
 ) -> Optional[DividendResult]:
     """
     计算真实股息率。
@@ -240,9 +277,12 @@ def calculate_true_dividend_yield(
         stock_info_provider: 股票信息获取函数（不传则使用默认 get_stock_info）
         dividend_provider: 分红数据获取函数（不传则使用默认 DataSourceManager）
             签名为 (stock_code, stock_info) → (total_div, year, details, explanation, source)
+        ttm_dividend_provider: TTM 分红获取函数（#19，不传则使用默认 get_ttm_dividend）
+            签名为 (stock_code, stock_info) → (ttm_total, period, count_note, source)
     """
     _stock_info = stock_info_provider or get_stock_info
     _dividend = dividend_provider or get_latest_full_year_dividend
+    _ttm_dividend = ttm_dividend_provider or get_ttm_dividend
 
     try:
         stock_info = _stock_info(stock_input)
@@ -290,6 +330,12 @@ def calculate_true_dividend_yield(
             f"当前股价{stock_info.current_price:.2f}元, 总股本{stock_info.total_shares / 1e8:.2f}亿股."
         )
 
+        # TTM 口径（#19）：并行计算，失败静默置 None，不拖垮主口径
+        _ttm_total, _ttm_period, _ttm_count, _ttm_source = _ttm_dividend(stock_code, stock_info)
+        _ttm_yield = None
+        if _ttm_total is not None and total_market_cap > 0:
+            _ttm_yield = (_ttm_total / total_market_cap) * 100
+
         return DividendResult(
             stock_code=stock_code,
             stock_name=stock_name,
@@ -305,6 +351,10 @@ def calculate_true_dividend_yield(
             explanation=explanation,
             warnings=list(stock_info.warnings) + _yield_warnings(dividend_yield_before_tax),
             dividend_source=dividend_source,
+            ttm_dividend=_ttm_total,
+            dividend_yield_ttm_before_tax=_ttm_yield,
+            ttm_period=_ttm_period,
+            ttm_source=_ttm_source,
         )
 
     except Exception as e:

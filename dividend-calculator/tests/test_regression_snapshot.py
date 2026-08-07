@@ -21,6 +21,7 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.dividend import _parse_fhps_detail, calculate_true_dividend_yield
+from src.utils import compute_ttm_dividend
 from src.pr_calculator import (
     compute_basic_pr, compute_pb_pr, classify_valuation,
 )
@@ -123,6 +124,35 @@ class TestFiscalYearGroupingSnapshot:
 
 
 # ---------------------------------------------------------------------------
+# 2b. TTM 股息率快照（#19）
+# ---------------------------------------------------------------------------
+
+class TestTtmSnapshot:
+    def test_ttm_12month_window(self):
+        """近12个月按除权日聚合：as_of 固定日期，窗口外分红不计入。"""
+        from datetime import date
+        from src.datasource.base import DividendRecord
+        records = [
+            # 窗口内（2025-08-01 ~ 2026-07-31）
+            DividendRecord("2026-07-15", 5.0, "2025年报"),
+            DividendRecord("2026-01-10", 2.0, "2025半年报"),
+            # 窗口外（>365天前）
+            DividendRecord("2025-05-01", 3.0, "2024年报"),
+        ]
+        ttm_total, start, end, count = compute_ttm_dividend(
+            records, total_shares=1e9, as_of_date=date(2026, 7, 31)
+        )
+        # 每股 0.5 + 0.2 = 0.7 × 10亿 = 7亿
+        assert ttm_total == pytest.approx(0.7 * 1e9)
+        assert count == 2
+        assert start == "2025-07-31"
+
+    def test_ttm_no_records_returns_none(self):
+        from datetime import date
+        assert compute_ttm_dividend([], 1e9, as_of_date=date(2026, 7, 31))[0] is None
+
+
+# ---------------------------------------------------------------------------
 # 3. PR 真实画像
 # ---------------------------------------------------------------------------
 
@@ -179,6 +209,16 @@ class TestSustainabilitySnapshot:
         assert result.triggered is True
         assert result.verdict == "可持续"
         assert result.score is not None and result.score >= 1.5
+        # 0-2 映射 0-100：score≥1.5 → score_100≥75（#20）
+        assert result.score_100 is not None
+        assert result.score_100 >= 75
+
+    def test_score_100_mapping(self):
+        """score_100 = round(score×50, 1)：阈值 1.5/1.0 → 75/50（#20）。"""
+        from src.sustainability_calculator import _score_to_100
+        assert _score_to_100(1.5) == 75.0
+        assert _score_to_100(1.0) == 50.0
+        assert _score_to_100(0.5) == 25.0
 
 
 # ---------------------------------------------------------------------------
