@@ -341,10 +341,15 @@
         <div id="market-cap" class="value"></div>
       </div>
 
-      <div class="result-card full">
+      <div class="result-card">
         <div class="label">近一年现金分红总额</div>
         <div id="total-dividend" class="value"></div>
         <div id="no-dividend-warning" class="warning hidden">当前结果没有有效分红数据，请以计算说明为准。</div>
+      </div>
+
+      <div class="result-card">
+        <div class="label">分红数据来源</div>
+        <div id="dividend-source" class="value" style="font-size:16px;"></div>
       </div>
 
       <div class="result-card full">
@@ -948,6 +953,7 @@
       document.getElementById('total-shares').textContent = formatSharesYi(si.total_shares);
       document.getElementById('market-cap').textContent = formatRmbYi(di.total_market_cap);
       document.getElementById('total-dividend').textContent = formatRmbYi(di.total_dividend);
+      document.getElementById('dividend-source').textContent = di.dividend_source || '未知';
       /* TTM 股息率（#19）：近12个月实际派发 */
       var ttmCard = document.getElementById('ttm-card');
       if (di.dividend_yield_ttm_before_tax != null) {

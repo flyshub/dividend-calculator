@@ -108,6 +108,7 @@
         dividend_yield_after_tax_10: yields[1],
         dividend_yield_after_tax_20: yields[2],
         total_market_cap: totalMarketCap,
+        dividend_source: '东财 datacenter',
         /* TTM 口径（#19）：近 12 个月实际派发，与主口径并行 */
         ttm_dividend: ttm.ttm_dividend,
         dividend_yield_ttm_before_tax: ttm.ttm_dividend != null && totalMarketCap > 0
