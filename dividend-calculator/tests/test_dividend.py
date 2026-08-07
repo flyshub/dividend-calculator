@@ -81,6 +81,7 @@ def test_di_seam_full_pipeline():
     assert "2025年度10派1.25元" in result.explanation
 
 
+@pytest.mark.integration
 def test_di_seam_defaults_still_work():
     """不传 provider 时，函数正常执行（使用真实数据源）。"""
     result = calculate_true_dividend_yield("600900")
