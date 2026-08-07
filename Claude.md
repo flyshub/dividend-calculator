@@ -111,6 +111,7 @@ N 因子 = 50% / 股利支付率，区间 [1.0, 2.0]（支付率 ≥50% → N=1.
 ## 开发坑位
 
 - mootdx 通达信协议全球可用，不依赖东方财富（解决海外 IP 限流问题）
+- 东财 datacenter HTTP 接口对海外 IP 限流，CI（GitHub Actions 海外 runner）访问易超时：所有 requests 调用须带重试（3 次退避 + 30s 读取超时），参考 `scripts/verify_js_vs_python.py` 的 `_get()` 统一会话
 - 腾讯 fqkline 接口全球可用，走势图数据源首选
 - 半年报除权日通常在 9-12 月，要用除权日而非公告日推断财年
 - A+H 股必须用总股本（腾讯 Index 73），不能用流通股本（Index 72）
