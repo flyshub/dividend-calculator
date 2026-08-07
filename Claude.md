@@ -6,19 +6,19 @@
 
 ```bash
 # 股息率计算
-python -m src.main 600987
+cd dividend-calculator && python -m src.main 600987
 
 # 市赚率计算
-python calc_pr.py 600900
+cd dividend-calculator && python calc_pr.py 600900
 
 # 启动 Web 服务
-python -m src.web
+cd dividend-calculator && python -m src.web
 
 # 运行全部测试
 cd dividend-calculator && python -m pytest -v
 
 # 运行单个测试
-python -m pytest tests/test_dividend.py -v
+cd dividend-calculator && python -m pytest tests/test_dividend.py -v
 ```
 
 ## 核心架构决策
