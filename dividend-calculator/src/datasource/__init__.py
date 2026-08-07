@@ -19,6 +19,10 @@ from .tencent_source import TencentSource
 class DataSourceManager:
     """数据源管理器，按优先级尝试多个数据源"""
 
+    # 跨源交叉验证阈值（审查 #2）：相对差超过即追加 warning
+    PRICE_DIFF_THRESHOLD = 0.01    # 价格相对差 >1%
+    SHARES_DIFF_THRESHOLD = 0.005  # 总股本相对差 >0.5%
+
     def __init__(self, sources=None):
         if sources is not None:
             self._sources = sorted(sources, key=lambda s: s.priority)
@@ -50,6 +54,8 @@ class DataSourceManager:
             try:
                 info = source.get_stock_info(stock_input)
                 if info is not None:
+                    # 跨源交叉验证（审查 #2）：主源为腾讯/新浪时用 mootdx best-effort 比对
+                    self._cross_check(stock_input, source.name, info)
                     return info
             except Exception as e:
                 last_error = e
@@ -58,6 +64,46 @@ class DataSourceManager:
         if last_error is not None:
             logger.warning("所有数据源获取 %s 失败，最后错误: %s", stock_input, last_error)
         return None
+
+    def _cross_check(self, stock_code: str, primary_name: str, info: StockInfo) -> None:
+        """跨源交叉验证（审查 #2）：单源错值拦截。
+
+        主源为 tencent/sina 时，best-effort 用 mootdx 取 price + zongguben 比对，
+        相对差超阈值追加 StockInfo.warnings。所有异常只跳过不抛（非阻塞）。
+        """
+        if primary_name == "mootdx":
+            return  # 主源已是 mootdx，无独立第二源
+        try:
+            from .mootdx_source import get_quotes_client
+            client = get_quotes_client()
+            df = client.quotes(symbol=stock_code)
+            if df is None or len(df) == 0:
+                return
+            m_price = float(df['price'].iloc[0])
+            m_shares = None
+            try:
+                fin = client.finance(symbol=stock_code)
+                if fin is not None and len(fin) > 0 and 'zongguben' in fin.columns:
+                    m_shares = float(fin['zongguben'].iloc[0])
+            except Exception:
+                pass  # 股本比对失败静默跳过
+
+            if m_price > 0 and info.current_price > 0:
+                rel = abs(m_price - info.current_price) / info.current_price
+                if rel > self.PRICE_DIFF_THRESHOLD:
+                    info.warnings.append(
+                        f"价格跨源不一致: {primary_name}={info.current_price:.2f}, "
+                        f"mootdx={m_price:.2f}（相对差 {rel*100:.1f}%，可能为行情时差）"
+                    )
+            if m_shares is not None and m_shares > 0 and info.total_shares > 0:
+                rel = abs(m_shares - info.total_shares) / info.total_shares
+                if rel > self.SHARES_DIFF_THRESHOLD:
+                    info.warnings.append(
+                        f"总股本跨源不一致: {primary_name}={info.total_shares:.0f}, "
+                        f"mootdx={m_shares:.0f}"
+                    )
+        except Exception as e:
+            logger.debug("跨源交叉验证跳过 %s: %s", stock_code, e)
 
     def get_latest_dividend(
         self,

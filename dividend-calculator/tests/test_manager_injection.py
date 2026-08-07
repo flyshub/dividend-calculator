@@ -62,3 +62,50 @@ class TestManagerInjection:
         info.warnings.append("测试告警")
         assert len(info.warnings) == 1
         assert info.stock_code == "600900"
+
+    def test_cross_check_price_diff_adds_warning(self):
+        """跨源价格差异 >1% 追加 warning（审查 #2）"""
+        from unittest.mock import patch
+        from src.datasource.base import StockInfo
+        import pandas as pd
+
+        info = StockInfo(stock_code="600900", current_price=26.56, total_shares=2.27e10)
+        mgr = DataSourceManager(sources=[])
+        with patch('src.datasource.mootdx_source.get_quotes_client') as mock_client:
+            mock_client.return_value.quotes.return_value = pd.DataFrame([{"price": 27.0}])
+            mock_client.return_value.finance.return_value = pd.DataFrame([{"zongguben": 2.27e10}])
+            mgr._cross_check("600900", "tencent", info)
+        assert len(info.warnings) >= 1
+        assert "价格跨源不一致" in info.warnings[0]
+
+    def test_cross_check_no_diff_no_warning(self):
+        """跨源价格一致不追加 warning"""
+        from unittest.mock import patch
+        from src.datasource.base import StockInfo
+        import pandas as pd
+
+        info = StockInfo(stock_code="600900", current_price=26.56, total_shares=2.27e10)
+        mgr = DataSourceManager(sources=[])
+        with patch('src.datasource.mootdx_source.get_quotes_client') as mock_client:
+            mock_client.return_value.quotes.return_value = pd.DataFrame([{"price": 26.56}])
+            mock_client.return_value.finance.return_value = pd.DataFrame([{"zongguben": 2.27e10}])
+            mgr._cross_check("600900", "tencent", info)
+        assert info.warnings == []
+
+    def test_cross_check_primary_mootdx_skips(self):
+        """主源已是 mootdx 时跳过交叉验证"""
+        from src.datasource.base import StockInfo
+        info = StockInfo(stock_code="600900", current_price=26.56, total_shares=2.27e10)
+        mgr = DataSourceManager(sources=[])
+        mgr._cross_check("600900", "mootdx", info)  # 不应抛异常，不应加 warning
+        assert info.warnings == []
+
+    def test_cross_check_mootdx_unavailable_skips_silently(self):
+        """mootdx 不可用时静默跳过，不抛异常不加 warning"""
+        from unittest.mock import patch
+        from src.datasource.base import StockInfo
+        info = StockInfo(stock_code="600900", current_price=26.56, total_shares=2.27e10)
+        mgr = DataSourceManager(sources=[])
+        with patch('src.datasource.mootdx_source.get_quotes_client', side_effect=Exception("mootdx 挂")):
+            mgr._cross_check("600900", "tencent", info)  # 不抛异常
+        assert info.warnings == []
