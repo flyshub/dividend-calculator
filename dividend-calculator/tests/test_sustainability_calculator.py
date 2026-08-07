@@ -376,11 +376,11 @@ def test_data_staleness_note_fresh_year():
         current_year=2026,
     )
     assert result.latest_annual_year == 2025
-    assert not any("18 个月" in n for n in result.notes)
+    assert not any("1 年" in n for n in result.notes)
 
 
 def test_data_staleness_note_stale_year():
-    """最新年报停在 2 年前 → stale note（超 18 个月未更新）。"""
+    """最新年报停在 2 年前 → stale note（超 1 年未更新）。"""
     fin = _healthy_financial()
     fin.year = 2023  # 模拟停更在 2023 年报
     result = assess_sustainability(
@@ -393,7 +393,7 @@ def test_data_staleness_note_stale_year():
         current_year=2026,
     )
     assert result.latest_annual_year == 2023
-    assert any("18 个月" in n for n in result.notes)
+    assert any("1 年" in n for n in result.notes)
 
 
 def test_staleness_note_current_year_none():
@@ -408,7 +408,7 @@ def test_staleness_note_current_year_none():
                                 latest_year_amount=214e8, history_mean_amount=200e8),
         industry="公用事业",
     )
-    assert not any("18 个月" in n for n in result.notes)
+    assert not any("1 年" in n for n in result.notes)
 
 
 def test_weak_cf_coverage_lowers_score():

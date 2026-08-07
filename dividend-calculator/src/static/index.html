@@ -871,7 +871,7 @@
           if (d.is_cyclical) explanation += '（周期性行业，适用PB估值）';
           if (d.is_tech) explanation += '（科技行业）';
         }
-        explanation += '\n核心公式: 市赚率 = PE_TTM × N因子 / ROE_5年中位数 × 100';
+        explanation += '\n核心公式: 市赚率 = PE_TTM × N因子 / ROE_latest × 100';
         explanation += '\n  基本版: ' + Number(d.pe_ttm || 0).toFixed(2) + ' × ' + Number(d.n_factor || 0).toFixed(4) + ' / ' + Number(d.roe_5y_median || 0).toFixed(2) + '% × 100 = ' + Number(d.pr_basic || 0).toFixed(3);
         explanation += '\n  修正版: ' + Number(d.pr_corrected || 0).toFixed(3) + '（对亏损股/周期股/N倍增长股进行修正）';
         explanation += '\n  PB版: PE/PB × ROE修正 = ' + Number(d.pr_pb || 0).toFixed(3);

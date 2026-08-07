@@ -62,7 +62,7 @@ def calculate_dividend_yield(
 
 def get_latest_full_year_dividend(
     stock_code: str, stock_info: StockInfo
-) -> Tuple[float, Optional[str], List[DividendDetail], str]:
+) -> Tuple[float, Optional[str], List[DividendDetail], str, str]:
     """
     获取最近一个完整财年的现金分红总额和明细
     多数据源自动降级：mootdx → akshare fhps_detail_em（含预案）→ akshare cninfo
@@ -229,7 +229,7 @@ def calculate_true_dividend_yield(
     *,
     stock_info_provider: Optional[Callable[[str], Optional[StockInfo]]] = None,
     dividend_provider: Optional[
-        Callable[[str, StockInfo], Tuple[float, Optional[str], List[DividendDetail], str]]
+        Callable[[str, StockInfo], Tuple[float, Optional[str], List[DividendDetail], str, str]]
     ] = None,
 ) -> Optional[DividendResult]:
     """
@@ -239,7 +239,7 @@ def calculate_true_dividend_yield(
         stock_input: 股票代码或名称
         stock_info_provider: 股票信息获取函数（不传则使用默认 get_stock_info）
         dividend_provider: 分红数据获取函数（不传则使用默认 DataSourceManager）
-            签名为 (stock_code, stock_info) → (total_div, year, details, explanation)
+            签名为 (stock_code, stock_info) → (total_div, year, details, explanation, source)
     """
     _stock_info = stock_info_provider or get_stock_info
     _dividend = dividend_provider or get_latest_full_year_dividend
@@ -254,7 +254,7 @@ def calculate_true_dividend_yield(
         total_market_cap = stock_info.current_price * stock_info.total_shares
 
         total_dividend, latest_year, dividend_details, dividend_explanation, dividend_source = (
-            _unwrap_dividend_result(_dividend(stock_code, stock_info))
+            _dividend(stock_code, stock_info)
         )
 
         if total_dividend <= 0:
@@ -316,13 +316,3 @@ def _yield_warnings(yield_before_tax: Optional[float]) -> List[str]:
     """股息率越界软校验（审查 #4），返回 warning 列表。"""
     w = check_dividend_yield(yield_before_tax)
     return [w] if w else []
-
-
-def _unwrap_dividend_result(result: Tuple) -> Tuple[float, Optional[str], List[DividendDetail], str, str]:
-    """解包分红结果，兼容 4 元（DI fake）与 5 元（含 dividend_source）返回。
-
-    返回 (total_dividend, year, details, explanation, source)。
-    """
-    if len(result) == 5:
-        return result
-    return result[0], result[1], result[2], result[3], ""

@@ -626,7 +626,7 @@
     if (result.latest_annual_year != null) {
       var nowYear = new Date().getFullYear();
       if (result.latest_annual_year < nowYear - 1) {
-        result.notes.push('财务数据截至 ' + result.latest_annual_year + ' 年报，已超过 18 个月未更新，结论时效性有限');
+        result.notes.push('财务数据截至 ' + result.latest_annual_year + ' 年报，已超过 1 年未更新，结论时效性有限');
       }
     }
 

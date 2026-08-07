@@ -657,11 +657,11 @@ def _staleness_note(latest_annual_year: int, current_year: int) -> Optional[str]
     """数据新鲜度判定（#13）：最新年报财年比当前年早 1 年以上 → 陈旧。
 
     A 股年报法定披露截止次年 4 月 30 日：当前 2026 年时正常最新年报 = 2025
-    （2026-04 前披露）；若停在 2024 或更早 → 超 18 个月未更新，标注时效有限。
+    （2026-04 前披露）；若停在 2024 或更早 → 已超 1 年未更新，标注时效有限。
     仅标注不改判（陈旧可能是公司真实状态，静默改结论违反数据铁律）。
     """
     if latest_annual_year < current_year - 1:
-        return (f"财务数据截至 {latest_annual_year} 年报，已超过 18 个月未更新，"
+        return (f"财务数据截至 {latest_annual_year} 年报，已超过 1 年未更新，"
                 "结论时效性有限")
     return None
 

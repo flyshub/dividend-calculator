@@ -53,7 +53,7 @@ def _fake_stock_info(code: str) -> StockInfo:
 def _fake_dividend(code: str, info: StockInfo):
     """Fake 分红数据提供器：10派1.25元 × 1000万股 = 125万分红。"""
     details = [DividendDetail(report_time="20251231", dividend_per_10=1.25)]
-    return 1_250_000.0, "2025", details, "2025年度10派1.25元"
+    return 1_250_000.0, "2025", details, "2025年度10派1.25元", "mock"
 
 
 def test_di_seam_full_pipeline():
