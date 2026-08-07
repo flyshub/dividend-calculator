@@ -23,6 +23,7 @@ import requests
 from .datasource.base import DividendRecord
 from .sustainability_calculator import (
     AnnualFinancial,
+    CUT_WINDOW_YEARS,
     DividendHistory,
     SustainabilityResult,
     assess_sustainability,
@@ -265,10 +266,10 @@ def aggregate_dividend_history(records: List[DividendRecord],
         history_3y_mean = sum(year_amount[yy] for yy in recent3) / len(recent3)
 
     ever_cut = False
-    # 近 10 年窗口（含最新财年）内相邻年分红降幅 > 30% 视为曾削减。
-    # 10 年以上久远的波动（如行业早期调整）对当前分红可持续性无参考价值，
+    # 近 CUT_WINDOW_YEARS 年窗口（含最新财年）内相邻年分红降幅 > 30% 视为曾削减。
+    # 窗口之外的久远波动（如行业早期调整）对当前分红可持续性无参考价值，
     # 避免连年提升分红的股票（如伊利 2016~2025 逐年递增）被早期低基数误判。
-    window_start = int(target_year) - 9
+    window_start = int(target_year) - (CUT_WINDOW_YEARS - 1)
     asc = sorted(year_amount.keys())
     for i in range(1, len(asc)):
         prev_y, cur_y = asc[i - 1], asc[i]

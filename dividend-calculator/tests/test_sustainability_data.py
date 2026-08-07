@@ -152,6 +152,16 @@ def test_aggregate_cut_outside_10y_window_ignored():
     assert h.ever_cut is False  # 窗口外削减不计入
 
 
+def test_aggregate_cut_at_window_boundary_detected():
+    """削减恰好落在窗口首年（起点年）应计入：2025 年窗口起点 2016，2015→2016 的削减算窗口内。"""
+    recs = []
+    for y in range(2014, 2026):
+        dp10 = 2.0 if y == 2016 else 5.0  # 2016 削减（5→2），2015→2016 跨立窗口首年
+        recs.append(DividendRecord(f"{y}-07-01", dp10, f"{y}年报"))
+    h = aggregate_dividend_history(recs, "2025", 1e9)
+    assert h.ever_cut is True
+
+
 def test_aggregate_latest_and_mean():
     total_shares = 1e9
     h = aggregate_dividend_history(_div_records(), "2025", total_shares)

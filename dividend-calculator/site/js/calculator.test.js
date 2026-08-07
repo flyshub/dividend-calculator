@@ -326,7 +326,7 @@ function yearlyFromYearAmount(obj) {
   /* {year: dp10值} → _aggregateDividendHistory 期望的 yearly 结构 */
   const yearly = {};
   Object.keys(obj).forEach(function (y) {
-    yearly[y] = { total: obj[y] * 10.0, details: [], has_annual: true }; /* total 是每10股，内部 /10 * shares */
+    yearly[y] = { total: obj[y] * 10.0 }; /* total 是每10股，内部 /10 * shares */
   });
   return yearly;
 }
@@ -342,6 +342,13 @@ test('aggregateDividendHistory 窗口外削减不计入 ever_cut', () => {
 test('aggregateDividendHistory 窗口内削减计入 ever_cut', () => {
   const amt = {};
   for (let y = 2015; y <= 2025; y++) amt[y] = (y === 2023 ? 2.0 : 5.0); /* 2023 削减，窗口内 */
+  const h = Calc.aggregateDividendHistory(yearlyFromYearAmount(amt), '2025', 1e9);
+  assert.equal(h.ever_cut, true);
+});
+
+test('aggregateDividendHistory 削减落在窗口首年计入 ever_cut', () => {
+  const amt = {};
+  for (let y = 2014; y <= 2025; y++) amt[y] = (y === 2016 ? 2.0 : 5.0); /* 2016 削减，跨立窗口起点 2016 */
   const h = Calc.aggregateDividendHistory(yearlyFromYearAmount(amt), '2025', 1e9);
   assert.equal(h.ever_cut, true);
 });

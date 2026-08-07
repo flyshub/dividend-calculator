@@ -44,6 +44,9 @@ DIM_DEBT_RATIO = (0.50, 0.70)
 DIM_INTEREST_COVERAGE = (3.0, 5.0)
 # 连续分红年数
 DIM_CONSECUTIVE_YEARS = (3, 10)
+# 曾削减判定窗口（年）：仅考察最新财年往前 CUT_WINDOW_YEARS 年内的相邻年降幅。
+# 10 年以上久远的波动（如行业早期调整）对当前分红可持续性无参考价值。
+CUT_WINDOW_YEARS = 10
 
 # 六维权重（合计 1.0）
 WEIGHTS = {

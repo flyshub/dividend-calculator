@@ -54,12 +54,13 @@
 | 股利支付率（分红/净利润） | 20% | >80% | 60–80% | <60% |
 | 盈利稳定性（ROE+利润趋势） | 15% | ROE<10% 或 利润同比为负降档 | ROE 10–15% | ROE≥15%（利润同比为负时降一档） |
 | 资产负债表（负债率+利息覆盖取较低） | 15% | 负债率>70% 或 利息覆盖<3x | 中间 | 负债率<50% 且 利息覆盖>5x |
-| 分红历史（连续年数+是否曾削减） | 15% | <3年 或 曾削减 | 3–10年 | ≥10年且无削减 |
+| 分红历史（连续年数+是否曾削减） | 15% | <3年 或 近10年内曾削减 | 3–10年 | ≥10年且无削减 |
 | 行业属性 | 10% | 强周期 | 一般 | 防御/成熟稳定 |
 
 - 资产负债率口径：东财无 `DEBT_ASSET_RATIO` 字段（实测为空），完全用 `总负债(LIABILITY)/总资产(TOTAL_ASSETS_PK)` 推算。
 - **缺失维度计 0 分（T4 修正）**：某维度数据缺失时**按 0 分计入**加权（分母为全部权重），不再归一化分摊——避免数据稀疏的股票因缺失而虚高得分。缺失权重 ≥ 30% 时额外标注"结论置信度偏低"。
 - **银行 general-fallback 屏蔽负债率（T7）**：银行专项全缺失降级通用分支时，资产负债表维度强制设为 None（银行天然负债率 90%+，通用阈值必踩坑）。
+- **曾削减判定窗口（`CUT_WINDOW_YEARS = 10`）**：「曾削减」仅考察最新财年往前 **10 年**内的相邻年降幅 > 30%。窗口之外的久远波动（如行业早期调整）不计入——避免连年提升分红的股票（如伊利 2016~2025 逐年递增）被 10 多年前的削减误判为"曾削减"。0 分文案按原因区分：「近 10 年内曾削减分红，历史稳定性存疑」vs「连续分红仅 N 年，历史较短」。
 
 #### 金融分支：银行专项评分（等权平均，0~2；CAR 另有致命否决）
 
@@ -107,7 +108,7 @@
 | `fatal_flags` | list[str] | 致命红旗理由（带数值） |
 | `warning_flags` | list[str] | 情境红旗理由（带数值） |
 | `dimension_scores` | dict | 各维度 0/1/2 分 |
-| `metrics` | dict | 支撑数据（payout_ratio、operating_cf、capex、free_cash_flow、cf_coverage、fcf_coverage、debt_ratio、interest_coverage、roe_latest、net_profit_yoy、consecutive_dividend_years、银行专项等） |
+| `metrics` | dict | 支撑数据（payout_ratio、operating_cf、capex、free_cash_flow、cf_coverage、fcf_coverage、debt_ratio、interest_coverage、roe_latest、net_profit_yoy、consecutive_dividend_years、ever_cut、银行专项等） |
 | `branch` | str | general / finance / general-fallback |
 | `notes` | list[str] | 缺失数据说明 |
 | `explanation` | list[str] | **结论白话说明**（`explain_sustainability()` / JS `explainSustainability()` 生成，双端逐字一致） |
@@ -214,6 +215,7 @@ DIM_ROE = (10.0, 15.0)             # ROE（%）
 DIM_DEBT_RATIO = (0.50, 0.70)      # 资产负债率（小数；银行 fallback 时屏蔽）
 DIM_INTEREST_COVERAGE = (3.0, 5.0) # 利息保障倍数（x）
 DIM_CONSECUTIVE_YEARS = (3, 10)    # 连续分红年数
+CUT_WINDOW_YEARS = 10               # 曾削减判定窗口（年）：仅考察最新财年往前 N 年内相邻年降幅 > 30%
 
 # 六维权重（合计 1.0）
 WEIGHTS = {"cf_coverage": 0.25, "payout": 0.20, "profitability": 0.15,

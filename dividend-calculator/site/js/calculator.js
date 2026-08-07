@@ -111,7 +111,9 @@
     if (!yearsSorted.length) {
       return { consecutive_years: 0, ever_cut: false, latest_year_amount: null, history_mean_amount: null };
     }
-    var tgt = (targetYear && yearAmount[targetYear] != null) ? parseInt(targetYear, 10) : yearsSorted[0];
+    /* 基准财年：优先传入的 targetYear（须在数据中），否则最新有分红年——对齐 Python target_year */
+    var baseYear = (targetYear && yearAmount[targetYear] != null) ? parseInt(targetYear, 10) : yearsSorted[0];
+    var tgt = baseYear;
     var consecutive = 0;
     while (yearAmount[String(tgt)] != null) { consecutive++; tgt--; }
 
@@ -123,17 +125,16 @@
       historyMean = sum / historyYears.length;
     }
     /* 近3年均值（targetYear之前最近3年）——突击分红判断用，避免早期低基数拉偏（T3）*/
-    var tgtInt = parseInt(targetYear, 10);
-    var recent3 = historyYears.filter(function (y) { return parseInt(y, 10) < tgtInt; }).slice(0, 3);
+    var recent3 = historyYears.filter(function (y) { return parseInt(y, 10) < baseYear; }).slice(0, 3);
     var history3yMean = null;
     if (recent3.length) {
       var s3 = 0;
       recent3.forEach(function (y) { s3 += yearAmount[y]; });
       history3yMean = s3 / recent3.length;
     }
-    /* 曾削减：近10年窗口（含最新财年）内相邻年降幅 > 30%（对齐 Python aggregate_dividend_history） */
-    /* 注意用 tgtInt（最新财年）而非 tgt——tgt 在 consecutive 计数时已被递减 */
-    var windowStart = tgtInt - 9;
+    /* 曾削减：近 CUT_WINDOW_YEARS 年窗口（含最新财年）内相邻年降幅 > 30%（对齐 Python aggregate_dividend_history） */
+    /* 注意用 baseYear（最新财年，含 fallback）而非 tgt——tgt 在 consecutive 计数时已被递减 */
+    var windowStart = baseYear - (SUS_CUT_WINDOW_YEARS - 1);
     var asc = yearsSorted.slice().sort(function (a, b) { return a - b; }).map(String);
     var everCut = false;
     for (var i = 1; i < asc.length; i++) {
@@ -393,6 +394,8 @@
     cf_coverage: [1.0, 1.5], payout: [0.60, 0.80], roe: [10.0, 15.0],
     debt_ratio: [0.50, 0.70], interest_coverage: [3.0, 5.0], consecutive_years: [3, 10],
   };
+  /* 曾削减判定窗口（年）：仅考察最新财年往前 SUS_CUT_WINDOW_YEARS 年内的相邻年降幅（对齐 Python CUT_WINDOW_YEARS） */
+  var SUS_CUT_WINDOW_YEARS = 10;
   var SUS_WEIGHTS = {
     cf_coverage: 0.25, payout: 0.20, profitability: 0.15, balance_sheet: 0.15,
     dividend_history: 0.15, industry: 0.10,
