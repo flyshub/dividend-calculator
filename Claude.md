@@ -128,8 +128,8 @@ N 因子 = 50% / 股利支付率，区间 [1.0, 2.0]（支付率 ≥50% → N=1.
 
 ## 参考文档
 
-- `dividend-calculator/README.md` — 完整使用文档（给人看）
-- `dividend-calculator/DATASOURCE_README.md` — 数据源架构详细说明
+- `README.md` — 完整使用文档（给人看，仓库根，GitHub 默认展示）
+- `docs/DATASOURCE_README.md` — 数据源架构详细说明
 - `docs/SUSTAINABILITY.md` — 股息可持续性分析：判断模型（分层级联）、数据来源、阈值与代码结构
 - `docs/DATA_RELIABILITY.md` — **数据铁律与可靠性审查报告**：数据源清单、口径、风险分级、修复路线图
 
