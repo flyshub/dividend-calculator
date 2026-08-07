@@ -40,3 +40,25 @@ jobs:
       - name: Run node tests
         working-directory: dividend-calculator
         run: node --test site/js/calculator.test.js
+
+  verify-dual-end:
+    name: JS/Python 双端一致性验证
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install deps
+        run: |
+          pip install -r dividend-calculator/requirements.txt
+
+      - name: Run dual-end verification (live data)
+        working-directory: dividend-calculator
+        run: python scripts/verify_js_vs_python.py

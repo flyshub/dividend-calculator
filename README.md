@@ -179,8 +179,6 @@ dividend-calculator/
 3. **口径必须准确** — 金融指标的计算口径与公开定义一致，文档公式与实现逐字一致
 4. **数据必须可验证** — 任何数据功能先验证可获得性与真实性，涉及数据的代码必须配测试
 
-完整审查结论与风险清单见 [数据可靠性审查报告](docs/DATA_RELIABILITY.md)。
-
 ## ✅ 质量保证
 
 - **221 Python 单元测试 + 70 JS 单元测试**：财年推断、市赚率公式、可持续性评分、数据源注入、双端对齐
@@ -213,7 +211,6 @@ A: 净利润 ≤0 的股票被标记为亏损股，市赚率不适用。
 ## 📄 相关文档
 
 - [数据源说明](docs/DATASOURCE_README.md)
-- [数据可靠性审查报告](docs/DATA_RELIABILITY.md)
 - [股息可持续性分析](docs/SUSTAINABILITY.md)
 - [GitHub Pages 站点说明](dividend-calculator/site/README.md)
 
