@@ -52,3 +52,13 @@ class TestManagerInjection:
         low = FakeSource("Low", priority=20)
         mgr = DataSourceManager(sources=[low, high])
         assert mgr.get_source_names() == ["High", "Low"]
+
+    def test_stock_info_warnings_default_empty(self):
+        """StockInfo 默认 warnings 为空列表（数据铁律#8：告警载体向后兼容）"""
+        from src.datasource.base import StockInfo
+        info = StockInfo(stock_code="600900", current_price=26.56, total_shares=2.27e10)
+        assert info.warnings == []
+        # 可追加告警且不影响其它字段
+        info.warnings.append("测试告警")
+        assert len(info.warnings) == 1
+        assert info.stock_code == "600900"

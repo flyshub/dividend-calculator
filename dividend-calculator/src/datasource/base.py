@@ -5,7 +5,7 @@ StockInfo 和 DividendDetail 是全局唯一定义，
 所有模块（api.py、dividend.py、datasource 等）统一引用此处的定义。
 """
 from typing import Protocol, Optional, List, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -14,6 +14,7 @@ class StockInfo:
     stock_code: str
     current_price: float
     total_shares: float
+    warnings: List[str] = field(default_factory=list)
 
 
 @dataclass
