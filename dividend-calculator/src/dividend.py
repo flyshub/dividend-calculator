@@ -3,10 +3,11 @@
 完全使用真实数据，不虚构任何数据
 """
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Optional, Tuple, List
 
 from .datasource.base import StockInfo, DividendDetail
+from .datasource.validation import check_dividend_yield
 from .api import get_stock_info
 from .tencent_quote import fetch_tencent_quote
 from .datasource import get_data_source_manager
@@ -31,6 +32,7 @@ class DividendResult:
     latest_year: Optional[str]
     dividend_details: List[DividendDetail]
     explanation: str
+    warnings: List[str] = field(default_factory=list)  # 数据完整性软校验（审查 #4）
 
 
 def calculate_dividend_yield(
@@ -268,6 +270,7 @@ def calculate_true_dividend_yield(
                 latest_year=None,
                 dividend_details=[],
                 explanation=f"无有效分红: {dividend_explanation}",
+                warnings=list(stock_info.warnings),
             )
 
         dividend_yield_before_tax, dividend_yield_after_tax, dividend_yield_after_tax_20 = calculate_dividend_yield(
@@ -299,8 +302,15 @@ def calculate_true_dividend_yield(
             latest_year=latest_year,
             dividend_details=dividend_details,
             explanation=explanation,
+            warnings=list(stock_info.warnings) + _yield_warnings(dividend_yield_before_tax),
         )
 
     except Exception as e:
         logger.error("计算真实股息率异常 %s: %s", stock_input, e)
         return None
+
+
+def _yield_warnings(yield_before_tax: Optional[float]) -> List[str]:
+    """股息率越界软校验（审查 #4），返回 warning 列表。"""
+    w = check_dividend_yield(yield_before_tax)
+    return [w] if w else []

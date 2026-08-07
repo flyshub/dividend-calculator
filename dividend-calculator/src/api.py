@@ -13,6 +13,7 @@ import pandas as pd
 
 from .datasource.base import StockInfo, MonthlyPrice, DividendRecord, HistoricalData
 from .datasource import get_data_source_manager
+from .datasource.validation import check_stock_info
 from .tencent_quote import fetch_tencent_quote
 from .utils import normalize_stock_code, infer_fiscal_year
 
@@ -39,6 +40,8 @@ def get_stock_info(stock_input: str) -> Optional[StockInfo]:
         info = manager.get_stock_info(stock_code)
         if info is not None:
             logger.info("通过数据源管理器获取 %s 成功", stock_code)
+            # 数据完整性软校验（审查 #4）：越界只追加 warning，不否决
+            info.warnings.extend(check_stock_info(info))
             return info
     except Exception as e:
         logger.warning("数据源管理器获取 %s 失败: %s", stock_code, e)

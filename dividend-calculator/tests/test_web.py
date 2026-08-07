@@ -80,6 +80,7 @@ def test_serialize_result_all_fields_present():
         "total_market_cap", "total_dividend", "dividend_yield_before_tax",
         "dividend_yield_after_tax", "dividend_yield_after_tax_20",
         "latest_year", "has_dividend", "dividend_details", "explanation",
+        "warnings",
     }
     assert set(data.keys()) == expected_keys
 

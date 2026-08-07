@@ -18,6 +18,8 @@ from typing import Optional, List, Tuple
 
 import requests
 
+from .datasource.validation import check_pe, check_pb, check_roe, check_net_profit, check_payout_ratio
+
 from .tencent_quote import fetch_tencent_quote
 from .pr_calculator import (
     compute_basic_pr,
@@ -423,6 +425,9 @@ def calculate_pr(
         judge_pr = pr_corrected if pr_corrected is not None else pr_basic
         valuation_zone = classify_valuation(judge_pr)
 
+    # 数据完整性软校验（审查 #4）：越界只追加 errors，不否决结果
+    all_errors.extend(_check_pr_fields(pe_ttm, pb, roe_latest, net_profit_annual, payout_ratio))
+
     return PRResult(
         stock_code=stock_code,
         stock_name=stock_name,
@@ -449,3 +454,24 @@ def calculate_pr(
         industry_source=ind_src,
         errors=all_errors,
     )
+
+
+def _check_pr_fields(
+    pe_ttm: Optional[float],
+    pb: Optional[float],
+    roe_latest: Optional[float],
+    net_profit_annual: Optional[float],
+    payout_ratio: Optional[float],
+) -> List[str]:
+    """市赚率相关字段数据完整性软校验（审查 #4）。越界追加 warning，不否决。"""
+    warnings: List[str] = []
+    for w in (
+        check_pe(pe_ttm),
+        check_pb(pb),
+        check_roe(roe_latest),
+        check_net_profit(net_profit_annual),
+        check_payout_ratio(payout_ratio),
+    ):
+        if w:
+            warnings.append(w)
+    return warnings

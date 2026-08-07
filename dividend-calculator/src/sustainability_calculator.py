@@ -16,6 +16,8 @@ import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+from .datasource.validation import check_net_profit, check_roe
+
 # ---------------------------------------------------------------------------
 # 可配置阈值与权重（集中在此，便于后续调参）
 # ---------------------------------------------------------------------------
@@ -573,6 +575,14 @@ def assess_sustainability(*,
         history = DividendHistory(consecutive_years=0, ever_cut=False,
                                   latest_year_amount=dividend_total, history_mean_amount=None)
         result.notes.append("分红历史缺失，分红历史维度按 0 分计")
+
+    # 数据完整性软校验（审查 #4）：越界只追加 notes，不否决结果
+    for w in (
+        check_net_profit(latest.net_profit),
+        check_roe(latest.roe),
+    ):
+        if w:
+            result.notes.append(w)
 
     # Layer 2：分支评分（先算，供展示；红旗否决时也有维度分）
     dim_scores, score, missing_ratio = _score_by_branch(latest, history, metrics, is_bank, is_cyclical, is_defensive)
