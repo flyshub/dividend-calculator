@@ -19,10 +19,9 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install light deps (no akshare)
+      - name: Install deps
         run: |
-          pip install pytest pandas requests
-          cd dividend-calculator && pip install -e ".[dev]" --no-deps 2>/dev/null || true
+          pip install -r dividend-calculator/requirements.txt pytest
 
       - name: Run pytest (unit only, no network)
         working-directory: dividend-calculator
