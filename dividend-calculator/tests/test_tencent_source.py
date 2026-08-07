@@ -31,8 +31,9 @@ class TestTencentSource:
         assert info.total_shares == 1015560000.0
 
     @patch('src.datasource.tencent_source.fetch_tencent_quote')
-    def test_get_stock_info_fallback_to_a_shares(self, mock_fetch):
-        """total_shares 为空时回退到 a_shares"""
+    @patch('src.datasource.tencent_source.get_quotes_client')
+    def test_get_stock_info_fallback_to_a_shares(self, mock_client, mock_fetch):
+        """total_shares 为空、mootdx 也失败时回退到 a_shares 并带 warning"""
         mock_fetch.return_value = TencentQuote(
             stock_code="000001",
             name="平安银行",
@@ -40,10 +41,48 @@ class TestTencentSource:
             total_shares=None,
             a_shares=1940591819.0,
         )
+        mock_client.return_value.finance.side_effect = Exception("mootdx 不可用")
         source = TencentSource()
         info = source.get_stock_info("000001")
         assert info is not None
         assert info.total_shares == 1940591819.0
+        assert any("回退 A 股股本" in w for w in info.warnings)
+
+    @patch('src.datasource.tencent_source.fetch_tencent_quote')
+    @patch('src.datasource.tencent_source.get_quotes_client')
+    def test_get_stock_info_uses_mootdx_shares_when_total_missing(self, mock_client, mock_fetch):
+        """total_shares 为空、mootdx 可用时用 mootdx 真总股本（含 H 股），无 warning"""
+        mock_fetch.return_value = TencentQuote(
+            stock_code="601919",
+            name="中远海控",
+            price=12.50,
+            total_shares=None,
+            a_shares=1.0e9,  # 若回退会用 A 股股本（错）
+        )
+        import pandas as pd
+        mock_fetch2 = mock_client.return_value.finance
+        mock_fetch2.return_value = pd.DataFrame([{"zongguben": 1.6e10}])  # 含 H 股真总股本
+        source = TencentSource()
+        info = source.get_stock_info("601919")
+        assert info is not None
+        assert info.total_shares == 1.6e10  # 用的是 mootdx 真总股本
+        assert info.warnings == []  # 值正确，无告警
+
+    @patch('src.datasource.tencent_source.fetch_tencent_quote')
+    def test_get_stock_info_total_shares_present_no_mootdx_call(self, mock_fetch):
+        """total_shares 有值时直接用，不触发 mootdx 降级"""
+        mock_fetch.return_value = TencentQuote(
+            stock_code="600900",
+            name="长江电力",
+            price=26.56,
+            total_shares=2.27e10,
+            a_shares=2.27e10,
+        )
+        source = TencentSource()
+        info = source.get_stock_info("600900")
+        assert info is not None
+        assert info.total_shares == 2.27e10
+        assert info.warnings == []
 
     @patch('src.datasource.tencent_source.fetch_tencent_quote')
     def test_get_stock_info_returns_none_on_fetch_failure(self, mock_fetch):
