@@ -5,7 +5,7 @@
 本工具是估值参考，真实极端值（小盘高 ROE、近零利润高 PE）比缺值更值得展示。
 `<=0` 硬界（价格/股本/每股分红）由各数据源已有 `>0` 检查处理，不在此层。
 """
-from typing import Optional, Sequence
+from typing import List, Optional
 
 from .base import StockInfo
 
