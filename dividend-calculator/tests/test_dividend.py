@@ -56,12 +56,18 @@ def _fake_dividend(code: str, info: StockInfo):
     return 1_250_000.0, "2025", details, "2025年度10派1.25元", "mock"
 
 
+def _fake_ttm_dividend(code: str, info: StockInfo):
+    """Fake TTM 分红提供器（#19）：返回 None 避免网络。"""
+    return None, None, None, "无"
+
+
 def test_di_seam_full_pipeline():
     """通过注入 fake provider，无需网络即可验证完整计算流水线。"""
     result = calculate_true_dividend_yield(
         "600900",
         stock_info_provider=_fake_stock_info,
         dividend_provider=_fake_dividend,
+        ttm_dividend_provider=_fake_ttm_dividend,
     )
 
     assert result is not None

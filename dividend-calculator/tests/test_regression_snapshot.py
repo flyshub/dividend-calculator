@@ -38,6 +38,10 @@ class TestDividendYieldSnapshot:
     def _stock_info(self, code="600900", price=26.56, shares=2.2741859116e10):
         return StockInfo(stock_code=code, current_price=price, total_shares=shares)
 
+    def _fake_ttm(self, code, info):
+        """Fake TTM provider（#19）：返回 None 避免网络。"""
+        return None, None, None, "无"
+
     def test_changjiang_power_snapshot(self):
         """长江电力：10派7.33元(2025年报) × 227.4亿股 = 166.6亿分红。"""
         def fake_dividend(code, info):
@@ -50,6 +54,7 @@ class TestDividendYieldSnapshot:
             "600900",
             stock_info_provider=lambda code: self._stock_info(),
             dividend_provider=fake_dividend,
+            ttm_dividend_provider=self._fake_ttm,
         )
         assert result is not None
         assert result.stock_code == "600900"
@@ -73,6 +78,7 @@ class TestDividendYieldSnapshot:
             "600036",
             stock_info_provider=lambda code: info,
             dividend_provider=fake_dividend,
+            ttm_dividend_provider=self._fake_ttm,
         )
         assert result is not None
         # 用总股本（252.2亿）而非 A 股股本 —— A+H 正确口径
