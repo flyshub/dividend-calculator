@@ -357,6 +357,18 @@ def main():
         raw = fetch_raw(code)
         fixture["stocks"][code] = raw
 
+        # 空数据假绿防护（审查 #6）：任一类数据为空即明确报错，避免双端
+        # 消费同样的空数据静默通过
+        if not raw["quote"] or raw["quote"].get("price") is None:
+            print(f"[{code}] 行情数据为空，verify 结果不可信")
+            return 2
+        if not raw["dividend_rows"]:
+            print(f"[{code}] 分红数据为空，verify 结果不可信")
+            return 2
+        if not raw["financial_rows"]:
+            print(f"[{code}] 财务数据为空，verify 结果不可信")
+            return 2
+
     # Windows 默认用 GBK 写文件会损坏中文，强制 UTF-8
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, dir="/tmp", encoding="utf-8") as f:
         json.dump(fixture, f, ensure_ascii=False)

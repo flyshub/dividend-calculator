@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python-tests:
+    name: Python tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install light deps (no akshare)
+        run: |
+          pip install pytest pandas requests
+          cd dividend-calculator && pip install -e ".[dev]" --no-deps 2>/dev/null || true
+
+      - name: Run pytest (unit only, no network)
+        working-directory: dividend-calculator
+        run: python -m pytest tests/ -q -m "not integration"
+
+  js-tests:
+    name: JS tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run node tests
+        working-directory: dividend-calculator
+        run: node --test site/js/calculator.test.js
