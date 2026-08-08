@@ -11,10 +11,16 @@ calculate_pr 网络密集，测试注入 assessor 包装。
 from typing import Callable, List, Optional
 
 from src.pr import PRResult, calculate_pr
+from src.pr_calculator import compute_basic_pr
 from src.screener_cache import FinanceSnapshot, ScreenerCache
 
 # 估值四档中选股器保留的两档（V2 回测证实 PR≤1 有超额）
 PR_ZONE_KEEP = ("合理偏低", "低估")
+
+
+def compute_pr(pe_ttm: Optional[float], roe_latest: Optional[float]) -> Optional[float]:
+    """PR = PE_TTM / ROE_latest（复用 pr_calculator.compute_basic_pr）。"""
+    return compute_basic_pr(pe_ttm, roe_latest)
 
 
 def evaluate_stock_full(
@@ -27,8 +33,26 @@ def evaluate_stock_full(
     """单股完整 PR 评估：调 calculate_pr 拿 valuation_zone/industry/roe_latest，写 finance_snapshot。
 
     pr_provider 注入便于测试（默认走 calculate_pr 真实数据源）。
+    缓存优先：finance_snapshot（ROE）+ quote_snapshot（PE）均有效且未过期时，
+    用缓存算估值，避免调网络 calculate_pr。
     返回 {code, pr, valuation_zone, pass_pr, industry, roe_latest}。
     """
+    # 缓存优先：ROE + PE 都有则用缓存估值（省网络请求）
+    fin = cache.get_finance(code)
+    quote = cache.get_quote(code)
+    if (fin is not None and fin.roe_latest is not None
+            and quote is not None and quote.pe_ttm is not None):
+        from src.pr_calculator import classify_valuation
+        pr_val = compute_pr(quote.pe_ttm, fin.roe_latest)
+        zone = classify_valuation(pr_val)
+        return {
+            "code": code,
+            "pr": pr_val,
+            "valuation_zone": zone,
+            "pass_pr": zone in PR_ZONE_KEEP,
+            "industry": None,  # 缓存无行业，后续从 calculate_pr 补
+            "roe_latest": fin.roe_latest,
+        }
     result = pr_provider(code) if pr_provider else calculate_pr(code, dividend_total=dividend_total)
     if result is None:
         return {"code": code, "pr": None, "valuation_zone": "无法判定",
@@ -62,8 +86,10 @@ def evaluate_pr_batch(
     dividend_totals: Optional[dict] = None,
 ) -> List[dict]:
     """候选池批量 PR 评估。pr_zone 控制保留的估值区间。"""
+    from src.screener_rate_limit import batch_wait
     results = []
     for code in codes:
+        batch_wait()  # 限流：控制请求间隔
         dt = (dividend_totals or {}).get(code)
         results.append(evaluate_stock_full(
             code, cache, dividend_total=dt, pr_provider=pr_provider))

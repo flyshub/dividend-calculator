@@ -1,10 +1,12 @@
 """选股器真实股息率测试（spec #67，工单 #71）。
 
 覆盖 dividend 快照转换 + 候选池批量计算 + 漏斗② 筛选，
-全部注入 provider / 构造快照，不碰真实网络。
+全部注入 provider / 构造快照，不碰网络。batch_wait 限流已 mock，测试不 sleep。
 
 先例：tests/test_dividend.py（股息计算）、tests/test_screener_cache.py。
 """
+from unittest.mock import patch
+
 import pytest
 
 from src.dividend import DividendResult
@@ -14,6 +16,13 @@ from src.screener_dividend import (
     screen_real_yield,
     to_dividend_snapshot,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_rate_limit():
+    """mock 限流等待，测试不 sleep。"""
+    with patch("src.screener_rate_limit.batch_wait"):
+        yield
 
 
 def _result(code="600900", real=6.0, ttm=6.5, year="2025", period="2025-07~2026-06"):

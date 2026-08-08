@@ -33,16 +33,23 @@ from src.screener_sustainability import (
 
 
 def _load_stock_list(cache: ScreenerCache) -> List[str]:
-    """全 A 股票列表（代码）。用 mootdx get_stock_list_cache，失败返回空。"""
+    """全 A 股票列表（代码）。
+
+    优先读 screener.db 的 stock_list 表（已初始化），mootdx 仅作后备。
+    """
+    # 1. 优先：screener.db stock_list（初始化脚本已写入）
+    with cache._conn() as conn:
+        rows = conn.execute("SELECT code FROM stock_list ORDER BY code").fetchall()
+    if rows:
+        return [r[0] for r in rows]
+    # 2. 后备：mootdx 全列表
     try:
         from src.utils import get_stock_list_cache
         df = get_stock_list_cache()
         if df is None or df.empty:
             return []
-        # mootdx stocks() 返回列含 code
         if "code" in df.columns:
             return df["code"].astype(str).str[-6:].tolist()
-        # 兼容列名（sh600900 形式）
         if "symbol" in df.columns:
             return df["symbol"].astype(str).str[-6:].tolist()
         return []

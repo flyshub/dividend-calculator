@@ -65,8 +65,10 @@ def evaluate_sustainability_batch(
 
     sus_verdict 控制保留的 verdict（默认 可持续/偏弱）。
     """
+    from src.screener_rate_limit import batch_wait
     results = []
     for s in stocks:
+        batch_wait()  # 限流：控制请求间隔
         code = s["code"]
         dividend = s.get("dividend")
         if dividend is None:

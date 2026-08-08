@@ -46,9 +46,20 @@ def compute_dividends_for_candidates(
     *,
     calc_provider: Optional[Callable[[str], Optional[DividendResult]]] = None,
 ) -> List[DividendSnapshot]:
-    """对候选池逐股计算股息，写 dividend_snapshot，返回全部快照。"""
+    """对候选池逐股计算股息，写 dividend_snapshot，返回全部快照。
+
+    逐股拉取受限流控制（RateLimiter），避免触发数据源限流。
+    增量复用：已有且未过期的 dividend_snapshot 直接复用，不重拉。
+    """
+    from src.screener_rate_limit import batch_wait
     snapshots: List[DividendSnapshot] = []
     for code in codes:
+        # 增量复用：缓存未过期则跳过重拉
+        existing = cache.get_dividend(code)
+        if existing is not None and not cache.is_dividend_stale(code):
+            snapshots.append(existing)
+            continue
+        batch_wait()  # 限流：控制请求间隔
         result = compute_dividend(code, calc_provider=calc_provider)
         if result is None:
             continue

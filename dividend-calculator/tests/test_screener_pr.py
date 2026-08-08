@@ -5,6 +5,8 @@
 
 先例：tests/test_pr_calculator.py（classify_valuation 边界）、tests/test_screener_cache.py。
 """
+from unittest.mock import patch
+
 import pytest
 
 from src.pr import PRResult
@@ -15,6 +17,13 @@ from src.screener_pr import (
     evaluate_stock_full,
     screen_pr,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_rate_limit():
+    """mock 限流等待，测试不 sleep。"""
+    with patch("src.screener_rate_limit.batch_wait"):
+        yield
 
 
 def _pr(code="600900", pr_basic=0.5, zone="低估", industry="电力", roe=16.0):

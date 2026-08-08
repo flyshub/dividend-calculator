@@ -4,6 +4,8 @@
 
 先例：tests/test_sustainability_calculator.py（分层评估）、tests/test_screener_cache.py。
 """
+from unittest.mock import patch
+
 import pytest
 
 from src.screener_cache import DividendSnapshot, ScreenerCache
@@ -14,6 +16,13 @@ from src.screener_sustainability import (
     reset_sus_cache,
     screen_sustainability,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_rate_limit():
+    """mock 限流等待，测试不 sleep。"""
+    with patch("src.screener_rate_limit.batch_wait"):
+        yield
 
 
 @pytest.fixture(autouse=True)
