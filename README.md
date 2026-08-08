@@ -5,13 +5,13 @@
 [![Python](https://img.shields.io/badge/Python-3.9%2B-blue)](https://www.python.org/)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPLv3-blue.svg)](#-许可证)
 [![GitHub Pages](https://img.shields.io/badge/GitHub%20Pages-online-brightgreen)](https://flyshub.github.io/dividend-calculator/)
-[![Tests](https://img.shields.io/badge/Tests-221%20Python%20%2B%2070%20JS-green)](dividend-calculator/tests/)
+[![Tests](https://img.shields.io/badge/Tests-242%20Python%20%2B%2078%20JS-green)](dividend-calculator/tests/)
 
 > 📈 **在线体验**（纯前端，无需安装）：<https://flyshub.github.io/dividend-calculator/>
 >
 > 输入 6 位股票代码（如 `600900`）或股票名称（如 `长江电力`），浏览器本地完成全部计算。
 
-![计算演示](screenshots/demo.png)
+![计算演示（移动端）](screenshots/demo-mobile.png)
 
 ---
 
