@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>真实股息率计算器</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232e5be6'/%3E%3Ctext x='16' y='22' font-size='17' text-anchor='middle' fill='%23fff' font-family='-apple-system,sans-serif'%3E息%3C/text%3E%3C/svg%3E">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
   <script src="js/calculator.js"></script>
   <script src="js/datasources.js"></script>
@@ -11,24 +12,49 @@
   <style>
     :root {
       color-scheme: light;
-      --bg: #f6f7f9;
-      --card: #ffffff;
-      --text: #172033;
-      --muted: #667085;
-      --primary: #2563eb;
-      --primary-dark: #1d4ed8;
-      --danger: #b42318;
-      --warning: #b54708;
-      --border: #e4e7ec;
-      /* 字号阶梯（U2）：xs 辅助说明 → sm 注记 → base 标签 → lg 数值 → xl 强调数值 */
+      /* 纸墨：冷调纸底 + 暖墨 */
+      --paper: #f5f6f8;
+      --ink: #1c212b;
+      --muted: #6e7683;
+      --line: #e2e5ea;
+      --line-strong: #cfd4dc;
+      /* 靛蓝：动作色 */
+      --brand: #2e5be6;
+      --brand-dark: #1d3fc7;
+      --brand-soft: #eef2ff;
+      --brand-line: #c7d2fe;
+      /* 碧绿：正收益 / 真实 */
+      --green: #0d7a4e;
+      --green-soft: #e7f5ee;
+      --green-line: #b7e3cd;
+      /* 赭黄：警示 */
+      --amber: #a85a12;
+      --amber-soft: #fdf4e3;
+      --amber-line: #f2ddab;
+      /* 赭红：红旗 */
+      --red: #be2a2a;
+      --red-soft: #fbeeed;
+      --red-line: #f2c6c3;
+      --neutral-soft: #f7f8fa;
+      --focus: rgba(46, 91, 230, 0.25);
+
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 16px;
+      --radius-pill: 999px;
+      --shadow-sm: 0 1px 3px rgba(20, 24, 38, 0.05);
+      --shadow-md: 0 6px 20px rgba(20, 24, 38, 0.09);
+
+      /* 字号阶梯：xs 辅助 → sm 注记 → base 标签 → lg 数值 → xl 强调 → 2xl 标题 → 3xl 主标题 → display 大数字 */
       --fs-xs: 11px;
       --fs-sm: 12px;
       --fs-base: 14px;
       --fs-lg: 16px;
       --fs-xl: 18px;
       --fs-2xl: 22px;
-      --fs-hero: 28px;
-      /* 间距阶梯（U3）：节奏层 token（微调值 2/6/10/14px 保持局部） */
+      --fs-3xl: 26px;
+      --fs-display: 36px;
+      /* 间距阶梯：节奏层 token（微调值 2/6/10/14px 保持局部） */
       --sp-1: 4px;
       --sp-2: 8px;
       --sp-3: 12px;
@@ -37,13 +63,13 @@
       --sp-6: 24px;
       --sp-7: 32px;
       --sp-8: 40px;
-      /* 图表配色 token（U4）：股价=蓝、股息率=橙、高股息区=绿（与页面 token 语义一致） */
-      --chart-price: #2196F3;
-      --chart-yield: #FF5722;
-      --chart-zone: rgba(76, 175, 80, 0.1);
-      --chart-text: #172033;
-      --chart-muted: #667085;
-      --chart-grid: #e4e7ec;
+      /* 图表配色 token：股价=靛蓝、股息率=赭橙、高股息区=绿（与页面 token 语义一致） */
+      --chart-price: #2e5be6;
+      --chart-yield: #e0772b;
+      --chart-zone: rgba(13, 122, 78, 0.08);
+      --chart-text: #1c212b;
+      --chart-muted: #6e7683;
+      --chart-grid: #e2e5ea;
     }
 
     * {
@@ -52,277 +78,620 @@
 
     body {
       margin: 0;
-      background: var(--bg);
-      color: var(--text);
+      background: var(--paper);
+      color: var(--ink);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
       line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    ::selection {
+      background: var(--brand-soft);
+      color: var(--brand);
     }
 
     main {
       max-width: 1040px;
       margin: 0 auto;
-      padding: var(--sp-8) 20px 64px;
+      padding: var(--sp-6) 20px 64px;
     }
 
+    :focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+
+    /* ===== 卡片共享表面 ===== */
     .hero,
     .panel,
     .result-card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 18px;
-      box-shadow: 0 10px 30px rgba(16, 24, 40, 0.06);
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-sm);
+      transition: box-shadow 0.18s ease;
     }
 
+    /* ===== Header / 品牌 ===== */
     .hero {
-      padding: var(--sp-7);
-      margin: var(--sp-5);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--sp-6);
+      padding: var(--sp-6) var(--sp-7);
+      margin: 0 0 var(--sp-6);
     }
-
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-4);
+      min-width: 0;
+    }
+    .brand-mark {
+      flex: 0 0 auto;
+      width: 46px;
+      height: 46px;
+      display: grid;
+      place-items: center;
+      border-radius: 13px;
+      background: linear-gradient(135deg, #3d6bff, #1d3fc7);
+      color: #fff;
+      font-weight: 800;
+      font-size: 19px;
+      box-shadow: 0 5px 14px rgba(46, 91, 230, 0.32);
+    }
+    .eyebrow {
+      margin: 0 0 4px;
+      font-size: var(--fs-xs);
+      letter-spacing: 0.14em;
+      color: var(--brand);
+      font-weight: 650;
+    }
     h1 {
-      margin: 0 0 8px;
-      font-size: var(--fs-hero);
-      letter-spacing: -0.03em;
+      margin: 0 0 2px;
+      font-size: var(--fs-3xl);
+      letter-spacing: -0.02em;
+      font-weight: 750;
     }
-
     .subtitle {
       margin: 0;
       color: var(--muted);
+      font-size: var(--fs-base);
     }
 
-    .formula {
-      display: inline-block;
-      margin: 18px;
-      padding: 10px 14px;
-      border-radius: 999px;
-      background: #eef4ff;
-      color: #1849a9;
-      font-size: 14px;
-    }
-
-    .panel {
-      padding: var(--sp-6);
-      margin: var(--sp-5);
-    }
-
-    form {
+    /* ===== 活公式算式牌（signature） ===== */
+    .equation {
       display: flex;
-      gap: 12px;
+      align-items: center;
+      gap: var(--sp-4);
+      padding: var(--sp-4) var(--sp-5);
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-sm);
+      flex: 0 1 auto;
     }
-
-    input {
-      flex: 1;
-      min-width: 0;
-      padding: 14px 16px;
-      border: 1px solid #d0d5dd;
-      border-radius: 12px;
-      font-size: 16px;
+    .equation__frac {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 200px;
     }
-
-    input:focus {
-      border-color: var(--primary);
-      outline: 3px solid rgba(37, 99, 235, 0.12);
+    .equation__term {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
     }
-
-    button {
-      border: 0;
-      border-radius: 12px;
-      background: var(--primary);
-      color: #fff;
-      cursor: pointer;
-      font-size: 16px;
+    .equation__term + .equation__term {
+      border-top: 1.5px solid var(--ink);
+      padding-top: 6px;
+    }
+    .equation__label {
+      font-size: var(--fs-xs);
+      color: var(--muted);
+      letter-spacing: 0.03em;
+    }
+    .equation__num {
+      font-variant-numeric: tabular-nums;
       font-weight: 650;
-      padding: 0 22px;
-      min-height: 50px;
+      font-size: var(--fs-lg);
     }
-
-    button:hover {
-      background: var(--primary-dark);
+    .equation__unit {
+      font-size: var(--fs-sm);
+      color: var(--muted);
+      font-weight: 500;
     }
-
-    button:disabled {
-      cursor: not-allowed;
-      opacity: 0.65;
-    }
-
-    .examples {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin: 14px;
-    }
-
-    .example-button {
-      min-height: auto;
-      padding: var(--sp-2) 12px;
-      background: #f2f4f7;
-      color: #344054;
-      font-size: 14px;
-    }
-
-    .example-button:hover {
-      background: #e4e7ec;
-    }
-
-    .status {
-      margin: var(--sp-4);
+    .equation__eq {
+      font-size: var(--fs-2xl);
+      font-weight: 650;
       color: var(--muted);
     }
+    .equation__result {
+      text-align: center;
+      padding-left: var(--sp-1);
+    }
+    .equation__result-label {
+      display: block;
+      font-size: var(--fs-xs);
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      margin-bottom: 2px;
+    }
+    .equation__result-num {
+      font-size: var(--fs-display);
+      font-weight: 800;
+      color: var(--green);
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+      letter-spacing: -0.01em;
+    }
+    .equation__result-unit {
+      font-size: 19px;
+      font-weight: 700;
+      margin-left: 2px;
+      color: var(--ink);
+    }
+    .real-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 7px;
+      padding: 2px 9px;
+      border-radius: var(--radius-pill);
+      background: var(--green-soft);
+      border: 1px solid var(--green-line);
+      color: var(--green);
+      font-size: var(--fs-xs);
+      font-weight: 650;
+    }
 
+    /* ===== 警示组件 ===== */
+    .alert {
+      display: flex;
+      align-items: flex-start;
+      gap: var(--sp-2);
+      padding: var(--sp-3) 14px;
+      border: 1px solid;
+      border-left-width: 3px;
+      border-radius: var(--radius-md);
+      font-size: var(--fs-sm);
+      line-height: 1.6;
+      margin: var(--sp-4) 0;
+    }
+    .alert p {
+      margin: 0;
+    }
+    .alert--banner {
+      justify-content: center;
+      text-align: center;
+      margin: 0 0 var(--sp-6);
+    }
+    .alert--warning {
+      background: var(--amber-soft);
+      border-color: var(--amber-line);
+      border-left-color: var(--amber);
+      color: var(--amber);
+    }
+    .alert--danger {
+      background: var(--red-soft);
+      border-color: var(--red-line);
+      border-left-color: var(--red);
+      color: var(--red);
+    }
+    .alert--info {
+      background: var(--brand-soft);
+      border-color: var(--brand-line);
+      border-left-color: var(--brand);
+      color: var(--brand);
+    }
+    .alert--success {
+      background: var(--green-soft);
+      border-color: var(--green-line);
+      border-left-color: var(--green);
+      color: var(--green);
+    }
+
+    /* .error/.warning 保留为警示组件别名 */
     .error,
     .warning {
-      margin: var(--sp-4);
+      margin: var(--sp-4) 0;
       padding: var(--sp-3) 14px;
-      border-radius: 12px;
+      border: 1px solid;
+      border-left-width: 3px;
+      border-radius: var(--radius-md);
+      font-size: var(--fs-sm);
+      line-height: 1.6;
     }
-
     .error {
-      background: #fef3f2;
-      color: var(--danger);
+      background: var(--red-soft);
+      border-color: var(--red-line);
+      border-left-color: var(--red);
+      color: var(--red);
     }
-
     .warning {
-      background: #fffaeb;
-      color: var(--warning);
+      background: var(--amber-soft);
+      border-color: var(--amber-line);
+      border-left-color: var(--amber);
+      color: var(--amber);
     }
 
     .hidden {
       display: none !important;
     }
 
+    /* ===== 搜索面板 ===== */
+    .panel {
+      padding: var(--sp-6);
+      margin: 0 0 var(--sp-6);
+    }
+    form {
+      display: flex;
+      gap: var(--sp-3);
+    }
+    input {
+      flex: 1;
+      min-width: 0;
+      padding: 12px 16px;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-md);
+      font: inherit;
+      font-size: var(--fs-lg);
+      color: var(--ink);
+      background: #fff;
+    }
+    input:focus {
+      border-color: var(--brand);
+      outline: none;
+      box-shadow: 0 0 0 3px var(--focus);
+    }
+    button {
+      border: 0;
+      border-radius: var(--radius-md);
+      background: var(--brand);
+      color: #fff;
+      cursor: pointer;
+      font-size: var(--fs-lg);
+      font-weight: 600;
+      padding: 0 24px;
+      min-height: 48px;
+    }
+    button:hover {
+      background: var(--brand-dark);
+    }
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.65;
+    }
+    .examples {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--sp-2);
+      margin-top: var(--sp-4);
+    }
+    .example-button {
+      min-height: auto;
+      padding: var(--sp-2) 13px;
+      background: var(--neutral-soft);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      color: var(--ink);
+      font-size: var(--fs-sm);
+      font-weight: 500;
+    }
+    .example-button:hover {
+      border-color: var(--brand-line);
+      background: var(--brand-soft);
+      color: var(--brand);
+    }
+    .status {
+      margin-top: var(--sp-4);
+      color: var(--muted);
+      font-size: var(--fs-sm);
+    }
+
+    /* ===== 结果区：账本式网格 ===== */
     .results {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 16px;
+      gap: var(--sp-4);
     }
-
     .result-card {
-      padding: 22px;
+      padding: var(--sp-5);
     }
-
+    .result-card:hover {
+      box-shadow: var(--shadow-md);
+    }
     .result-card.full {
       grid-column: 1 / -1;
     }
-
     .label {
       color: var(--muted);
-      font-size: var(--fs-base);
+      font-size: var(--fs-sm);
+      letter-spacing: 0.02em;
     }
-
-    .value {
-      margin: var(--sp-1);
-      font-size: 24px;
-      font-weight: 750;
+    .result-card.full > .label:first-child {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--ink);
+      font-weight: 700;
+      margin-bottom: var(--sp-3);
+      font-size: var(--fs-lg);
+      letter-spacing: -0.01em;
+    }
+    .result-card.full > .label:first-child::before {
+      content: "";
+      width: 3px;
+      height: 14px;
+      border-radius: 2px;
+      background: var(--brand);
+    }
+    .section-title {
+      grid-column: 1 / -1;
+      margin: var(--sp-2) 0 0;
+      padding: var(--sp-3) 0 var(--sp-2);
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: var(--fs-xs);
+      font-weight: 650;
+      letter-spacing: 0.12em;
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+    .section-title b {
+      color: var(--ink);
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+    .stock-line {
+      display: flex;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .stock-industry {
+      font-size: var(--fs-base);
+      font-weight: 500;
+      color: var(--muted);
+    }
+    .metric-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--sp-3);
+      margin-bottom: var(--sp-3);
+    }
+    .metric-row:last-child {
+      margin-bottom: 0;
+    }
+    .metric-row--center {
+      align-items: center;
     }
     .metric {
       flex: 1;
       min-width: 120px;
     }
 
+    /* ===== 数值：等宽数字 + 字重对比 ===== */
+    .value {
+      margin: var(--sp-1) 0 0;
+      font-size: var(--fs-2xl);
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.01em;
+    }
+    .value--base {
+      font-size: var(--fs-base);
+    }
+    .value--lg {
+      font-size: var(--fs-lg);
+    }
+    .value--xl {
+      font-size: var(--fs-xl);
+    }
+    .value--2xl {
+      font-size: var(--fs-2xl);
+    }
     .yield {
-      color: #067647;
-      font-size: 32px;
+      color: var(--green);
+      font-size: var(--fs-display);
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 10px;
+      border-radius: var(--radius-pill);
+      font-size: var(--fs-sm);
+      font-weight: 650;
+    }
+    .badge--green {
+      background: var(--green-soft);
+      color: var(--green);
+      border: 1px solid var(--green-line);
+    }
+    .badge--orange {
+      background: var(--amber-soft);
+      color: var(--amber);
+      border: 1px solid var(--amber-line);
+    }
+    .badge--red {
+      background: var(--red-soft);
+      color: var(--red);
+      border: 1px solid var(--red-line);
+    }
+    .badge--gray {
+      background: var(--neutral-soft);
+      color: var(--muted);
+      border: 1px solid var(--line);
+    }
+
+    .sus-explanation {
+      margin: var(--sp-3) 0;
+      padding: var(--sp-3) 14px;
+      white-space: pre-line;
+      line-height: 1.7;
+      font-size: var(--fs-base);
+      color: var(--ink);
+      background: var(--neutral-soft);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+    }
+
+    .tip {
+      margin: var(--sp-3) 0;
+      padding: var(--sp-2) 12px;
+      border: 1px solid;
+      border-radius: var(--radius-sm);
+      font-size: var(--fs-sm);
+      line-height: 1.6;
+    }
+    .tip--backtest {
+      background: var(--amber-soft);
+      border-color: var(--amber-line);
+      color: var(--amber);
+    }
+    .tip--applicability {
+      background: var(--brand-soft);
+      border-color: var(--brand-line);
+      color: var(--brand);
     }
 
     table {
       width: 100%;
       border-collapse: collapse;
-      margin: var(--sp-3);
+      margin: var(--sp-2) 0;
     }
-
     th,
     td {
-      border-bottom: 1px solid var(--border);
+      border-bottom: 1px solid var(--line);
       padding: 10px 8px;
       text-align: left;
+      font-size: var(--fs-base);
     }
-
     th {
       color: var(--muted);
-      font-size: 14px;
       font-weight: 600;
-    }
-
-    .explanation {
-      margin: var(--sp-3) 0 0;
-      color: #344054;
-      white-space: pre-wrap;
+      font-size: var(--fs-sm);
     }
 
     #chart-container {
       width: 100%;
       min-height: 400px;
-      margin: var(--sp-2);
-    }
-
-    @media (max-width: 720px) {
-      #chart-container {
-        min-height: 300px;
-      }
+      background: #fbfcfe;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: var(--sp-2);
     }
 
     .note {
-      margin: var(--sp-5);
       color: var(--muted);
-      font-size: var(--fs-base);
+      font-size: var(--fs-sm);
+      margin: var(--sp-1) 0 0;
+    }
+    .note--xs {
+      font-size: var(--fs-xs);
+    }
+    .note--sm {
+      font-size: var(--fs-sm);
+    }
+    .explanation {
+      margin: var(--sp-3) 0 0;
+      color: var(--ink);
+      white-space: pre-wrap;
+    }
+    .site-note {
+      margin-top: var(--sp-6);
+      padding-top: var(--sp-4);
+      border-top: 1px solid var(--line);
+    }
+    .site-note .note {
+      margin: 0;
+      text-align: center;
     }
 
     @media (max-width: 720px) {
       main {
-        padding: var(--sp-6) 12px 40px;
+        padding: var(--sp-4) 12px 40px;
       }
-
-      .hero,
-      .panel,
-      .result-card {
-        border-radius: 14px;
+      .hero {
+        flex-direction: column;
+        align-items: stretch;
+        padding: var(--sp-5);
+        gap: var(--sp-4);
       }
-
+      .equation {
+        width: 100%;
+      }
+      .equation__frac {
+        min-width: 0;
+        flex: 1;
+      }
       form {
         flex-direction: column;
       }
-
       button {
         width: 100%;
       }
-
       .results {
         grid-template-columns: 1fr;
       }
-
-      .examples {
-        gap: var(--sp-2);
-      }
-
       .example-button {
         flex: 1 1 45%;
-        margin: 0;
       }
-
+      h1 {
+        font-size: var(--fs-2xl);
+      }
       .result-card.full table {
         display: block;
         overflow-x: auto;
         white-space: nowrap;
       }
-
-      .hero {
-        padding: var(--sp-6);
-      }
-      h1 {
-        font-size: 28px;
+      #chart-container {
+        min-height: 300px;
       }
     }
   </style>
 </head>
 <body>
   <main>
-    <section class="hero">
-      <h1>真实股息率计算器</h1>
-      <p class="subtitle">输入 A 股股票代码或精确股票名称，调用本项目真实数据链路计算股息率。</p>
-      <div class="formula">真实股息率 = 最近完整财年现金分红总额 / 当前总市值</div>
-    </section>
+    <header class="hero">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">息</span>
+        <div class="brand-text">
+          <p class="eyebrow">A 股 · 真实数据链路</p>
+          <h1>真实股息率计算器</h1>
+          <p class="subtitle">输入 A 股股票代码或精确股票名称，调用本项目真实数据链路计算股息率。</p>
+        </div>
+      </div>
+      <div class="equation" aria-label="真实股息率计算公式">
+        <div class="equation__frac">
+          <div class="equation__term">
+            <span class="equation__label">最近完整财年现金分红总额</span>
+            <span class="equation__num"><span id="eq-dividend">—</span> <span class="equation__unit">亿元</span></span>
+          </div>
+          <div class="equation__term">
+            <span class="equation__label">当前总市值</span>
+            <span class="equation__num"><span id="eq-marketcap">—</span> <span class="equation__unit">亿元</span></span>
+          </div>
+        </div>
+        <div class="equation__eq">=</div>
+        <div class="equation__result">
+          <span class="equation__result-label">真实股息率</span>
+          <div><span id="eq-yield" class="equation__result-num">—</span><span class="equation__result-unit">%</span></div>
+          <span id="eq-real-badge" class="real-badge hidden">✓ 真实</span>
+        </div>
+      </div>
+    </header>
 
-    <div style="max-width:1040px;margin:0 auto 20px;padding:var(--sp-3) 20px;background:#fefce8;border:1px solid #fde68a;border-radius:12px;">
-      <p style="margin:0;color:#854d0e;font-size:var(--fs-base);font-weight:600;text-align:center;">核心投资原则："高股息率是投资结果，而非决策理由。"</p>
+    <div class="alert alert--warning alert--banner" role="note">
+      <p>核心投资原则："高股息率是投资结果，而非决策理由。"</p>
     </div>
 
     <section class="panel">
@@ -341,10 +710,18 @@
     </section>
 
     <section id="result-section" class="results hidden">
+
+      <h2 class="section-title"><b>计算结果</b> / RESULT</h2>
+
       <div class="result-card full">
         <div class="label">股票</div>
-        <div id="stock-title" class="value"></div>
+        <div class="stock-line">
+          <div id="stock-title" class="value"></div>
+          <span id="stock-industry" class="stock-industry"></span>
+        </div>
       </div>
+
+      <h2 class="section-title"><b>股息率</b> / YIELD</h2>
 
       <div class="result-card">
         <div class="label">真实股息率（持股1年以上，免税）</div>
@@ -364,9 +741,11 @@
       <div class="result-card" id="ttm-card">
         <div class="label">TTM 股息率（近12个月实际派发）</div>
         <div id="ttm-yield" class="value yield"></div>
-        <div id="ttm-period" class="note" style="margin:2px;font-size:var(--fs-xs);"></div>
-        <div id="ttm-note" class="note" style="margin:var(--sp-1);font-size:var(--fs-xs);color:#667085;"></div>
+        <div id="ttm-period" class="note note--xs"></div>
+        <div id="ttm-note" class="note note--xs"></div>
       </div>
+
+      <h2 class="section-title"><b>公司概况</b> / PROFILE</h2>
 
       <div class="result-card">
         <div class="label">最新分红年度</div>
@@ -396,8 +775,10 @@
 
       <div class="result-card">
         <div class="label">分红数据来源</div>
-        <div id="dividend-source" class="value" style="font-size:var(--fs-lg);"></div>
+        <div id="dividend-source" class="value value--lg"></div>
       </div>
+
+      <h2 class="section-title"><b>分红明细</b> / DIVIDEND</h2>
 
       <div class="result-card full">
         <div class="label">分红明细</div>
@@ -415,109 +796,105 @@
       <div class="result-card full hidden" id="chart-card">
         <div class="label">股价与股息率走势</div>
         <div id="chart-container"></div>
-        <p id="chart-note" class="note" style="margin:var(--sp-2);font-size:var(--fs-sm);"></p>
+        <p id="chart-note" class="note note--sm"></p>
       </div>
 
       <div class="result-card full hidden" id="sustainability-card">
         <div class="label">股息可持续性分析</div>
-        <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;">
-          <div class="metric" style="min-width:120px;">
+        <div class="metric-row metric-row--center">
+          <div class="metric">
             <div class="label">可持续性结论</div>
-            <div id="sus-verdict" class="value" style="font-size:var(--fs-2xl);"></div>
+            <div id="sus-verdict" class="value"></div>
           </div>
-          <div class="metric" style="min-width:120px;">
+          <div class="metric">
             <div class="label">综合评分</div>
-            <div id="sus-score" class="value" style="font-size:var(--fs-xl);"></div>
-            <div id="sus-score-100" class="note" style="margin:2px;font-size:var(--fs-sm);"></div>
+            <div id="sus-score" class="value value--xl"></div>
+            <div id="sus-score-100" class="note note--sm"></div>
           </div>
-          <div class="metric" style="min-width:120px;">
+          <div class="metric">
             <div class="label">判断分支</div>
-            <div id="sus-branch" class="value" style="font-size:var(--fs-base);"></div>
+            <div id="sus-branch" class="value value--base"></div>
           </div>
         </div>
-        <div id="sus-explanation" style="margin:var(--sp-3);white-space:pre-line;line-height:1.7;font-size:var(--fs-base);color:#444;background:#fafafa;border:1px solid #eee;border-radius:6px;padding:10px 12px;"></div>
-        <div style="display:flex;flex-wrap:wrap;gap:12px;margin:var(--sp-3);">
-          <div class="metric" style="min-width:120px;"><div class="label">股利支付率</div><div id="sus-payout" class="value"></div></div>
-          <div class="metric" style="min-width:120px;"><div class="label">经营现金流覆盖</div><div id="sus-cf-cov" class="value"></div></div>
-          <div class="metric" style="min-width:120px;"><div class="label">自由现金流覆盖</div><div id="sus-fcf-cov" class="value"></div></div>
-          <div class="metric" style="min-width:120px;"><div class="label">资产负债率</div><div id="sus-debt" class="value"></div></div>
+        <div id="sus-explanation" class="sus-explanation"></div>
+        <div class="metric-row">
+          <div class="metric"><div class="label">股利支付率</div><div id="sus-payout" class="value"></div></div>
+          <div class="metric"><div class="label">经营现金流覆盖</div><div id="sus-cf-cov" class="value"></div></div>
+          <div class="metric"><div class="label">自由现金流覆盖</div><div id="sus-fcf-cov" class="value"></div></div>
+          <div class="metric"><div class="label">资产负债率</div><div id="sus-debt" class="value"></div></div>
         </div>
-        <div style="display:flex;flex-wrap:wrap;gap:12px;margin:var(--sp-3);">
-          <div class="metric" style="min-width:120px;"><div class="label">ROE（最新）</div><div id="sus-roe" class="value"></div></div>
-          <div class="metric" style="min-width:120px;"><div class="label">净利润同比</div><div id="sus-np-yoy" class="value"></div></div>
-          <div class="metric" style="min-width:120px;"><div class="label">连续分红年数</div><div id="sus-consecutive" class="value"></div></div>
-          <div class="metric" style="min-width:120px;"><div class="label">各维度评分</div><div id="sus-dims" class="value" style="font-size:var(--fs-base);"></div></div>
+        <div class="metric-row">
+          <div class="metric"><div class="label">ROE（最新）</div><div id="sus-roe" class="value"></div></div>
+          <div class="metric"><div class="label">净利润同比</div><div id="sus-np-yoy" class="value"></div></div>
+          <div class="metric"><div class="label">连续分红年数</div><div id="sus-consecutive" class="value"></div></div>
+          <div class="metric"><div class="label">各维度评分</div><div id="sus-dims" class="value value--base"></div></div>
         </div>
-        <p id="sus-fatal" class="warning" style="margin:var(--sp-3);"></p>
-        <p id="sus-warnings" class="explanation" style="margin:var(--sp-2);color:#b8860b;"></p>
-        <p id="sus-notes" class="note" style="margin:6px;font-size:var(--fs-sm);"></p>
+        <p id="sus-fatal" class="alert alert--danger hidden"></p>
+        <p id="sus-warnings" class="alert alert--warning hidden"></p>
+        <p id="sus-notes" class="note note--sm"></p>
       </div>
 
       <div class="result-card full hidden" id="pr-card">
         <div class="label">市赚率分析</div>
-        <div style="display:flex;flex-wrap:wrap;gap:12px;">
-          <div class="metric" style="min-width:120px;">
+        <div class="metric-row">
+          <div class="metric">
             <div class="label">市赚率（基本版）</div>
             <div id="pr-basic" class="value"></div>
           </div>
-          <div class="metric" style="min-width:120px;">
+          <div class="metric">
             <div class="label">市赚率（修正版）</div>
             <div id="pr-corrected" class="value"></div>
           </div>
-          <div class="metric" style="min-width:120px;">
+          <div class="metric">
             <div class="label">市赚率（PB版）</div>
             <div id="pr-pb" class="value"></div>
           </div>
         </div>
-        <div style="display:flex;flex-wrap:wrap;gap:12px;">
-          <div class="metric" style="min-width:120px;">
+        <div class="metric-row">
+          <div class="metric">
             <div class="label">估值区间</div>
-            <div id="pr-valuation" class="value" style="font-size:var(--fs-xl);"></div>
+            <div id="pr-valuation" class="value value--xl"></div>
           </div>
-          <div class="metric" style="min-width:120px;">
+          <div class="metric">
             <div class="label">扣非PE / PB</div>
-            <div id="pr-pe-pb" class="value" style="font-size:var(--fs-lg);"></div>
+            <div id="pr-pe-pb" class="value value--lg"></div>
           </div>
-          <div class="metric" style="min-width:120px;">
+          <div class="metric">
             <div class="label">ROE（最新 / 5年中位数）</div>
-            <div id="pr-roe" class="value" style="font-size:var(--fs-lg);"></div>
+            <div id="pr-roe" class="value value--lg"></div>
           </div>
         </div>
-        <div style="margin:6px;padding:6px 10px;background:#fff8e6;border-radius:6px;font-size:var(--fs-sm);color:#8a6d1a;line-height:1.5;">
-          回测提示（2016-2024 沪深300）：市赚率用于<b>避贵</b>而非抄底——PR&gt;3 组年均跑输基准 14pct+，最便宜组（PR&lt;1）无超额，超额集中在 PR 1~3。
-        </div>
-        <div style="margin:var(--sp-1);padding:6px 10px;background:#f0f4ff;border-radius:6px;font-size:var(--fs-sm);color:#3457a8;line-height:1.5;">
-          <b>适用性</b>：修正市赚率（N 因子版）仅适用于 ROE 稳定且分红大方的价值股；周期股（景气年分红失真）、科技股（回购代替分红）、成长股（高成长需留存利润，分红率低导致 N 因子失真）均不适用，页面会给出对应警示。
-        </div>
-        <div style="display:flex;flex-wrap:wrap;gap:12px;">
-          <div class="metric" style="min-width:120px;">
+        <div class="tip tip--backtest">回测提示（2016-2024 沪深300）：市赚率用于<b>避贵</b>而非抄底——PR&gt;3 组年均跑输基准 14pct+，最便宜组（PR&lt;1）无超额，超额集中在 PR 1~3。</div>
+        <div class="tip tip--applicability"><b>适用性</b>：修正市赚率（N 因子版）仅适用于 ROE 稳定且分红大方的价值股；周期股（景气年分红失真）、科技股（回购代替分红）、成长股（高成长需留存利润，分红率低导致 N 因子失真）均不适用，页面会给出对应警示。</div>
+        <div class="metric-row">
+          <div class="metric">
             <div class="label">最新报告期净利润</div>
             <div id="pr-profit-ttm" class="value"></div>
           </div>
-          <div class="metric" style="min-width:120px;">
+          <div class="metric">
             <div class="label">年度净利润</div>
             <div id="pr-profit-annual" class="value"></div>
           </div>
-          <div class="metric" style="min-width:120px;">
+          <div class="metric">
             <div class="label">近一年现金分红总额</div>
             <div id="pr-dividend-total" class="value"></div>
           </div>
         </div>
-        <div style="display:flex;flex-wrap:wrap;gap:12px;">
-          <div class="metric" style="min-width:120px;">
+        <div class="metric-row">
+          <div class="metric">
             <div class="label">分红率</div>
             <div id="pr-payout" class="value"></div>
           </div>
-          <div class="metric" style="min-width:120px;">
+          <div class="metric">
             <div class="label">N因子</div>
             <div id="pr-nfactor" class="value"></div>
           </div>
-          <div class="metric" style="min-width:120px;">
+          <div class="metric">
             <div class="label">数据来源</div>
-            <div id="pr-sources" class="value" style="font-size:var(--fs-base);"></div>
+            <div id="pr-sources" class="value value--base"></div>
           </div>
         </div>
-        <p id="pr-explanation" class="explanation" style="margin:var(--sp-3);"></p>
+        <p id="pr-explanation" class="explanation"></p>
         <p id="pr-warning" class="warning hidden"></p>
       </div>
 
@@ -527,7 +904,9 @@
       </div>
     </section>
 
-    <p class="note">本工具完全使用公开市场真实数据（腾讯行情 + 东方财富），全部在浏览器本地计算，不依赖任何后端服务；结果依赖数据源实时可用性。</p>
+    <footer class="site-note">
+      <p class="note">本工具完全使用公开市场真实数据（腾讯行情 + 东方财富），全部在浏览器本地计算，不依赖任何后端服务；结果依赖数据源实时可用性。</p>
+    </footer>
   </main>
 
   <script>
@@ -760,7 +1139,7 @@
             nameTextStyle: { fontSize: 11, color: C_PRICE },
             axisLabel: { fontSize: 11, color: C_MUTED },
             axisLine: { show: true, lineStyle: { color: C_PRICE } },
-            splitLine: { lineStyle: { color: '#f0f0f0', type: 'dashed' } }
+            splitLine: { lineStyle: { color: C_GRID, type: 'dashed' } }
           },
           {
             type: 'value',
@@ -914,12 +1293,14 @@
       document.getElementById('pr-nfactor').textContent = fmtNum(d.n_factor, 4);
       document.getElementById('pr-sources').textContent = '数据源: 腾讯行情 + 东财财报';
 
-      // 构建计算说明
-      var explanation = d.stock_name + '（' + d.stock_code + '）';
-      if (d.industry && d.industry !== '未知行业') {
-        explanation += ' | ' + d.industry;
+      // 行业信息并入股票卡，避免与说明重复
+      const indEl = document.getElementById('stock-industry');
+      if (indEl) {
+        indEl.textContent = (d.industry && d.industry !== '未知行业') ? '| ' + d.industry : '';
       }
-      explanation += '\n核心公式: 市赚率 = PE_TTM × N因子 / ROE';
+
+      // 构建计算说明
+      var explanation = '核心公式: 市赚率 = PE_TTM × N因子 / ROE';
       explanation += '\n  基本版: ' + fmtNum(d.pe_ttm, 2) + ' / ' + fmtNum(d.roe_latest, 2) + '% = ' + fmtNum(d.pr_basic, 3);
       explanation += '\n  修正版: ' + fmtNum(d.pr_corrected, 3) + '（对亏损股/周期股/N倍增长股进行修正）';
       explanation += '\n  PB版: ' + fmtNum(d.pr_pb, 3);
@@ -941,7 +1322,7 @@
       if (prCard) prCard.classList.remove('hidden');
     }
 
-    var SUS_VERDICT_COLOR = { '可持续': '#1a7f37', '偏弱': '#b8860b', '不可持续': '#cf222e', '未评估': '#666' };
+    var SUS_VERDICT_COLOR = { '可持续': '#0d7a4e', '偏弱': '#a85a12', '不可持续': '#be2a2a', '未评估': '#6e7683' };
     var SUS_DIM_LABEL = {
       cf_coverage: '经营现金流覆盖', payout: '股利支付率', profitability: '盈利稳定性',
       balance_sheet: '资产负债表', dividend_history: '分红历史', industry: '行业属性',
@@ -954,7 +1335,7 @@
 
       const verdictEl = document.getElementById('sus-verdict');
       verdictEl.textContent = s.verdict;
-      verdictEl.style.color = SUS_VERDICT_COLOR[s.verdict] || '#666';
+      verdictEl.style.color = SUS_VERDICT_COLOR[s.verdict] || '#6e7683';
 
       document.getElementById('sus-score').textContent = s.score == null ? '评分不足' : (s.score.toFixed(2) + ' / 2.0');
       document.getElementById('sus-score-100').textContent = s.score_100 == null ? '' : ('评分 ' + Number(s.score_100).toFixed(1) + ' / 100');
@@ -983,7 +1364,7 @@
       // 致命红旗
       const fatalEl = document.getElementById('sus-fatal');
       if (s.fatal_flags && s.fatal_flags.length) {
-        fatalEl.textContent = '🔴 致命红旗：\n' + s.fatal_flags.map(function (f) { return '  • ' + f; }).join('\n');
+        fatalEl.textContent = '致命红旗：\n' + s.fatal_flags.map(function (f) { return '  • ' + f; }).join('\n');
         fatalEl.classList.remove('hidden');
       } else {
         fatalEl.classList.add('hidden');
@@ -991,7 +1372,7 @@
       // 情境警示
       const warnEl = document.getElementById('sus-warnings');
       if (s.warning_flags && s.warning_flags.length) {
-        warnEl.textContent = '🟠 情境警示：\n' + s.warning_flags.map(function (w) { return '  • ' + w; }).join('\n');
+        warnEl.textContent = '情境警示：\n' + s.warning_flags.map(function (w) { return '  • ' + w; }).join('\n');
         warnEl.classList.remove('hidden');
       } else {
         warnEl.textContent = '';
@@ -1017,6 +1398,17 @@
       document.getElementById('market-cap').textContent = formatRmbYi(di.total_market_cap);
       document.getElementById('total-dividend').textContent = formatRmbYi(di.total_dividend);
       document.getElementById('dividend-source').textContent = di.dividend_source || '未知';
+
+      // 活公式算式牌：接入真实数据（数据铁律：有数据才填，无数据保留占位）
+      const eqDividend = document.getElementById('eq-dividend');
+      if (eqDividend) eqDividend.textContent = di.total_dividend != null ? (Number(di.total_dividend) / 1e8).toFixed(1) : '—';
+      const eqMcap = document.getElementById('eq-marketcap');
+      if (eqMcap) eqMcap.textContent = di.total_market_cap != null ? (Number(di.total_market_cap) / 1e8).toFixed(1) : '—';
+      const eqYield = document.getElementById('eq-yield');
+      if (eqYield) eqYield.textContent = di.dividend_yield_before_tax != null ? Number(di.dividend_yield_before_tax).toFixed(2) : '—';
+      const eqBadge = document.getElementById('eq-real-badge');
+      if (eqBadge) eqBadge.classList.toggle('hidden', !di.has_dividend);
+
       /* TTM 股息率（#19）：近12个月实际派发 */
       var ttmCard = document.getElementById('ttm-card');
       if (di.dividend_yield_ttm_before_tax != null) {
