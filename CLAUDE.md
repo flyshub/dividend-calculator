@@ -2,6 +2,13 @@
 
 基于 Python 的 A 股真实股息率 + 市赚率计算工具。技术栈：Python 3.9+、mootdx（通达信协议）、腾讯行情、ECharts 前端。
 
+## ⚠️ 路径规范（必读，防漂移）
+
+- **目录结构**：git 根在外层 `/Users/fly/Claude/dividend-calculator`，实际项目在内层 `dividend-calculator/`（非嵌套 git，仅子目录）。
+- **macOS 大小写不敏感**：`/Users/fly/Claude` 与 `/Users/fly/claude` 是**同一物理目录**。混用大小写会导致 `pwd` 漂移、相对路径解析错位（表现为"文件不存在"）。
+- **铁律**：所有命令用**绝对路径 + 大写 `Claude`**：`cd /Users/fly/Claude/dividend-calculator/dividend-calculator`。每个 Bash 命令开头固定 `cd`，不依赖 `pwd` 继承。
+- 项目内相对路径一律以 `dividend-calculator/`（内层）为基准，避免两层前缀 + 大小写叠加出错。
+
 ## 常用命令
 
 ```bash
