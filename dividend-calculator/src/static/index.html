@@ -559,6 +559,34 @@
       border-color: var(--brand-line);
       color: var(--brand);
     }
+    .tip__title {
+      font-weight: 650;
+    }
+    .appl-list {
+      list-style: none;
+      margin: var(--sp-2) 0 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .appl-item {
+      padding: 3px 8px;
+      border-radius: var(--radius-sm);
+      color: var(--muted);
+      border: 1px solid transparent;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+    .appl-item--active {
+      background: var(--brand-soft);
+      border-color: var(--brand-line);
+      color: var(--brand);
+      font-weight: 600;
+    }
+    .appl-item--active::before {
+      content: "▍";
+      margin-right: 4px;
+    }
 
     table {
       width: 100%;
@@ -862,7 +890,15 @@
           </div>
         </div>
         <div class="tip tip--backtest">回测提示（2016-2024 沪深300）：市赚率用于<b>避贵</b>而非抄底——PR&gt;3 组年均跑输基准 14pct+，最便宜组（PR&lt;1）无超额，超额集中在 PR 1~3。</div>
-        <div class="tip tip--applicability"><b>适用性</b>：修正市赚率（N 因子版）仅适用于 ROE 稳定且分红大方的价值股；周期股（景气年分红失真）、科技股（回购代替分红）、成长股（高成长需留存利润，分红率低导致 N 因子失真）均不适用，页面会给出对应警示。</div>
+        <div class="tip tip--applicability">
+          <div class="tip__title">适用性 · 修正市赚率（N 因子版）</div>
+          <ul class="appl-list">
+            <li class="appl-item" data-kind="value">仅适用于 <b>ROE 稳定且分红大方</b>的价值股</li>
+            <li class="appl-item" data-kind="cyclical">周期股 · 盈利随景气波动，单年分红失真，建议优先参考 <b>PB-市赚率</b></li>
+            <li class="appl-item" data-kind="tech">科技股 · 常以回购代替分红，股利支付率失真，修正市赚率可能不适用</li>
+            <li class="appl-item" data-kind="growth">成长股 · 高成长需留存利润、分红率低，N 因子失真，修正市赚率可能不适用</li>
+          </ul>
+        </div>
         <div class="metric-row">
           <div class="metric">
             <div class="label">最新报告期净利润</div>
@@ -1363,8 +1399,16 @@
         if (d.is_loss_stock) explanation += '\n⚠️ 该公司处于亏损状态，市赚率参考价值有限';
         document.getElementById('pr-explanation').textContent = explanation;
 
-        if (d.pr_warning) {
-          prWarning.textContent = d.pr_warning;
+        // 适用性卡：点亮当前股票所属情况（优先级：周期 > 科技 > 成长；无则默认价值股）
+        const activeKind = d.is_cyclical ? 'cyclical' : (d.is_tech ? 'tech' : (d.is_growth ? 'growth' : 'value'));
+        const applItems = document.querySelectorAll('.appl-item');
+        applItems.forEach(function(item) {
+          item.classList.toggle('appl-item--active', item.dataset.kind === activeKind);
+        });
+
+        // 行业适用性已并入适用性卡；底部警示条仅保留亏损股强警示
+        if (d.is_loss_stock) {
+          prWarning.textContent = '该公司处于亏损状态，市赚率参考价值有限';
           prWarning.classList.remove('hidden');
         } else {
           prWarning.classList.add('hidden');
