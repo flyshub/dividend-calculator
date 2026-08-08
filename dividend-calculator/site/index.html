@@ -20,6 +20,14 @@
       --danger: #b42318;
       --warning: #b54708;
       --border: #e4e7ec;
+      /* 字号阶梯（U2）：xs 辅助说明 → sm 注记 → base 标签 → lg 数值 → xl 强调数值 */
+      --fs-xs: 11px;
+      --fs-sm: 12px;
+      --fs-base: 14px;
+      --fs-lg: 16px;
+      --fs-xl: 18px;
+      --fs-2xl: 22px;
+      --fs-hero: 28px;
     }
 
     * {
@@ -56,7 +64,7 @@
 
     h1 {
       margin: 0 0 8px;
-      font-size: 34px;
+      font-size: var(--fs-hero);
       letter-spacing: -0.03em;
     }
 
@@ -181,7 +189,7 @@
 
     .label {
       color: var(--muted);
-      font-size: 14px;
+      font-size: var(--fs-base);
     }
 
     .value {
@@ -235,7 +243,7 @@
     .note {
       margin-top: 20px;
       color: var(--muted);
-      font-size: 14px;
+      font-size: var(--fs-base);
     }
 
     @media (max-width: 720px) {
@@ -276,7 +284,7 @@
     </section>
 
     <div style="max-width:1040px;margin:0 auto 20px;padding:12px 20px;background:#fefce8;border:1px solid #fde68a;border-radius:12px;">
-      <p style="margin:0;color:#854d0e;font-size:15px;font-weight:600;text-align:center;">核心投资原则："高股息率是投资结果，而非决策理由。"</p>
+      <p style="margin:0;color:#854d0e;font-size:var(--fs-base);font-weight:600;text-align:center;">核心投资原则："高股息率是投资结果，而非决策理由。"</p>
     </div>
 
     <section class="panel">
@@ -318,8 +326,8 @@
       <div class="result-card" id="ttm-card">
         <div class="label">TTM 股息率（近12个月实际派发）</div>
         <div id="ttm-yield" class="value yield"></div>
-        <div id="ttm-period" class="note" style="margin-top:2px;font-size:11px;"></div>
-        <div id="ttm-note" class="note" style="margin-top:4px;font-size:11px;color:#667085;"></div>
+        <div id="ttm-period" class="note" style="margin-top:2px;font-size:var(--fs-xs);"></div>
+        <div id="ttm-note" class="note" style="margin-top:4px;font-size:var(--fs-xs);color:#667085;"></div>
       </div>
 
       <div class="result-card">
@@ -350,7 +358,7 @@
 
       <div class="result-card">
         <div class="label">分红数据来源</div>
-        <div id="dividend-source" class="value" style="font-size:16px;"></div>
+        <div id="dividend-source" class="value" style="font-size:var(--fs-lg);"></div>
       </div>
 
       <div class="result-card full">
@@ -369,7 +377,7 @@
       <div class="result-card full hidden" id="chart-card">
         <div class="label">股价与股息率走势</div>
         <div id="chart-container"></div>
-        <p id="chart-note" class="note" style="margin-top:8px;font-size:12px;"></p>
+        <p id="chart-note" class="note" style="margin-top:8px;font-size:var(--fs-sm);"></p>
       </div>
 
       <div class="result-card full hidden" id="sustainability-card">
@@ -377,19 +385,19 @@
         <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;">
           <div class="result-card" style="flex:1;min-width:160px;">
             <div class="label">可持续性结论</div>
-            <div id="sus-verdict" class="value" style="font-size:22px;"></div>
+            <div id="sus-verdict" class="value" style="font-size:var(--fs-2xl);"></div>
           </div>
           <div class="result-card" style="flex:1;min-width:120px;">
             <div class="label">综合评分</div>
-            <div id="sus-score" class="value" style="font-size:18px;"></div>
-            <div id="sus-score-100" class="note" style="margin-top:2px;font-size:12px;"></div>
+            <div id="sus-score" class="value" style="font-size:var(--fs-xl);"></div>
+            <div id="sus-score-100" class="note" style="margin-top:2px;font-size:var(--fs-sm);"></div>
           </div>
           <div class="result-card" style="flex:1;min-width:120px;">
             <div class="label">判断分支</div>
-            <div id="sus-branch" class="value" style="font-size:14px;"></div>
+            <div id="sus-branch" class="value" style="font-size:var(--fs-base);"></div>
           </div>
         </div>
-        <div id="sus-explanation" style="margin-top:12px;white-space:pre-line;line-height:1.7;font-size:13px;color:#444;background:#fafafa;border:1px solid #eee;border-radius:6px;padding:10px 12px;"></div>
+        <div id="sus-explanation" style="margin-top:12px;white-space:pre-line;line-height:1.7;font-size:var(--fs-base);color:#444;background:#fafafa;border:1px solid #eee;border-radius:6px;padding:10px 12px;"></div>
         <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:12px;">
           <div class="result-card" style="flex:1;min-width:120px;"><div class="label">股利支付率</div><div id="sus-payout" class="value"></div></div>
           <div class="result-card" style="flex:1;min-width:120px;"><div class="label">经营现金流覆盖</div><div id="sus-cf-cov" class="value"></div></div>
@@ -400,11 +408,11 @@
           <div class="result-card" style="flex:1;min-width:120px;"><div class="label">ROE（最新）</div><div id="sus-roe" class="value"></div></div>
           <div class="result-card" style="flex:1;min-width:120px;"><div class="label">净利润同比</div><div id="sus-np-yoy" class="value"></div></div>
           <div class="result-card" style="flex:1;min-width:120px;"><div class="label">连续分红年数</div><div id="sus-consecutive" class="value"></div></div>
-          <div class="result-card" style="flex:1;min-width:120px;"><div class="label">各维度评分</div><div id="sus-dims" class="value" style="font-size:13px;"></div></div>
+          <div class="result-card" style="flex:1;min-width:120px;"><div class="label">各维度评分</div><div id="sus-dims" class="value" style="font-size:var(--fs-base);"></div></div>
         </div>
         <p id="sus-fatal" class="warning" style="margin-top:12px;"></p>
         <p id="sus-warnings" class="explanation" style="margin-top:8px;color:#b8860b;"></p>
-        <p id="sus-notes" class="note" style="margin-top:6px;font-size:12px;"></p>
+        <p id="sus-notes" class="note" style="margin-top:6px;font-size:var(--fs-sm);"></p>
       </div>
 
       <div class="result-card full hidden" id="pr-card">
@@ -426,21 +434,21 @@
         <div style="display:flex;flex-wrap:wrap;gap:12px;">
           <div class="result-card" style="flex:1;min-width:120px;">
             <div class="label">估值区间</div>
-            <div id="pr-valuation" class="value" style="font-size:18px;"></div>
+            <div id="pr-valuation" class="value" style="font-size:var(--fs-xl);"></div>
           </div>
           <div class="result-card" style="flex:1;min-width:120px;">
             <div class="label">扣非PE / PB</div>
-            <div id="pr-pe-pb" class="value" style="font-size:16px;"></div>
+            <div id="pr-pe-pb" class="value" style="font-size:var(--fs-lg);"></div>
           </div>
           <div class="result-card" style="flex:1;min-width:120px;">
             <div class="label">ROE（最新 / 5年中位数）</div>
-            <div id="pr-roe" class="value" style="font-size:16px;"></div>
+            <div id="pr-roe" class="value" style="font-size:var(--fs-lg);"></div>
           </div>
         </div>
-        <div style="margin-top:6px;padding:6px 10px;background:#fff8e6;border-radius:6px;font-size:12px;color:#8a6d1a;line-height:1.5;">
+        <div style="margin-top:6px;padding:6px 10px;background:#fff8e6;border-radius:6px;font-size:var(--fs-sm);color:#8a6d1a;line-height:1.5;">
           回测提示（2016-2024 沪深300）：市赚率用于<b>避贵</b>而非抄底——PR&gt;3 组年均跑输基准 14pct+，最便宜组（PR&lt;1）无超额，超额集中在 PR 1~3。
         </div>
-        <div style="margin-top:4px;padding:6px 10px;background:#f0f4ff;border-radius:6px;font-size:12px;color:#3457a8;line-height:1.5;">
+        <div style="margin-top:4px;padding:6px 10px;background:#f0f4ff;border-radius:6px;font-size:var(--fs-sm);color:#3457a8;line-height:1.5;">
           <b>适用性</b>：修正市赚率（N 因子版）仅适用于 ROE 稳定且分红大方的价值股；周期股（景气年分红失真）、科技股（回购代替分红）、成长股（高成长需留存利润，分红率低导致 N 因子失真）均不适用，页面会给出对应警示。
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:12px;">
@@ -468,7 +476,7 @@
           </div>
           <div class="result-card" style="flex:1;min-width:120px;">
             <div class="label">数据来源</div>
-            <div id="pr-sources" class="value" style="font-size:14px;"></div>
+            <div id="pr-sources" class="value" style="font-size:var(--fs-base);"></div>
           </div>
         </div>
         <p id="pr-explanation" class="explanation" style="margin-top:12px;"></p>
