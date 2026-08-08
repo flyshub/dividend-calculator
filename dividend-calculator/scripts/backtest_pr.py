@@ -88,7 +88,7 @@ def _http_session():
         "https://",
         requests.adapters.HTTPAdapter(
             max_retries=Retry(total=3, connect=3, read=3, backoff_factor=1.0,
-                              status_forcelist=[500, 502, 503, 504]),
+                              status_forcelist=[429, 500, 502, 503, 504]),
         ),
     )
     return s
@@ -318,13 +318,19 @@ def build_points(code: str):
         if p0 <= 0 or p1 <= 0:
             continue
 
+        ret_1y = p1 / p0 - 1
+        # 收益合理性过滤：|ret| > 5 视为数据毛刺（腾讯周线异常值，如复权错位），
+        # 剔除避免污染夏普/均值（审查 #25 发现 Q2/Q3 std≈4-5.5 必有 +1000% 级异常）
+        if abs(ret_1y) > 5:
+            continue
+
         points.append({
             "code": code,
             "date": t,
             "year": t.year,
             "pe": pe_val,
             "roe": roe_val,
-            "ret_1y": p1 / p0 - 1,
+            "ret_1y": ret_1y,
         })
     return points
 

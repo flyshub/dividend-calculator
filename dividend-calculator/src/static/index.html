@@ -886,7 +886,7 @@
         document.getElementById('pr-pb').textContent = Number(d.pr_pb || 0).toFixed(3);
         document.getElementById('pr-valuation').textContent = d.valuation_zone || '';
         document.getElementById('pr-pe-pb').textContent = Number(d.pe_ttm || 0).toFixed(2) + ' / ' + Number(d.pb || 0).toFixed(2);
-        document.getElementById('pr-roe').textContent = Number(d.roe_latest || 0).toFixed(2) + '% / ' + Number(d.roe_5y_median || 0).toFixed(2) + '%';
+        document.getElementById('pr-roe').textContent = Number(d.roe_latest || 0).toFixed(2) + '% / ' + Number(d.roe_5y_median || 0).toFixed(2) + '%' + (d.roe_period ? '（' + d.roe_period + '）' : '');
         document.getElementById('pr-profit-ttm').textContent = formatRmbYi(d.net_profit_latest_period);
         document.getElementById('pr-profit-annual').textContent = formatRmbYi(d.net_profit_annual);
         document.getElementById('pr-dividend-total').textContent = formatRmbYi(d.dividend_total);
@@ -905,9 +905,10 @@
         explanation += '\n  基本版: ' + Number(d.pe_ttm || 0).toFixed(2) + ' × ' + Number(d.n_factor || 0).toFixed(4) + ' / ' + Number(d.roe_5y_median || 0).toFixed(2) + '% × 100 = ' + Number(d.pr_basic || 0).toFixed(3);
         explanation += '\n  修正版: ' + Number(d.pr_corrected || 0).toFixed(3) + '（对亏损股/周期股/N倍增长股进行修正）';
         explanation += '\n  PB版: PE/PB × ROE修正 = ' + Number(d.pr_pb || 0).toFixed(3);
-        explanation += '\n估值区间: ' + (d.valuation_zone || '无') + '（市赚率<0.5低估，0.5-1合理偏低，1-2合理偏高，>2高估）';
+        explanation += '\n估值区间: ' + (d.valuation_zone || '无') + '（市赚率≤0.5低估，0.5-1.0合理偏低，1.0-3.0合理，>3.0高估）';
         explanation += '\n净利润: 最新报告期 ' + (Number(d.net_profit_latest_period || 0) / 1e8).toFixed(2) + '亿, 年度 ' + (Number(d.net_profit_annual || 0) / 1e8).toFixed(2) + '亿';
         explanation += '\n分红率: ' + Number(d.payout_ratio * 100 || 0).toFixed(1) + '%（近一年分红总额 / 年度净利润）';
+        explanation += '\n口径说明: PE 为 TTM（含最新季报），ROE 为最新年报（' + (d.roe_period || '未知报告期') + '）——ROE 仅定期披露无实时值，与 PE 组合是市赚率公式的定义口径';
         if (d.is_loss_stock) explanation += '\n⚠️ 该公司处于亏损状态，市赚率参考价值有限';
         document.getElementById('pr-explanation').textContent = explanation;
 

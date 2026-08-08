@@ -136,7 +136,7 @@ def print_result(result: PRResult):
     print("          N = 0.5 / 股利支付率, 区间 [1.0, 2.0]")
     print("  PB-PR   = PB / ROE² / 100")
     print()
-    print("  估值四档: ≤0.5低估 | 0.5~0.7合理偏低 | 0.7~1.0合理 | >1.0高估")
+    print("  估值四档: ≤0.5低估 | 0.5~1.0合理偏低 | 1.0~3.0合理 | >3.0高估")
     print()
 
 

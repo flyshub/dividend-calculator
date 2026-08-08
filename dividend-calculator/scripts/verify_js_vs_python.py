@@ -61,7 +61,7 @@ _HTTP.mount(
     "https://",
     requests.adapters.HTTPAdapter(
         max_retries=Retry(total=3, connect=3, read=3, backoff_factor=1.0,
-                          status_forcelist=[500, 502, 503, 504]),
+                          status_forcelist=[429, 500, 502, 503, 504]),
     ),
 )
 
