@@ -380,7 +380,8 @@
 
   function classifyValuation(pr) {
     // 阈值基于 PR 历史回测（2016-2024 沪深300，见 docs/BACKTEST_REPORT.md）：
-    // 超额集中在 PR 1~3，PR>3 显著跑输，PR<1 无超额。与 Python classify_valuation 逐字一致。
+    // 低估(≤0.5)与合理偏低(0.5-1)超额 +4%+，合理(1-3)接近中性，高估(>3)跑输 5%+。
+    // 与 Python classify_valuation 逐字一致。
     if (pr == null) return '无法判定';
     if (pr <= 0.5) return '低估';
     if (pr <= 1.0) return '合理偏低';
