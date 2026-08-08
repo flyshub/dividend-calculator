@@ -868,7 +868,7 @@
       explanation += '\n估值区间: ' + (d.valuation_zone || '无') + '（市赚率≤0.5低估，0.5-1.0合理偏低，1.0-3.0合理，>3.0高估）';
       explanation += '\n净利润: 最新报告期 ' + (Number(d.net_profit_latest_period || 0) / 1e8).toFixed(2) + '亿, 年度 ' + (Number(d.net_profit_annual || 0) / 1e8).toFixed(2) + '亿';
       explanation += '\n分红率: ' + (d.payout_ratio == null ? '无' : Number(d.payout_ratio * 100).toFixed(1) + '%（近一年分红总额 / 年度净利润）');
-      explanation += '\n口径说明: PE 为 TTM（含最新季报），ROE 为最新年报（' + (d.roe_period || '未知报告期') + '）——两者时间窗口不同是市赚率行业惯例';
+      explanation += '\n口径说明: PE 为 TTM（含最新季报），ROE 为最新年报（' + (d.roe_period || '未知报告期') + '）——ROE 仅定期披露无实时值，与 PE 组合是市赚率公式的定义口径';
       if (d.is_loss_stock) explanation += '\n⚠️ 该公司处于亏损状态，市赚率参考价值有限';
       document.getElementById('pr-explanation').textContent = explanation;
 
