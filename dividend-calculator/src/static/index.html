@@ -210,6 +210,10 @@
       font-size: 24px;
       font-weight: 750;
     }
+    .metric {
+      flex: 1;
+      min-width: 120px;
+    }
 
     .yield {
       color: #067647;
@@ -396,32 +400,32 @@
       <div class="result-card full hidden" id="sustainability-card">
         <div class="label">股息可持续性分析</div>
         <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;">
-          <div class="result-card" style="flex:1;min-width:160px;">
+          <div class="metric" style="min-width:120px;">
             <div class="label">可持续性结论</div>
             <div id="sus-verdict" class="value" style="font-size:var(--fs-2xl);"></div>
           </div>
-          <div class="result-card" style="flex:1;min-width:120px;">
+          <div class="metric" style="min-width:120px;">
             <div class="label">综合评分</div>
             <div id="sus-score" class="value" style="font-size:var(--fs-xl);"></div>
             <div id="sus-score-100" class="note" style="margin:2px;font-size:var(--fs-sm);"></div>
           </div>
-          <div class="result-card" style="flex:1;min-width:120px;">
+          <div class="metric" style="min-width:120px;">
             <div class="label">判断分支</div>
             <div id="sus-branch" class="value" style="font-size:var(--fs-base);"></div>
           </div>
         </div>
         <div id="sus-explanation" style="margin:var(--sp-3);white-space:pre-line;line-height:1.7;font-size:var(--fs-base);color:#444;background:#fafafa;border:1px solid #eee;border-radius:6px;padding:10px 12px;"></div>
         <div style="display:flex;flex-wrap:wrap;gap:12px;margin:var(--sp-3);">
-          <div class="result-card" style="flex:1;min-width:120px;"><div class="label">股利支付率</div><div id="sus-payout" class="value"></div></div>
-          <div class="result-card" style="flex:1;min-width:120px;"><div class="label">经营现金流覆盖</div><div id="sus-cf-cov" class="value"></div></div>
-          <div class="result-card" style="flex:1;min-width:120px;"><div class="label">自由现金流覆盖</div><div id="sus-fcf-cov" class="value"></div></div>
-          <div class="result-card" style="flex:1;min-width:120px;"><div class="label">资产负债率</div><div id="sus-debt" class="value"></div></div>
+          <div class="metric" style="min-width:120px;"><div class="label">股利支付率</div><div id="sus-payout" class="value"></div></div>
+          <div class="metric" style="min-width:120px;"><div class="label">经营现金流覆盖</div><div id="sus-cf-cov" class="value"></div></div>
+          <div class="metric" style="min-width:120px;"><div class="label">自由现金流覆盖</div><div id="sus-fcf-cov" class="value"></div></div>
+          <div class="metric" style="min-width:120px;"><div class="label">资产负债率</div><div id="sus-debt" class="value"></div></div>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:12px;margin:var(--sp-3);">
-          <div class="result-card" style="flex:1;min-width:120px;"><div class="label">ROE（最新）</div><div id="sus-roe" class="value"></div></div>
-          <div class="result-card" style="flex:1;min-width:120px;"><div class="label">净利润同比</div><div id="sus-np-yoy" class="value"></div></div>
-          <div class="result-card" style="flex:1;min-width:120px;"><div class="label">连续分红年数</div><div id="sus-consecutive" class="value"></div></div>
-          <div class="result-card" style="flex:1;min-width:120px;"><div class="label">各维度评分</div><div id="sus-dims" class="value" style="font-size:var(--fs-base);"></div></div>
+          <div class="metric" style="min-width:120px;"><div class="label">ROE（最新）</div><div id="sus-roe" class="value"></div></div>
+          <div class="metric" style="min-width:120px;"><div class="label">净利润同比</div><div id="sus-np-yoy" class="value"></div></div>
+          <div class="metric" style="min-width:120px;"><div class="label">连续分红年数</div><div id="sus-consecutive" class="value"></div></div>
+          <div class="metric" style="min-width:120px;"><div class="label">各维度评分</div><div id="sus-dims" class="value" style="font-size:var(--fs-base);"></div></div>
         </div>
         <p id="sus-fatal" class="warning" style="margin:var(--sp-3);"></p>
         <p id="sus-warnings" class="explanation" style="margin:var(--sp-2);color:#b8860b;"></p>
@@ -431,57 +435,57 @@
       <div class="result-card full hidden" id="pr-card">
         <div class="label">市赚率分析</div>
         <div style="display:flex;flex-wrap:wrap;gap:12px;">
-          <div class="result-card" style="flex:1;min-width:120px;">
+          <div class="metric" style="min-width:120px;">
             <div class="label">市赚率（基本版）</div>
             <div id="pr-basic" class="value"></div>
           </div>
-          <div class="result-card" style="flex:1;min-width:120px;">
+          <div class="metric" style="min-width:120px;">
             <div class="label">市赚率（修正版）</div>
             <div id="pr-corrected" class="value"></div>
           </div>
-          <div class="result-card" style="flex:1;min-width:120px;">
+          <div class="metric" style="min-width:120px;">
             <div class="label">市赚率（PB版）</div>
             <div id="pr-pb" class="value"></div>
           </div>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:12px;">
-          <div class="result-card" style="flex:1;min-width:120px;">
+          <div class="metric" style="min-width:120px;">
             <div class="label">估值区间</div>
             <div id="pr-valuation" class="value" style="font-size:var(--fs-xl);"></div>
           </div>
-          <div class="result-card" style="flex:1;min-width:120px;">
+          <div class="metric" style="min-width:120px;">
             <div class="label">扣非PE / PB</div>
             <div id="pr-pe-pb" class="value" style="font-size:var(--fs-lg);"></div>
           </div>
-          <div class="result-card" style="flex:1;min-width:120px;">
+          <div class="metric" style="min-width:120px;">
             <div class="label">ROE（最新 / 5年中位数）</div>
             <div id="pr-roe" class="value" style="font-size:var(--fs-lg);"></div>
           </div>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:12px;">
-          <div class="result-card" style="flex:1;min-width:120px;">
+          <div class="metric" style="min-width:120px;">
             <div class="label">最新报告期净利润</div>
             <div id="pr-profit-ttm" class="value"></div>
           </div>
-          <div class="result-card" style="flex:1;min-width:120px;">
+          <div class="metric" style="min-width:120px;">
             <div class="label">年度净利润</div>
             <div id="pr-profit-annual" class="value"></div>
           </div>
-          <div class="result-card" style="flex:1;min-width:120px;">
+          <div class="metric" style="min-width:120px;">
             <div class="label">近一年现金分红总额</div>
             <div id="pr-dividend-total" class="value"></div>
           </div>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:12px;">
-          <div class="result-card" style="flex:1;min-width:120px;">
+          <div class="metric" style="min-width:120px;">
             <div class="label">分红率</div>
             <div id="pr-payout" class="value"></div>
           </div>
-          <div class="result-card" style="flex:1;min-width:120px;">
+          <div class="metric" style="min-width:120px;">
             <div class="label">N因子</div>
             <div id="pr-nfactor" class="value"></div>
           </div>
-          <div class="result-card" style="flex:1;min-width:120px;">
+          <div class="metric" style="min-width:120px;">
             <div class="label">数据来源</div>
             <div id="pr-sources" class="value" style="font-size:var(--fs-base);"></div>
           </div>
