@@ -52,7 +52,7 @@
 | 真实股息率 | 最近完整财年现金分红总额 / 当前总市值（总额法） | `src/dividend.py` |
 | 市赚率基础版 | **PE_TTM / ROE_latest**（最新年报 ROE，非 5Y 中位数） | `src/pr.py:415` |
 | 市赚率修正版 | N × PE_TTM / ROE_latest | 同上 |
-| PB-市赚率 | PB / ROE² / 100 | `src/pr.py` |
+| PB-市赚率 | PB / ROE² / 100（周期股用 5 年 ROE 中位数，非周期股用最新年报 ROE） | `src/pr.py` |
 | **口径标注（P0-2）** | PE 为 TTM（含最新季报），ROE 为最新年报（`roe_period` 标注报告期，如 '2025年报'）——ROE 仅定期披露无实时值，与 PE 组合是市赚率公式的定义口径，已在 PR 结果/前端标注 | `src/pr.py` PRResult.roe_period |
 | N 因子 | 0.5 / 股利支付率，区间 [1.0, 2.0] | `src/pr.py` |
 | 股利支付率 | 分红总额 / 最新年报净利润 | `src/pr.py` |

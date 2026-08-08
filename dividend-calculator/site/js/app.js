@@ -62,16 +62,18 @@
 
     var fin = Calculator.parseFinancials(financeRows);
 
+    var indClass = Calculator.classifyIndustry(industry);
+
     var pr = Calculator.computePr({
       pe_ttm: quote.pe_ttm,
       pb: quote.pb,
       roe_latest: fin.roeLatest,
       roe_period: fin.roePeriod,
+      roe_5y_median: fin.roe5yMedian,
+      is_cyclical: indClass.isCyclical,
       net_profit_annual: fin.netProfitAnnual,
       dividend_total: div.totalDividend > 0 ? div.totalDividend : null,
     });
-
-    var indClass = Calculator.classifyIndustry(industry);
 
     /* 亏损股提示：与 pr.py 一致，追加"该股为亏损股，市赚率不适用" */
     var prWarning = indClass.warning;

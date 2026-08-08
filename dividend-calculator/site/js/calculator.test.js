@@ -167,6 +167,22 @@ test('computePr roe_period 口径标注', () => {
   assert.equal(r.roe_period, '2025年报');
 });
 
+test('computePr 周期股 PB-市赚率用 5 年 ROE 中位数', () => {
+  // 周期股: roe_latest=5, 5年中位数=10 → PB-PR 用 10
+  const cyc = Calc.computePr({ pe_ttm: 10, pb: 4, roe_latest: 5, roe_5y_median: 10, is_cyclical: true, net_profit_annual: 100, dividend_total: 50 });
+  const nonCyc = Calc.computePr({ pe_ttm: 10, pb: 4, roe_latest: 5, roe_5y_median: 10, is_cyclical: false, net_profit_annual: 100, dividend_total: 50 });
+  assert.notEqual(cyc.pr_pb, nonCyc.pr_pb);
+  // 周期股: PB=4, ROE=10% → 4/(0.10²)/100 = 4/0.01/100 = 4.00
+  assert.equal(cyc.pr_pb, 4.00);
+  // 非周期股: PB=4, ROE=5% → 4/(0.05²)/100 = 4/0.0025/100 = 16.00
+  assert.equal(nonCyc.pr_pb, 16.00);
+});
+
+test('computePr 周期股但无 5 年中位数时回退最新 ROE', () => {
+  const r = Calc.computePr({ pe_ttm: 10, pb: 4, roe_latest: 5, roe_5y_median: null, is_cyclical: true, net_profit_annual: 100, dividend_total: 50 });
+  assert.equal(r.pr_pb, 16.00);  // 回退 roe_latest=5
+});
+
 test('parseFinancials ROE中位数与TTM', () => {
   const rows = [
     { REPORT_DATE: '2026-03-31 00:00:00', ROEJQ: '9.0', PARENTNETPROFIT: '67.61' },

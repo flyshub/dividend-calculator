@@ -202,7 +202,7 @@ def compute_python(raw: dict) -> dict:
     fin = _parse_financials(raw["financial_rows"])
 
     # 3. 行业分类（与 JS classifyIndustry 同关键字集）
-    _, _, warning = classify_industry(raw["industry"])
+    is_cyclical, _, warning = classify_industry(raw["industry"])
 
     # 4. 市赚率公式（与 JS computePr 相同核心）
     net_annual = fin["net_profit_annual"]
@@ -222,7 +222,9 @@ def compute_python(raw: dict) -> dict:
     if not is_loss and quote["pe_ttm"] is not None and roe is not None and roe > 0:
         pr_basic = compute_basic_pr(quote["pe_ttm"], roe)
         pr_corrected = compute_corrected_pr(quote["pe_ttm"], roe, n_factor)
-        pr_pb = compute_pb_pr(quote["pb"], roe)
+        # 周期股 PB-市赚率用 5 年 ROE 中位数（对齐 JS computePr）
+        roe_for_pb = fin["roe_5y_median"] if (is_cyclical and fin["roe_5y_median"] is not None) else roe
+        pr_pb = compute_pb_pr(quote["pb"], roe_for_pb)
         zone = classify_valuation(pr_corrected if pr_corrected is not None else pr_basic)
 
     total_market_cap = quote["price"] * total_shares

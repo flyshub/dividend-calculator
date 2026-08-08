@@ -13,6 +13,7 @@
     '煤炭', '钢铁', '有色金属', '石油', '化工', '航运', '建材',
     '水泥', '玻璃', '造纸', '养殖', '房地产', '工程机械', '船舶',
     '化肥', '农药', '化纤', '橡胶', '塑料',
+    '证券', '券商', '保险',
   ];
 
   var TECH_INDUSTRIES = [
@@ -413,9 +414,11 @@
     var prBasic = null, prCorrected = null, prPb = null;
     var valuationZone = '无法判定';
     if (!isLossStock && pe != null && roe != null && roe > 0) {
+      // 周期股 PB-市赚率用 5 年 ROE 中位数（对齐 Python：周期股单年 ROE 失真）
+      var roeForPb = (input.is_cyclical && input.roe_5y_median != null) ? input.roe_5y_median : roe;
       prBasic = computeBasicPR(pe, roe);
       prCorrected = computeCorrectedPR(pe, roe, nFactor);
-      prPb = computePbPR(pb, roe);
+      prPb = computePbPR(pb, roeForPb);
       valuationZone = classifyValuation(prCorrected != null ? prCorrected : prBasic);
     }
 

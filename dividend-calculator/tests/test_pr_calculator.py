@@ -177,3 +177,33 @@ class TestGetIndustryFallback:
         assert industry == "电力"
         assert source == "mootdx F10"
         mock_em.assert_not_called()
+
+
+# ---- calculate_pr 周期股 PB-市赚率用 5 年 ROE 中位数（#25 补充）----
+
+class TestCalculatePrCyclicalPBRoe:
+    """周期股 PB-市赚率用 5 年 ROE 中位数；非周期股用最新年报 ROE。"""
+
+    def _run(self, industry, roe_latest, roe_5y_median):
+        from src.pr import calculate_pr
+        with patch("src.pr._get_pe_pb", return_value=(10.0, 4.0, "测试股", "tencent", [])), \
+             patch("src.pr._get_financial",
+                   return_value=(roe_latest, roe_5y_median, 1e9, 1e9, "mock", [], 2025)), \
+             patch("src.pr._get_industry", return_value=(industry, "mock")), \
+             patch("src.pr._check_pr_fields", return_value=[]):
+            return calculate_pr("600000", stock_name="测试股", dividend_total=5e8)
+
+    def test_cyclical_uses_median(self):
+        # 煤炭（周期）: ROE最新=5, 5年中位=10 → PB-PR 用 10 → 4/(0.1²)/100 = 4.0
+        r = self._run("煤炭", 5.0, 10.0)
+        assert r.pr_pb == 4.0
+
+    def test_non_cyclical_uses_latest(self):
+        # 白酒（非周期）: ROE最新=5 → PB-PR 用 5 → 4/(0.05²)/100 = 16.0
+        r = self._run("白酒", 5.0, 10.0)
+        assert r.pr_pb == 16.0
+
+    def test_cyclical_no_median_falls_back(self):
+        # 周期股但无 5 年中位数 → 回退最新 ROE
+        r = self._run("煤炭", 5.0, None)
+        assert r.pr_pb == 16.0

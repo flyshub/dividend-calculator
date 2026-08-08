@@ -453,10 +453,14 @@ def calculate_pr(
 
     roe_for_calc = roe_latest  # 主用最新年报 ROE
 
+    # 周期股 PB-市赚率用 5 年 ROE 中位数（对齐市赚率定义：周期股单年 ROE 失真，
+    # 用多年 ROE 平滑；丁宁原版用均值，本项目用中位数抗单年极端值）
+    roe_for_pb = roe_5y_median if (is_cyclical and roe_5y_median is not None) else roe_for_calc
+
     if not is_loss_stock and pe_ttm is not None and roe_for_calc is not None and roe_for_calc > 0:
         pr_basic = compute_basic_pr(pe_ttm, roe_for_calc)
         pr_corrected = compute_corrected_pr(pe_ttm, roe_for_calc, n_factor)
-        pr_pb = compute_pb_pr(pb, roe_for_calc)
+        pr_pb = compute_pb_pr(pb, roe_for_pb)
 
         # 估值档位：优先用修正PR（如有），否则用基础PR
         judge_pr = pr_corrected if pr_corrected is not None else pr_basic
