@@ -243,6 +243,26 @@
       font-size: var(--fs-xs);
       font-weight: 650;
     }
+    .real-badge--sustainable {
+      background: var(--green-soft);
+      border-color: var(--green-line);
+      color: var(--green);
+    }
+    .real-badge--weak {
+      background: var(--amber-soft);
+      border-color: var(--amber-line);
+      color: var(--amber);
+    }
+    .real-badge--unsustainable {
+      background: var(--red-soft);
+      border-color: var(--red-line);
+      color: var(--red);
+    }
+    .real-badge--neutral {
+      background: var(--neutral-soft);
+      border-color: var(--line);
+      color: var(--muted);
+    }
 
     /* ===== 警示组件 ===== */
     .alert {
@@ -710,7 +730,7 @@
         <div class="equation__result">
           <span class="equation__result-label">真实股息率</span>
           <div><span id="eq-yield" class="equation__result-num">—</span><span class="equation__result-unit">%</span></div>
-          <span id="eq-real-badge" class="real-badge hidden">✓ 真实</span>
+          <span id="eq-real-badge" class="real-badge hidden"></span>
         </div>
       </div>
     </header>
@@ -952,6 +972,8 @@
 
     let chartInstance = null;
     let chartResizeHandler = null;
+    // 算式牌徽章：暂存 dividend 关键字段，供 PR 异步返回后刷新可持续性徽章
+    let _eqDividendData = null;
 
     function formatPercent(value) {
       return `${Number(value || 0).toFixed(2)}%`;
@@ -1284,7 +1306,44 @@
         });
     }
 
+    // 算式牌徽章五档：高股息按可持续性 verdict（可持续/偏弱/不可持续），低股息/无分红为中性档
+    function renderEqBadge(sus) {
+      const badge = document.getElementById('eq-real-badge');
+      if (!badge) return;
+      const data = _eqDividendData || {};
+      const yieldV = data.dividend_yield_before_tax;
+
+      let text = '';
+      let cls = '';
+      if (sus && sus.triggered && sus.verdict === '可持续') {
+        text = '✓ 可持续';
+        cls = 'real-badge--sustainable';
+      } else if (sus && sus.triggered && sus.verdict === '偏弱') {
+        text = '~ 偏弱';
+        cls = 'real-badge--weak';
+      } else if (sus && sus.triggered && sus.verdict === '不可持续') {
+        text = '✕ 不可持续';
+        cls = 'real-badge--unsustainable';
+      } else if (data.has_dividend && yieldV != null && yieldV > 0 && yieldV <= 4) {
+        text = '• 低股息';
+        cls = 'real-badge--neutral';
+      } else if (data.has_dividend === false || (yieldV != null && yieldV <= 0)) {
+        text = '— 无分红';
+        cls = 'real-badge--neutral';
+      } else {
+        badge.classList.add('hidden');
+        return;
+      }
+      badge.textContent = text;
+      badge.className = 'real-badge ' + cls;
+      badge.classList.remove('hidden');
+    }
+
     function renderResult(data) {
+      _eqDividendData = {
+        has_dividend: data.has_dividend,
+        dividend_yield_before_tax: data.dividend_yield_before_tax,
+      };
       const title = data.stock_name ? `${data.stock_name} (${data.stock_code})` : data.stock_code;
       document.getElementById('stock-title').textContent = title;
       document.getElementById('yield-before-tax').textContent = formatPercent(data.dividend_yield_before_tax);
@@ -1304,8 +1363,7 @@
       if (eqMcap) eqMcap.textContent = data.total_market_cap != null ? (Number(data.total_market_cap) / 1e8).toFixed(1) : '—';
       const eqYield = document.getElementById('eq-yield');
       if (eqYield) eqYield.textContent = data.dividend_yield_before_tax != null ? Number(data.dividend_yield_before_tax).toFixed(2) : '—';
-      const eqBadge = document.getElementById('eq-real-badge');
-      if (eqBadge) eqBadge.classList.toggle('hidden', !data.has_dividend);
+      renderEqBadge(null);
 
       // TTM 股息率（#19）：近12个月实际派发
       const ttmCard = document.getElementById('ttm-card');
@@ -1416,6 +1474,7 @@
 
         if (prCard) prCard.classList.remove('hidden');
         renderSustainability(d.sustainability);
+        renderEqBadge(d.sustainability);
       } catch (err) {
         console.warn('市赚率数据获取失败:', err);
         if (prCard) prCard.classList.add('hidden');
