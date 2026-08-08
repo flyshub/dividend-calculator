@@ -42,12 +42,12 @@ test('computeNFactor 边界0.25→2.0', () => assert.equal(Calc.computeNFactor(0
 // ---- classifyValuation ----
 test('classifyValuation 低估', () => assert.equal(Calc.classifyValuation(0.3), '低估'));
 test('classifyValuation 合理偏低', () => assert.equal(Calc.classifyValuation(0.6), '合理偏低'));
-test('classifyValuation 合理', () => assert.equal(Calc.classifyValuation(0.85), '合理'));
-test('classifyValuation 高估', () => assert.equal(Calc.classifyValuation(1.5), '高估'));
+test('classifyValuation 合理', () => assert.equal(Calc.classifyValuation(1.5), '合理'));
+test('classifyValuation 高估', () => assert.equal(Calc.classifyValuation(4.0), '高估'));
 test('classifyValuation null', () => assert.equal(Calc.classifyValuation(null), '无法判定'));
 test('classifyValuation 边界0.5', () => assert.equal(Calc.classifyValuation(0.5), '低估'));
-test('classifyValuation 边界0.7', () => assert.equal(Calc.classifyValuation(0.7), '合理偏低'));
-test('classifyValuation 边界1.0', () => assert.equal(Calc.classifyValuation(1.0), '合理'));
+test('classifyValuation 边界1.0', () => assert.equal(Calc.classifyValuation(1.0), '合理偏低'));
+test('classifyValuation 边界3.0', () => assert.equal(Calc.classifyValuation(3.0), '合理'));
 
 // ---- classifyIndustry ----
 test('classifyIndustry 周期行业', () => {

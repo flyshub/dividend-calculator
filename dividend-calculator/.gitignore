@@ -33,3 +33,6 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# Backtest data (SQLite db + downloaded constituents, regenerable)
+data/

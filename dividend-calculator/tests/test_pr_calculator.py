@@ -106,10 +106,10 @@ class TestClassifyValuation:
         assert classify_valuation(0.6) == "合理偏低"
 
     def test_fair(self):
-        assert classify_valuation(0.85) == "合理"
+        assert classify_valuation(1.5) == "合理"
 
     def test_overvalued(self):
-        assert classify_valuation(1.5) == "高估"
+        assert classify_valuation(4.0) == "高估"
 
     def test_none(self):
         assert classify_valuation(None) == "无法判定"
@@ -117,11 +117,11 @@ class TestClassifyValuation:
     def test_boundary_05(self):
         assert classify_valuation(0.5) == "低估"
 
-    def test_boundary_07(self):
-        assert classify_valuation(0.7) == "合理偏低"
-
     def test_boundary_10(self):
-        assert classify_valuation(1.0) == "合理"
+        assert classify_valuation(1.0) == "合理偏低"
+
+    def test_boundary_30(self):
+        assert classify_valuation(3.0) == "合理"
 
 
 # ---- classify_industry ----
