@@ -1032,7 +1032,7 @@
       // P4：重置综合信号条徽章，避免跨搜索残留
       ['signal-valuation', 'signal-yield', 'signal-sustainability', 'pr-valuation-badge'].forEach(function(id) {
         const el = document.getElementById(id);
-        if (el) { el.textContent = ''; el.className = 'badge badge--gray'; }
+        if (el) { el.textContent = ''; el.className = 'badge badge--gray hidden'; }
       });
       const valNote = document.getElementById('pr-valuation-note');
       if (valNote) valNote.textContent = '';
@@ -1426,16 +1426,19 @@
         if (s && s.triggered && s.verdict === '可持续') {
           sigSus.textContent = '可持续';
           sigSus.className = 'badge badge--green';
+          sigSus.classList.remove('hidden');
         } else if (s && s.triggered && s.verdict === '偏弱') {
           sigSus.textContent = '可持续偏弱';
           sigSus.className = 'badge badge--orange';
+          sigSus.classList.remove('hidden');
         } else if (s && s.triggered && s.verdict === '不可持续') {
           sigSus.textContent = '不可持续';
           sigSus.className = 'badge badge--red';
+          sigSus.classList.remove('hidden');
         } else {
-          // P3：未触发（含未评估）时清空，避免「未评估」与股息率徽章重复
+          // P3：未触发（含未评估）时隐藏，避免空胶囊残留
           sigSus.textContent = '';
-          sigSus.className = 'badge badge--gray';
+          sigSus.className = 'badge badge--gray hidden';
         }
       }
     }
