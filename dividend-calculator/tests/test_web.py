@@ -106,6 +106,7 @@ def test_serialize_pr_result_basic():
         industry="电力",
         is_cyclical=False,
         is_tech=False,
+        is_growth=False,
         is_loss_stock=False,
         pr_warning="",
         pe_pb_source="tencent",
@@ -148,6 +149,7 @@ def test_serialize_pr_result_with_errors():
         industry="银行",
         is_cyclical=True,
         is_tech=False,
+        is_growth=False,
         is_loss_stock=False,
         pr_warning="周期股PR仅供参考",
         pe_pb_source="tencent",
@@ -185,6 +187,7 @@ def test_serialize_pr_result_all_fields():
         industry="白酒",
         is_cyclical=False,
         is_tech=False,
+        is_growth=False,
         is_loss_stock=False,
         pr_warning="",
         pe_pb_source="tencent",
@@ -199,7 +202,7 @@ def test_serialize_pr_result_all_fields():
         "valuation_zone", "pe_ttm", "pb", "roe_latest", "roe_5y_median",
         "net_profit_latest_period", "net_profit_annual", "dividend_total",
         "payout_ratio", "n_factor", "industry", "is_cyclical", "is_tech",
-        "is_loss_stock", "pr_warning", "pe_pb_source", "finance_source",
+        "is_growth", "is_loss_stock", "pr_warning", "pe_pb_source", "finance_source",
         "industry_source", "errors", "roe_period",
     }
     assert set(data.keys()) == expected_keys

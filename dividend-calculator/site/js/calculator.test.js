@@ -73,6 +73,31 @@ test('classifyIndustry 空字符串', () => {
   assert.equal(r.isCyclical, false);
   assert.equal(r.isTech, false);
 });
+test('classifyIndustry 成长行业', () => {
+  const r = Calc.classifyIndustry('光伏设备');
+  assert.equal(r.isCyclical, false);
+  assert.equal(r.isTech, false);
+  assert.equal(r.isGrowth, true);
+  assert.ok(r.warning.includes('成长行业'));
+});
+test('classifyIndustry 成长AI算力', () => {
+  const r = Calc.classifyIndustry('数据中心');
+  assert.equal(r.isGrowth, true);
+});
+test('classifyIndustry 优先级周期>成长', () => {
+  const r = Calc.classifyIndustry('化工新材料');
+  assert.equal(r.isCyclical, true);
+  assert.equal(r.isGrowth, true);
+  assert.ok(r.warning.includes('周期行业'));
+  assert.ok(!r.warning.includes('成长行业'));
+});
+test('classifyIndustry 优先级科技>成长', () => {
+  const r = Calc.classifyIndustry('半导体新材料');
+  assert.equal(r.isTech, true);
+  assert.equal(r.isGrowth, true);
+  assert.ok(r.warning.includes('科技行业'));
+  assert.ok(!r.warning.includes('成长行业'));
+});
 
 // ---- inferFiscalYear（对齐 tests/test_fiscal_year.py）----
 test('inferFiscalYear 3-8月除权→上年度年报', () => {

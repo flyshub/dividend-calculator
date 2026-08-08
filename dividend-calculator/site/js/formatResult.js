@@ -32,6 +32,9 @@ module.exports = function formatResult(r) {
     net_profit_annual: r.pr.net_profit_annual,
     industry: r.pr.industry,
     is_loss_stock: r.pr.is_loss_stock,
+    is_cyclical: r.pr.is_cyclical,
+    is_tech: r.pr.is_tech,
+    is_growth: r.pr.is_growth,
     // 股息可持续性（仅高股息触发时非 null）。衍生指标拍平——防止双端公式发散被 verdict 掩盖
     sustainability_triggered: r.sustainability ? (r.sustainability.triggered ? 1 : 0) : null,
     sustainability_verdict: r.sustainability ? r.sustainability.verdict : null,

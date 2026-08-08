@@ -128,23 +128,48 @@ class TestClassifyValuation:
 
 class TestClassifyIndustry:
     def test_cyclical(self):
-        c, t, w = classify_industry("煤炭开采")
-        assert c is True and t is False
+        c, t, g, w = classify_industry("煤炭开采")
+        assert c is True and t is False and g is False
         assert "周期行业" in w
 
     def test_tech(self):
-        c, t, w = classify_industry("半导体设备")
-        assert c is False and t is True
+        c, t, g, w = classify_industry("半导体设备")
+        assert c is False and t is True and g is False
         assert "科技行业" in w
 
+    def test_growth(self):
+        c, t, g, w = classify_industry("光伏设备")
+        assert c is False and t is False and g is True
+        assert "成长行业" in w
+
+    def test_growth_ai_adjacent(self):
+        # AI 应用行业标签可能是算力/数据中心（不在 TECH 而在 GROWTH）
+        c, t, g, w = classify_industry("数据中心")
+        assert g is True
+        assert "成长行业" in w
+
+    def test_priority_cyclical_over_growth(self):
+        # 化工新材料：成长（新材料）+ 周期（化工）重叠 → 周期优先（周期用中位数 ROE 是计算级处理）
+        c, t, g, w = classify_industry("化工新材料")
+        assert c is True and g is True
+        assert "周期行业" in w
+        assert "成长行业" not in w
+
+    def test_priority_tech_over_growth(self):
+        # 半导体新材料：成长（新材料）+ 科技（半导体）重叠 → 科技优先
+        c, t, g, w = classify_industry("半导体新材料")
+        assert t is True and g is True
+        assert "科技行业" in w
+        assert "成长行业" not in w
+
     def test_normal(self):
-        c, t, w = classify_industry("食品饮料")
-        assert c is False and t is False
+        c, t, g, w = classify_industry("食品饮料")
+        assert c is False and t is False and g is False
         assert w == ""
 
     def test_empty(self):
-        c, t, w = classify_industry("")
-        assert c is False and t is False
+        c, t, g, w = classify_industry("")
+        assert c is False and t is False and g is False
 
 
 # ---- _get_industry 降级链（pr.py 数据层）----

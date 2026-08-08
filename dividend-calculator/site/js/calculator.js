@@ -21,6 +21,14 @@
     '芯片', '人工智能', '云计算', '大数据',
   ];
 
+  var GROWTH_INDUSTRIES = [
+    '新能源', '光伏', '锂电', '储能', '风电', '氢能', '新能源汽车',
+    '军工', '国防', '机器人', '工业机器人', '智能驾驶', '卫星导航',
+    '生物医药', '创新药', 'CXO', '医疗器械', '医美',
+    '新材料', '碳纤维', '复合材料',
+    '算力', '数据中心', '大模型',
+  ];
+
   function inferFiscalYear(year, month) {
     /* 3-8月除权 → 上年度年报；9-12月 → 当年中报；1-2月 → 上年度中报 */
     if (month >= 3 && month <= 8) {
@@ -381,20 +389,25 @@
   }
 
   function classifyIndustry(industry) {
-    var isCyclical = false, isTech = false;
+    var isCyclical = false, isTech = false, isGrowth = false;
     for (var i = 0; i < CYCLICAL_INDUSTRIES.length; i++) {
       if (industry.indexOf(CYCLICAL_INDUSTRIES[i]) !== -1) { isCyclical = true; break; }
     }
     for (var j = 0; j < TECH_INDUSTRIES.length; j++) {
       if (industry.indexOf(TECH_INDUSTRIES[j]) !== -1) { isTech = true; break; }
     }
+    for (var k = 0; k < GROWTH_INDUSTRIES.length; k++) {
+      if (industry.indexOf(GROWTH_INDUSTRIES[k]) !== -1) { isGrowth = true; break; }
+    }
     var warning = '';
     if (isCyclical) {
       warning = '该股属于周期行业，修正市赚率仅供参考；建议优先参考PB-市赚率';
     } else if (isTech) {
       warning = '该股属于科技行业，修正市赚率可能不适用（科技股常以回购代替分红）';
+    } else if (isGrowth) {
+      warning = '该股属于成长行业，修正市赚率可能不适用（高成长需留存利润，分红率低导致N因子失真）';
     }
-    return { isCyclical: isCyclical, isTech: isTech, warning: warning };
+    return { isCyclical: isCyclical, isTech: isTech, isGrowth: isGrowth, warning: warning };
   }
 
   /* 综合市赚率（对齐 pr.py calculate_pr 的核心计算段） */

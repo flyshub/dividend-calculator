@@ -67,6 +67,7 @@ class PRResult:
     industry: str                         # 行业分类
     is_cyclical: bool                     # 是否周期行业
     is_tech: bool                         # 是否科技行业
+    is_growth: bool                       # 是否成长行业
     is_loss_stock: bool                   # 是否亏损股
     pr_warning: str                       # 市赚率适用性提示
 
@@ -430,7 +431,7 @@ def calculate_pr(
     industry, ind_src = _get_industry(stock_code)
 
     # 4. 分类行业属性
-    is_cyclical, is_tech, pr_warning = classify_industry(industry)
+    is_cyclical, is_tech, is_growth, pr_warning = classify_industry(industry)
 
     # 5. 判断亏损股
     is_loss_stock = False
@@ -489,6 +490,7 @@ def calculate_pr(
         industry=industry,
         is_cyclical=is_cyclical,
         is_tech=is_tech,
+        is_growth=is_growth,
         is_loss_stock=is_loss_stock,
         pr_warning=pr_warning,
         pe_pb_source=pe_pb_src,

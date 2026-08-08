@@ -202,7 +202,7 @@ def compute_python(raw: dict) -> dict:
     fin = _parse_financials(raw["financial_rows"])
 
     # 3. 行业分类（与 JS classifyIndustry 同关键字集）
-    is_cyclical, _, warning = classify_industry(raw["industry"])
+    is_cyclical, is_tech, is_growth, warning = classify_industry(raw["industry"])
 
     # 4. 市赚率公式（与 JS computePr 相同核心）
     net_annual = fin["net_profit_annual"]
@@ -285,6 +285,9 @@ def compute_python(raw: dict) -> dict:
         "net_profit_annual": net_annual,
         "industry": raw["industry"],
         "is_loss_stock": is_loss,
+        "is_cyclical": is_cyclical,
+        "is_tech": is_tech,
+        "is_growth": is_growth,
         "sustainability_triggered": sus_triggered,
         "sustainability_verdict": sus_verdict,
         "sustainability_score": sus_score,
