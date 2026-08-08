@@ -75,6 +75,8 @@ class PRResult:
     finance_source: str                   # 财务数据来源
     industry_source: str                  # 行业数据来源
     errors: List[str] = field(default_factory=list)  # 采集过程中的非致命错误
+    # 口径标注：PE-TTM 与 ROE 时间窗口差异（评审 P0-2，见 DATA_RELIABILITY.md §3）
+    roe_period: Optional[str] = None      # ROE 对应报告期，如 '2025年报'（PE 为 TTM 含最新季报）
 
 
 # ---------------------------------------------------------------------------
@@ -211,9 +213,12 @@ def _amount_to_float(value) -> float:
 
 
 def _get_financial_ths(stock_code: str) -> Tuple[
-    Optional[float], Optional[float], Optional[float], Optional[float], str, List[str],
+    Optional[float], Optional[float], Optional[float], Optional[float], str, List[str], Optional[int],
 ]:
-    """从 akshare/同花顺财报获取 ROE 和净利润（mootdx 不可用时的备选）"""
+    """从 akshare/同花顺财报获取 ROE 和净利润（mootdx 不可用时的备选）
+
+    返回：roe_latest, roe_5y_median, net_profit_latest_period, net_profit_annual, src, errors, roe_period(年报年份)
+    """
     errors: List[str] = []
     try:
         import akshare as ak
@@ -222,7 +227,7 @@ def _get_financial_ths(stock_code: str) -> Tuple[
         df_annual = ak.stock_financial_abstract_ths(symbol=stock_code, indicator="按年度")
         if df_annual.empty:
             errors.append("同花顺年度财报数据为空")
-            return None, None, None, None, "无", errors
+            return None, None, None, None, "无", errors, None
 
         latest_annual = df_annual.iloc[-1]
         roe_latest = _pct_to_float(latest_annual["净资产收益率"])
@@ -281,17 +286,20 @@ def _get_financial_ths(stock_code: str) -> Tuple[
             (net_profit_latest_period or 0) / 1e8,
             net_profit_annual / 1e8,
         )
-        return roe_latest, roe_5y_median, net_profit_latest_period, net_profit_annual, "同花顺（akshare）", errors
+        return roe_latest, roe_5y_median, net_profit_latest_period, net_profit_annual, "同花顺（akshare）", errors, int(years.max() // 10000)
 
     except Exception as e:
         errors.append(f"同花顺财报获取失败: {e}")
-        return None, None, None, None, "无", errors
+        return None, None, None, None, "无", errors, None
 
 
 def _get_financial(stock_code: str) -> Tuple[
-    Optional[float], Optional[float], Optional[float], Optional[float], str, List[str],
+    Optional[float], Optional[float], Optional[float], Optional[float], str, List[str], Optional[int],
 ]:
-    """获取 ROE 和净利润，mootdx F10 优先，akshare/同花顺备用"""
+    """获取 ROE 和净利润，mootdx F10 优先，akshare/同花顺备用
+
+    返回：roe_latest, roe_5y_median, net_profit_latest_period, net_profit_annual, src, errors, roe_period(年报年份)
+    """
     errors: List[str] = []
 
     # 主：mootdx F10
@@ -340,7 +348,8 @@ def _get_financial(stock_code: str) -> Tuple[
                 (net_profit_latest_period or 0) / 1e8,
                 (net_profit_annual or 0) / 1e8,
             )
-            return roe_latest, roe_5y_median, net_profit_latest_period, net_profit_annual, "mootdx F10", errors
+            roe_period = max(roe_history.keys()) if roe_history else None
+            return roe_latest, roe_5y_median, net_profit_latest_period, net_profit_annual, "mootdx F10", errors, roe_period
 
         errors.append("mootdx F10 未获取到有效 ROE 数据")
     except Exception as e:
@@ -348,9 +357,9 @@ def _get_financial(stock_code: str) -> Tuple[
 
     # 备：akshare/同花顺
     logger.info("mootdx 财报不可用，回退到 akshare/同花顺")
-    roe, roe5y, np_ttm, np_annual, src, errs2 = _get_financial_ths(stock_code)
+    roe, roe5y, np_ttm, np_annual, src, errs2, roe_period = _get_financial_ths(stock_code)
     errors.extend(errs2)
-    return roe, roe5y, np_ttm, np_annual, src, errors
+    return roe, roe5y, np_ttm, np_annual, src, errors, roe_period
 
 
 # ---------------------------------------------------------------------------
@@ -414,7 +423,7 @@ def calculate_pr(
         stock_name = tencent_name
 
     # 2. 获取 ROE 和净利润
-    roe_latest, roe_5y_median, net_profit_latest_period, net_profit_annual, fin_src, errs = _get_financial(stock_code)
+    roe_latest, roe_5y_median, net_profit_latest_period, net_profit_annual, fin_src, errs, roe_period_year = _get_financial(stock_code)
     all_errors.extend(errs)
 
     # 3. 获取行业分类
@@ -466,6 +475,7 @@ def calculate_pr(
         pe_ttm=pe_ttm,
         pb=pb,
         roe_latest=roe_latest,
+        roe_period=f"{roe_period_year}年报" if roe_period_year else None,
         roe_5y_median=roe_5y_median,
         net_profit_latest_period=net_profit_latest_period,
         net_profit_annual=net_profit_annual,

@@ -40,7 +40,7 @@ FIELDS_NUMERIC = [
 ]
 FIELDS_STR = ["dividend_year", "valuation_zone", "pr_warning", "industry", "is_loss_stock", "explanation",
               "sustainability_verdict", "sustainability_explanation",
-              "ttm_period", "ttm_source"]
+              "ttm_period", "ttm_source", "roe_period"]
 
 
 # ---------------------------------------------------------------------------
@@ -278,6 +278,7 @@ def compute_python(raw: dict) -> dict:
         "n_factor": n_factor,
         "roe_latest": fin["roe_latest"],
         "roe_5y_median": fin["roe_5y_median"],
+        "roe_period": fin["roe_period"],
         "net_profit_latest_period": fin["net_profit_latest_period"],
         "net_profit_annual": net_annual,
         "industry": raw["industry"],
@@ -354,6 +355,7 @@ def _parse_financials(rows: list) -> dict:
     return {
         "roe_latest": roe_latest,
         "roe_5y_median": roe_5y_median,
+        "roe_period": f"{annual[0]['year']}年报" if annual else None,
         "net_profit_latest_period": net_profit_latest_period,
         "net_profit_annual": net_profit_annual,
     }

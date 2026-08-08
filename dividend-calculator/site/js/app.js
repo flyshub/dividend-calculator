@@ -66,6 +66,7 @@
       pe_ttm: quote.pe_ttm,
       pb: quote.pb,
       roe_latest: fin.roeLatest,
+      roe_period: fin.roePeriod,
       net_profit_annual: fin.netProfitAnnual,
       dividend_total: div.totalDividend > 0 ? div.totalDividend : null,
     });
@@ -136,6 +137,7 @@
         is_loss_stock: pr.is_loss_stock,
         roe_latest: fin.roeLatest,
         roe_5y_median: fin.roe5yMedian,
+        roe_period: pr.roe_period,
         net_profit_latest_period: fin.netProfitTtm,
         net_profit_annual: fin.netProfitAnnual,
         industry: industry,

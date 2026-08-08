@@ -151,6 +151,7 @@ test('parseFinancials 空字符串不污染中位数', () => {
   const r = Calc.parseFinancials(rows);
   assert.equal(r.roeLatest, 15.9);
   assert.equal(r.roe5yMedian, 15.9);  // 有效年报 [13.0, 15.9]，len//2=1 → 15.9（空字符串被排除）
+  assert.equal(r.roePeriod, 2025);
   assert.equal(r.netProfitAnnual, 345.03);
 });
 
@@ -159,6 +160,11 @@ test('computePr 亏损股 pr_warning 由 app 层拼接（verify 覆盖）', () =
   assert.equal(r.is_loss_stock, true);
   assert.equal(r.pr_basic, null);
   assert.equal(r.valuation_zone, '无法判定');
+});
+
+test('computePr roe_period 口径标注', () => {
+  const r = Calc.computePr({ pe_ttm: 10, pb: 2, roe_latest: 20, roe_period: 2025, net_profit_annual: 100, dividend_total: 50 });
+  assert.equal(r.roe_period, '2025年报');
 });
 
 test('parseFinancials ROE中位数与TTM', () => {

@@ -203,7 +203,7 @@
    * 可持续性字段（NETCASH_OPERATE_PK/NETCASH_INVEST_PK/LIABILITY/TOTAL_ASSETS_PK/
    * DEBT_ASSET_RATIO/INTEREST_DEBT_RATIO/INTEREST_COVERAGE_RATIO/银行专项）在 columns=ALL 已含。 */
   function parseFinancials(rows) {
-    if (!rows.length) return { roeLatest: null, roe5yMedian: null, netProfitTtm: null, netProfitAnnual: null, sustainabilityFin: null };
+    if (!rows.length) return { roeLatest: null, roe5yMedian: null, roePeriod: null, netProfitTtm: null, netProfitAnnual: null, sustainabilityFin: null };
 
     /* 严格数值判断：空字符串/空白/null 视为缺失（Number('')===0 会污染中位数） */
     function toNum(v) {
@@ -276,6 +276,7 @@
 
     return {
       roeLatest: roeLatest, roe5yMedian: roe5yMedian,
+      roePeriod: annual.length ? annual[0].year : null,
       netProfitTtm: netProfitTtm, netProfitAnnual: netProfitAnnual,
       sustainabilityFin: sustainabilityFin,
     };
@@ -399,6 +400,7 @@
   function computePr(input) {
     var pe = input.pe_ttm, pb = input.pb, roe = input.roe_latest;
     var netProfitAnnual = input.net_profit_annual, dividendTotal = input.dividend_total;
+    var roePeriod = input.roe_period;
 
     var isLossStock = netProfitAnnual != null && netProfitAnnual <= 0;
 
@@ -422,6 +424,7 @@
       pr_corrected: prCorrected,
       pr_pb: prPb,
       valuation_zone: valuationZone,
+      roe_period: roePeriod != null ? String(roePeriod) + '年报' : null,
       payout_ratio: payoutRatio,
       n_factor: nFactor,
       is_loss_stock: isLossStock,
