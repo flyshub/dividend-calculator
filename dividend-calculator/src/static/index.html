@@ -161,19 +161,21 @@
     .equation {
       display: flex;
       align-items: center;
-      gap: var(--sp-4);
-      padding: var(--sp-4) var(--sp-5);
+      gap: var(--sp-5);
+      padding: var(--sp-4) var(--sp-6);
       background: #fff;
       border: 1px solid var(--line);
       border-radius: var(--radius-lg);
       box-shadow: var(--shadow-sm);
-      flex: 0 1 auto;
+      flex: 1 1 0;
+      min-width: 0;
     }
     .equation__frac {
       display: flex;
       flex-direction: column;
       gap: 4px;
-      min-width: 200px;
+      min-width: 0;
+      flex: 1;
     }
     .equation__term {
       display: flex;
@@ -712,7 +714,7 @@
         <div class="brand-text">
           <p class="eyebrow">A 股 · 真实数据链路</p>
           <h1>真实股息率计算器</h1>
-          <p class="subtitle">输入 A 股股票代码或精确股票名称，调用本项目真实数据链路计算股息率。</p>
+          <p class="subtitle">输入 A 股股票代码或精确股票名称，计算真实股息率。</p>
         </div>
       </div>
       <div class="equation" aria-label="真实股息率计算公式">
