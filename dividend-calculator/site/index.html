@@ -486,9 +486,6 @@
       gap: var(--sp-2);
       margin-top: var(--sp-3);
     }
-    .signal-row .badge {
-      font-size: var(--fs-sm);
-    }
     .valuation-note {
       margin-top: var(--sp-1);
       line-height: 1.5;
@@ -922,6 +919,7 @@
           <div class="metric">
             <div class="label">估值区间</div>
             <div id="pr-valuation" class="value value--xl"></div>
+            <span id="pr-valuation-badge" class="badge badge--gray"></span>
             <div id="pr-valuation-note" class="note note--sm valuation-note"></div>
           </div>
           <div class="metric">
@@ -1032,6 +1030,13 @@
       if (prCard) prCard.classList.add('hidden');
       const susCard = document.getElementById('sustainability-card');
       if (susCard) susCard.classList.add('hidden');
+      // P4：重置综合信号条徽章，避免跨搜索残留
+      ['signal-valuation', 'signal-yield', 'signal-sustainability', 'pr-valuation-badge'].forEach(function(id) {
+        const el = document.getElementById(id);
+        if (el) { el.textContent = ''; el.className = 'badge badge--gray'; }
+      });
+      const valNote = document.getElementById('pr-valuation-note');
+      if (valNote) valNote.textContent = '';
       if (chartInstance) { chartInstance.dispose(); chartInstance = null; }
       if (chartResizeHandler) { window.removeEventListener('resize', chartResizeHandler); chartResizeHandler = null; }
     }
@@ -1359,10 +1364,11 @@
     function renderValuationSignal(d) {
       const zone = d.valuation_zone || '';
       const el = document.getElementById('pr-valuation');
+      const badgeEl = document.getElementById('pr-valuation-badge');
       const noteEl = document.getElementById('pr-valuation-note');
       if (!el) return;
+      // P5：估值保留大数值，彩色徽章作为前缀独立显示
       el.textContent = zone;
-      // ① 徽章着色（复用 .badge--*，对应 V2 回测：低估/合理偏低有超额，高估跑输）
       el.className = 'value value--xl';
       const badgeCls = {
         '低估': 'badge badge--green',
@@ -1370,7 +1376,11 @@
         '合理': 'badge badge--gray',
         '高估': 'badge badge--red',
       }[zone];
-      if (badgeCls) el.className = badgeCls;
+      if (badgeEl) {
+        // S5：无法判定时徽章清空，避免「主值无徽章、chip 灰」样式分裂
+        badgeEl.textContent = badgeCls ? zone : '';
+        badgeEl.className = badgeCls || 'badge badge--gray';
+      }
       // ② 提示语（事实陈述 + 行动导向，V2 结论）
       let note = '';
       if (zone === '低估' || zone === '合理偏低') {
@@ -1386,7 +1396,7 @@
       // ③ 综合信号条：估值徽章
       const sigV = document.getElementById('signal-valuation');
       if (sigV) {
-        sigV.textContent = zone ? '估值 ' + zone : '';
+        sigV.textContent = badgeCls ? '估值 ' + zone : '';
         sigV.className = badgeCls || 'badge badge--gray';
       }
     }
@@ -1411,19 +1421,17 @@
       }
       if (sigSus) {
         const sus = data.sustainability;
-        if (sus && sus.verdict === '可持续') {
+        if (sus && sus.triggered && sus.verdict === '可持续') {
           sigSus.textContent = '可持续';
           sigSus.className = 'badge badge--green';
-        } else if (sus && sus.verdict === '偏弱') {
+        } else if (sus && sus.triggered && sus.verdict === '偏弱') {
           sigSus.textContent = '可持续偏弱';
           sigSus.className = 'badge badge--orange';
-        } else if (sus && sus.verdict === '不可持续') {
+        } else if (sus && sus.triggered && sus.verdict === '不可持续') {
           sigSus.textContent = '不可持续';
           sigSus.className = 'badge badge--red';
-        } else if (sus && sus.verdict) {
-          sigSus.textContent = sus.verdict;
-          sigSus.className = 'badge badge--gray';
         } else {
+          // P3：未触发（含未评估）时清空，避免「未评估」与股息率徽章重复
           sigSus.textContent = '';
           sigSus.className = 'badge badge--gray';
         }
