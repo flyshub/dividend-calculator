@@ -18,10 +18,13 @@
 - 年报 ROE：akshare stock_financial_analysis_indicator(symbol, start_year)，取 12-31 报告期行
 - 价格：腾讯 fqkline 周线（qfqweek，东财 push2his 海外/受限环境易断连）
 
-口径要点（2026-08-08 版）：
+口径要点（2026-08-08 V2 版，issue #53）：
 - 成分股按「当年 6/30 时点」取：每年回测只用当年真实成分（Q1..Q5 分组、基准都基于当年成分）
-- 纯价格收益，未计分红再投资（成分等权 vs 真实指数有口径差）
+- 收益用腾讯 qfqweek（前复权）：已含分红除权调整，近似总收益（非纯价格收益）
 - 亏损股（PE<0）、ROE<=0 排除在 PR 体系外（与项目一致：PR 只对盈利公司有意义）
+- PE 极端值（PE>300）剔除（PE_MAX=300，避免微利股失真污染分组）
+- 收益毛刺（|ret_1y|>5，如复权错位 +1000% 级异常）剔除，避免污染夏普/均值
+- P1 增强（T6/T7）：bucket_absolute_pr 绝对 PR 区间、industry_neutralize 行业中性化
 
 用法:
     python scripts/backtest_pr.py            # 默认沪深300，数据存 data/backtest.db
@@ -43,10 +46,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = PROJECT_ROOT / "data" / "backtest.db"
 CONSTITUENTS_CSV = PROJECT_ROOT / "data" / "csi300.csv"  # 历史成分源，首次自动下载
 CONSTITUENTS_URL = "https://raw.githubusercontent.com/unliftedq/index-constitution/master/history/csi300.csv"
-REBALANCE_MONTH = 6  # 每年 6 月最后交易日调仓
+REBALANCE_MONTH = 6  # 每年 6 月调仓（取该月 30 日前最近已收盘交易日）
 ROE_START_YEAR = 2012  # 保证早期调仓点（2016）有上年年报 ROE
 BACKTEST_START, BACKTEST_END = 2016, 2024  # 调仓年份区间（2025 仅作最后一期 t_next）
 PE_MIN, ROE_MIN = 0.0, 0.0  # 排除亏损股/负 ROE
+PE_MAX = 300.0  # 排除 PE 极端值（亏损边缘股/微利股 >300 视为失真），见 #56
 
 UA_SLEEP = 0.8  # 单股请求间隔，避免东财限流（实测 0.2s 过密会 RemoteDisconnected）
 
@@ -271,14 +275,152 @@ def fetch_price_daily(code: str) -> pd.DataFrame:
 # 回测
 # ---------------------------------------------------------------------------
 
-def rebalance_dates(px: pd.DataFrame, start_year: int, end_year: int) -> list:
-    """每年 6 月最后交易日（调仓时点）。"""
+def rebalance_dates(px: pd.DataFrame, target_dates: list) -> list:
+    """给定目标调仓日（如每年 6/30），返回每个目标日前最近一个已收盘交易日。
+
+    修复口径（#55）：原实现用 `date.month == REBALANCE_MONTH` 过滤，但腾讯周线把
+    6/30 当周 bar 归到 7 月（7/01~7/07），导致实际选中 6/24~6/30、与「6 月最后
+    交易日」不符。现改为：对每个 target_date，取 px 中 date <= target_date 的
+    最后一条——语义精确、周线/日线通用。
+    """
     dates = []
-    for year in range(start_year, end_year + 1):
-        june = px[(px["date"].dt.year == year) & (px["date"].dt.month == REBALANCE_MONTH)]
-        if not june.empty:
-            dates.append(june["date"].iloc[-1])  # 该月最后一个交易日
+    for target in target_dates:
+        t = pd.Timestamp(target)
+        before = px[px["date"] <= t]
+        if not before.empty:
+            dates.append(before["date"].iloc[-1])
     return dates
+
+
+def rebalance_targets(start_year: int, end_year: int, day: int = 30) -> list:
+    """生成每年目标调仓日（默认每年 6/30）。"""
+    return [f"{y}-{REBALANCE_MONTH:02d}-{day:02d}" for y in range(start_year, end_year + 1)]
+
+
+def filter_pe_outliers(points: list, pe_max: float) -> list:
+    """剔除 PE 极端值（> pe_max）的调仓点，避免单只失真污染分组（#56）。"""
+    return [p for p in points if p["pe"] is not None and p["pe"] <= pe_max]
+
+
+def analyze_panel(points: list) -> dict:
+    """纯价格收益分组回测统计：过滤 → 分组 → 各组年化/超额/赢率/最差/夏普 → rho。
+
+    返回 dict：{bench_annual, groups, spearman_rho, valid_points, q1_by_year}。
+    逻辑与原 main 完全一致（回归锚点：#54 要求与报告已知结果一致）。
+    """
+    panel = pd.DataFrame(points)
+    if panel.empty:
+        return {"bench_annual": float("nan"), "groups": [], "spearman_rho": float("nan"),
+                "valid_points": 0, "q1_by_year": {}}
+    panel = panel[(panel["pe"] > PE_MIN) & (panel["roe"] > ROE_MIN)]
+    panel["pr"] = panel["pe"] / panel["roe"]
+
+    # 分组：每年按 PR 升序分 5 组（点数不足时降级为单组，避免 qcut 崩溃）
+    def _assign_group(s):
+        n = s.notna().sum()
+        if n < 5:
+            return pd.Series(["Q1"] * n, index=s.index)
+        return pd.qcut(s.rank(method="first"), 5, labels=["Q1", "Q2", "Q3", "Q4", "Q5"])
+    panel["group"] = panel.groupby("year")["pr"].transform(_assign_group)
+
+    # 基准：同期全体成分等权收益
+    bench = panel.groupby("year")["ret_1y"].mean().mean()
+
+    group_stats = []
+    for g in ["Q1", "Q2", "Q3", "Q4", "Q5"]:
+        sub = panel[panel["group"] == g]
+        rets = sub["ret_1y"]
+        pr_min, pr_max = sub["pr"].min(), sub["pr"].max()
+        ann = (1 + rets.mean()) ** 1 - 1  # 1年持有，均值即年化（几何近似）
+        excess = ann - bench
+        win = (rets > 0).mean()
+        worst = rets.min()
+        sharpe = rets.mean() / rets.std() if rets.std() > 0 else float("nan")
+        group_stats.append({"group": g, "pr_min": float(pr_min), "pr_max": float(pr_max),
+                            "ann": ann, "excess": excess, "win": win, "worst": worst, "sharpe": sharpe})
+
+    # 单调性：组序 vs 年化收益 Spearman
+    means = pd.Series({gs["group"]: gs["ann"] for gs in group_stats})
+    order = [1, 2, 3, 4, 5]
+    rank_means = [means[f"Q{i}"] for i in order]
+    rho = _spearman(order, rank_means)
+
+    # Q1 逐年明细
+    q1 = panel[panel["group"] == "Q1"].groupby("year")["ret_1y"].mean()
+    q1_by_year = {str(y): float(r) for y, r in q1.items()}
+
+    return {
+        "bench_annual": float(bench),
+        "groups": group_stats,
+        "spearman_rho": float(rho),
+        "valid_points": len(panel),
+        "q1_by_year": q1_by_year,
+    }
+
+
+# ---------------------------------------------------------------------------
+# P1 增强（issue #53 T6/T7）：绝对 PR 区间 + 行业中性化
+# ---------------------------------------------------------------------------
+
+PR_BUCKETS = [
+    ("低估(≤0.5)", 0.0, 0.5),
+    ("合理偏低(0.5-1)", 0.5, 1.0),
+    ("合理(1-3)", 1.0, 3.0),
+    ("高估(>3)", 3.0, float("inf")),
+]
+
+
+def bucket_absolute_pr(panel: pd.DataFrame) -> dict:
+    """按绝对 PR 阈值分桶（对应 classify_valuation 估值四档），输出各组统计。
+
+    面板需含 year/pr/ret_1y 列。返回 {bench_annual, buckets, n}。
+    """
+    bench = panel.groupby("year")["ret_1y"].mean().mean()
+    buckets = []
+    for name, lo, hi in PR_BUCKETS:
+        sub = panel[(panel["pr"] > lo) & (panel["pr"] <= hi)]
+        if sub.empty:
+            buckets.append({"bucket": name, "n": 0})
+            continue
+        rets = sub["ret_1y"]
+        ann = rets.mean()
+        excess = ann - bench
+        sharpe = rets.mean() / rets.std() if rets.std() > 0 else float("nan")
+        win = (rets > 0).mean()
+        buckets.append({"bucket": name, "n": len(sub), "ann": float(ann),
+                        "excess": float(excess), "sharpe": float(sharpe), "win": float(win)})
+    return {"bench_annual": float(bench), "buckets": buckets, "n": len(panel)}
+
+
+def industry_neutralize(panel: pd.DataFrame) -> dict:
+    """行业中性化分组超额（T7）：行业内调整收益后重算 Q1-Q5 超额。
+
+    面板需含 year/group/ret_1y/ind1（一级行业）列。方法：ret_1y 减去
+    当年×行业的均值（行业调整收益），再算各 PR 分组超额，检验 PR 因子
+    是否独立于行业。返回 {raw_excess, neutral_excess, bench, n_industries}。
+    """
+    if "ind1" not in panel.columns or panel["ind1"].isna().all():
+        return {"error": "缺少 ind1（一级行业）列"}
+    bench = panel.groupby("year")["ret_1y"].mean().mean()
+    # 行业调整收益：ret - 当年行业均值
+    adj = panel.copy()
+    adj["ret_ind"] = adj.groupby(["year", "ind1"])["ret_1y"].transform(lambda x: x - x.mean())
+    bench_ind = adj.groupby("year")["ret_ind"].mean().mean()
+
+    raw_excess, neutral_excess = {}, {}
+    for g in ["Q1", "Q2", "Q3", "Q4", "Q5"]:
+        sub = panel[panel["group"] == g]
+        sub_adj = adj[adj["group"] == g]
+        raw_excess[g] = sub["ret_1y"].mean() - bench
+        neutral_excess[g] = sub_adj["ret_ind"].mean() - bench_ind
+
+    return {
+        "bench_annual": float(bench),
+        "bench_annual_neutral": float(bench_ind),
+        "raw_excess": {k: float(v) for k, v in raw_excess.items()},
+        "neutral_excess": {k: float(v) for k, v in neutral_excess.items()},
+        "n_industries": int(panel["ind1"].nunique()),
+    }
 
 
 def build_points(code: str):
@@ -289,7 +431,7 @@ def build_points(code: str):
     if pe.empty or roe.empty or len(px) < 60:
         return []
 
-    rb = rebalance_dates(px, 2016, 2025)
+    rb = rebalance_dates(px, rebalance_targets(2016, 2025))
     points = []
     for i, t in enumerate(rb):
         if i + 1 >= len(rb):
@@ -332,7 +474,8 @@ def build_points(code: str):
             "roe": roe_val,
             "ret_1y": ret_1y,
         })
-    return points
+    # PE 极端值过滤（#56）：剔除 PE>PE_MAX 的调仓点
+    return filter_pe_outliers(points, PE_MAX)
 
 
 def main():
@@ -375,41 +518,18 @@ def main():
         log("✘ 无有效数据，终止")
         return 1
 
-    panel = pd.DataFrame(all_points)
-    panel = panel[(panel["pe"] > PE_MIN) & (panel["roe"] > ROE_MIN)]
-    panel["pr"] = panel["pe"] / panel["roe"]
-    log(f"\n有效调仓点: {len(panel)}，覆盖 {panel['year'].nunique()} 年（{panel['year'].min()}-{panel['year'].max()}）")
+    stats = analyze_panel(all_points)
+    bench = stats["bench_annual"]
+    group_stats = stats["groups"]
+    rho = stats["spearman_rho"]
 
-    # 分组：每年按 PR 升序分 5 组
-    panel["group"] = panel.groupby("year")["pr"].transform(
-        lambda s: pd.qcut(s.rank(method="first"), 5, labels=["Q1", "Q2", "Q3", "Q4", "Q5"])
-    )
-
-    # 基准：同期全体成分等权收益
-    bench = panel.groupby("year")["ret_1y"].mean().mean()
-
+    log(f"\n有效调仓点: {stats['valid_points']}（PE 极端值已按 >{PE_MAX:.0f} 过滤）")
     log("\n===== PR 分组回测结果（1 年持有，组内等权） =====")
     log(f"{'组':<4}{'PR区间':<16}{'年化收益':>9}{'超额(vs基准)':>12}{'赢率':>7}{'最差年份':>9}{'夏普':>7}")
-    group_stats = []
-    for g in ["Q1", "Q2", "Q3", "Q4", "Q5"]:
-        sub = panel[panel["group"] == g]
-        rets = sub["ret_1y"]
-        pr_min, pr_max = sub["pr"].min(), sub["pr"].max()
-        ann = (1 + rets.mean()) ** 1 - 1  # 1年持有，均值即年化（几何近似）
-        excess = ann - bench
-        win = (rets > 0).mean()
-        worst = rets.min()
-        sharpe = rets.mean() / rets.std() if rets.std() > 0 else float("nan")
-        group_stats.append({"group": g, "ann": ann, "excess": excess, "win": win, "worst": worst, "sharpe": sharpe})
-        log(f"{g:<4}{pr_min:>7.2f}-{pr_max:<7.2f}{ann*100:>8.2f}%{excess*100:>11.2f}%{win*100:>6.0f}%{worst*100:>8.2f}%{sharpe:>7.2f}")
+    for gs in group_stats:
+        log(f"{gs['group']:<4}{gs['pr_min']:>7.2f}-{gs['pr_max']:<7.2f}{gs['ann']*100:>8.2f}%{gs['excess']*100:>11.2f}%{gs['win']*100:>6.0f}%{gs['worst']*100:>8.2f}%{gs['sharpe']:>7.2f}")
 
     log(f"\n基准（沪深300成分等权年均）: {bench*100:.2f}%")
-
-    # 单调性检验：Q1..Q5 年化收益与组序 Spearman 相关（预期 PR 越低收益越高 → 负相关）
-    means = pd.Series({gs["group"]: gs["ann"] for gs in group_stats})
-    order = [1, 2, 3, 4, 5]
-    rank_means = [means[f"Q{i}"] for i in order]
-    rho = _spearman(order, rank_means)
     log(f"\n单调性检验（Spearman, 组序 vs 年化收益）: rho={rho:.3f}")
     if rho < -0.5:
         log("→ PR 越低收益越高，支持「低估组有 alpha」假说")
@@ -420,9 +540,8 @@ def main():
 
     # Q1 逐年明细（最便宜组是否稳定跑赢）
     log("\nQ1（最低 PR）逐年收益：")
-    q1 = panel[panel["group"] == "Q1"].groupby("year")["ret_1y"].mean()
-    for y, r in q1.items():
-        log(f"  {y}: {r*100:+.2f}%  {'↑跑赢' if r > 0 else '↓亏损'}")
+    for y, r in sorted(stats["q1_by_year"].items()):
+        log(f"  {y}: {r*100:+.2f}%  {'↑正收益' if r > 0 else '↓负收益'}")
 
     # 数据库统计
     with _db() as conn:
@@ -436,7 +555,8 @@ def main():
         "bench_annual": bench,
         "groups": group_stats,
         "spearman_rho": rho,
-        "valid_points": len(panel),
+        "valid_points": stats["valid_points"],
+        "q1_by_year": stats["q1_by_year"],
     }
     (DB_PATH.parent / "result_summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
