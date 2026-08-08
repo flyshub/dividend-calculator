@@ -175,11 +175,11 @@ class TestPRSnapshot:
         assert pb_pr == pytest.approx(round(0.69 / 0.107**2 / 100, 2))
 
     def test_valuation_zones_snapshot(self):
-        """估值四档边界：0.5/0.7/1.0。"""
+        """估值四档边界：0.5/1.0/3.0（回测导向口径，见 docs/BACKTEST_REPORT.md）。"""
         assert classify_valuation(0.5) == "低估"
-        assert classify_valuation(0.7) == "合理偏低"
-        assert classify_valuation(1.0) == "合理"
-        assert classify_valuation(1.5) == "高估"
+        assert classify_valuation(1.0) == "合理偏低"
+        assert classify_valuation(3.0) == "合理"
+        assert classify_valuation(4.0) == "高估"
 
 
 # ---------------------------------------------------------------------------

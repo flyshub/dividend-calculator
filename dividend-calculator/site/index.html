@@ -437,6 +437,9 @@
             <div id="pr-roe" class="value" style="font-size:16px;"></div>
           </div>
         </div>
+        <div style="margin-top:6px;padding:6px 10px;background:#fff8e6;border-radius:6px;font-size:12px;color:#8a6d1a;line-height:1.5;">
+          回测提示（2016-2024 沪深300，<a href="docs/BACKTEST_REPORT.md" target="_blank" style="color:#8a6d1a;">详见报告</a>）：市赚率用于<b>避贵</b>而非抄底——PR&gt;3 组年均跑输基准 14pct+，最便宜组（PR&lt;1）无超额，超额集中在 PR 1~3。
+        </div>
         <div style="display:flex;flex-wrap:wrap;gap:12px;">
           <div class="result-card" style="flex:1;min-width:120px;">
             <div class="label">最新报告期净利润</div>
@@ -862,7 +865,7 @@
       explanation += '\n  基本版: ' + fmtNum(d.pe_ttm, 2) + ' / ' + fmtNum(d.roe_latest, 2) + '% = ' + fmtNum(d.pr_basic, 3);
       explanation += '\n  修正版: ' + fmtNum(d.pr_corrected, 3) + '（对亏损股/周期股/N倍增长股进行修正）';
       explanation += '\n  PB版: ' + fmtNum(d.pr_pb, 3);
-      explanation += '\n估值区间: ' + (d.valuation_zone || '无') + '（市赚率≤0.5低估，0.5-0.7合理偏低，0.7-1.0合理，>1.0高估）';
+      explanation += '\n估值区间: ' + (d.valuation_zone || '无') + '（市赚率≤0.5低估，0.5-1.0合理偏低，1.0-3.0合理，>3.0高估）';
       explanation += '\n净利润: 最新报告期 ' + (Number(d.net_profit_latest_period || 0) / 1e8).toFixed(2) + '亿, 年度 ' + (Number(d.net_profit_annual || 0) / 1e8).toFixed(2) + '亿';
       explanation += '\n分红率: ' + (d.payout_ratio == null ? '无' : Number(d.payout_ratio * 100).toFixed(1) + '%（近一年分红总额 / 年度净利润）');
       if (d.is_loss_stock) explanation += '\n⚠️ 该公司处于亏损状态，市赚率参考价值有限';
