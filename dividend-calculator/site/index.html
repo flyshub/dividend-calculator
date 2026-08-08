@@ -515,6 +515,15 @@
       font-variant-numeric: tabular-nums;
       letter-spacing: -0.01em;
     }
+    .color-green {
+      color: var(--green);
+    }
+    .color-gray {
+      color: var(--muted);
+    }
+    .color-red {
+      color: var(--red);
+    }
     .value--base {
       font-size: var(--fs-base);
     }
@@ -919,7 +928,6 @@
           <div class="metric">
             <div class="label">估值区间</div>
             <div id="pr-valuation" class="value value--xl"></div>
-            <span id="pr-valuation-badge" class="badge badge--gray"></span>
             <div id="pr-valuation-note" class="note note--sm valuation-note"></div>
           </div>
           <div class="metric">
@@ -1031,7 +1039,7 @@
       const susCard = document.getElementById('sustainability-card');
       if (susCard) susCard.classList.add('hidden');
       // P4：重置综合信号条徽章，避免跨搜索残留
-      ['signal-valuation', 'signal-yield', 'signal-sustainability', 'pr-valuation-badge'].forEach(function(id) {
+      ['signal-valuation', 'signal-yield', 'signal-sustainability'].forEach(function(id) {
         const el = document.getElementById(id);
         if (el) { el.textContent = ''; el.className = 'badge badge--gray hidden'; }
       });
@@ -1360,27 +1368,22 @@
       return v == null ? '无' : Number(v).toFixed(digits);
     }
 
-    // 估值信号：着色徽章（①）+ V2 实证提示语（②），事实陈述 + 行动导向
+    // 估值信号：着色 + V2 实证提示语（②），事实陈述 + 行动导向
     function renderValuationSignal(d) {
       const zone = d.valuation_zone || '';
       const el = document.getElementById('pr-valuation');
-      const badgeEl = document.getElementById('pr-valuation-badge');
       const noteEl = document.getElementById('pr-valuation-note');
       if (!el) return;
-      // P5：估值保留大数值，彩色徽章作为前缀独立显示
+      // 估值大数字本身就是标签，直接着色（低估/合理偏低=绿、合理=灰、高估=红）
       el.textContent = zone;
       el.className = 'value value--xl';
-      const badgeCls = {
-        '低估': 'badge badge--green',
-        '合理偏低': 'badge badge--green',
-        '合理': 'badge badge--gray',
-        '高估': 'badge badge--red',
+      const colorCls = {
+        '低估': 'color-green',
+        '合理偏低': 'color-green',
+        '合理': 'color-gray',
+        '高估': 'color-red',
       }[zone];
-      if (badgeEl) {
-        // S5：无法判定时徽章清空，避免「主值无徽章、chip 灰」样式分裂
-        badgeEl.textContent = badgeCls ? zone : '';
-        badgeEl.className = badgeCls || 'badge badge--gray';
-      }
+      if (colorCls) el.className = 'value value--xl ' + colorCls;
       // ② 提示语（事实陈述 + 行动导向，V2 结论）
       let note = '';
       if (zone === '低估' || zone === '合理偏低') {
@@ -1393,11 +1396,17 @@
         note = '无法判定估值区间（数据不足）。';
       }
       if (noteEl) noteEl.textContent = note;
-      // ③ 综合信号条：估值徽章
+      // ③ 综合信号条：估值徽章（三信号条独立视觉，用 badge 类）
       const sigV = document.getElementById('signal-valuation');
       if (sigV) {
-        sigV.textContent = badgeCls ? '估值 ' + zone : '';
-        sigV.className = badgeCls || 'badge badge--gray';
+        const sigCls = {
+          '低估': 'badge badge--green',
+          '合理偏低': 'badge badge--green',
+          '合理': 'badge badge--gray',
+          '高估': 'badge badge--red',
+        }[zone];
+        sigV.textContent = sigCls ? '估值 ' + zone : '';
+        sigV.className = sigCls || 'badge badge--gray';
       }
     }
 
