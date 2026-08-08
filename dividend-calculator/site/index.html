@@ -37,6 +37,13 @@
       --sp-6: 24px;
       --sp-7: 32px;
       --sp-8: 40px;
+      /* 图表配色 token（U4）：股价=蓝、股息率=橙、高股息区=绿（与页面 token 语义一致） */
+      --chart-price: #2196F3;
+      --chart-yield: #FF5722;
+      --chart-zone: rgba(76, 175, 80, 0.1);
+      --chart-text: #172033;
+      --chart-muted: #667085;
+      --chart-grid: #e4e7ec;
     }
 
     * {
@@ -613,6 +620,15 @@
     }
 
     function buildEChartsOption(apiData) {
+      // 图表 token 读取（U4）：配色随 CSS 变量，与页面主色语义一致
+      var cs = getComputedStyle(document.documentElement);
+      var C_PRICE = (cs.getPropertyValue('--chart-price') || C_PRICE).trim();
+      var C_YIELD = (cs.getPropertyValue('--chart-yield') || C_YIELD).trim();
+      var C_ZONE = (cs.getPropertyValue('--chart-zone') || C_ZONE).trim();
+      var C_TEXT = (cs.getPropertyValue('--chart-text') || C_TEXT).trim();
+      var C_MUTED = (cs.getPropertyValue('--chart-muted') || C_MUTED).trim();
+      var C_GRID = (cs.getPropertyValue('--chart-grid') || C_GRID).trim();
+
       var prices = apiData.monthly_prices;
       var dividends = apiData.dividend_records;
       var yieldData = computeDividendYields(prices, dividends);
@@ -668,7 +684,7 @@
       return {
         title: {
           text: title,
-          textStyle: { fontSize: 14, fontWeight: 600, color: '#172033' },
+          textStyle: { fontSize: 14, fontWeight: 600, color: C_TEXT },
           left: 'center',
           top: 5
         },
@@ -696,7 +712,7 @@
         legend: {
           data: ['收盘价', '股息率(最新完整财年)'],
           bottom: 5,
-          textStyle: { fontSize: 12, color: '#667085' }
+          textStyle: { fontSize: 12, color: C_MUTED }
         },
         grid: { left: '10%', right: '10%', top: '16%', bottom: '16%' },
         xAxis: {
@@ -709,9 +725,9 @@
             },
             interval: 2,
             fontSize: 11,
-            color: '#667085'
+            color: C_MUTED
           },
-          axisLine: { lineStyle: { color: '#e4e7ec' } },
+          axisLine: { lineStyle: { color: C_GRID } },
           axisTick: { show: false },
           splitLine: { show: false }
         },
@@ -719,17 +735,17 @@
           {
             type: 'value',
             name: '股价(元)',
-            nameTextStyle: { fontSize: 11, color: '#2196F3' },
-            axisLabel: { fontSize: 11, color: '#667085' },
-            axisLine: { show: true, lineStyle: { color: '#2196F3' } },
+            nameTextStyle: { fontSize: 11, color: C_PRICE },
+            axisLabel: { fontSize: 11, color: C_MUTED },
+            axisLine: { show: true, lineStyle: { color: C_PRICE } },
             splitLine: { lineStyle: { color: '#f0f0f0', type: 'dashed' } }
           },
           {
             type: 'value',
             name: '股息率(%)',
-            nameTextStyle: { fontSize: 11, color: '#FF5722' },
-            axisLabel: { fontSize: 11, color: '#667085', formatter: '{value}%' },
-            axisLine: { show: true, lineStyle: { color: '#FF5722' } },
+            nameTextStyle: { fontSize: 11, color: C_YIELD },
+            axisLabel: { fontSize: 11, color: C_MUTED, formatter: '{value}%' },
+            axisLine: { show: true, lineStyle: { color: C_YIELD } },
             splitLine: { show: false }
           }
         ],
@@ -739,15 +755,15 @@
             type: 'line',
             data: priceValues,
             yAxisIndex: 0,
-            lineStyle: { color: '#2196F3', width: 2 },
-            itemStyle: { color: '#2196F3' },
+            lineStyle: { color: C_PRICE, width: 2 },
+            itemStyle: { color: C_PRICE },
             symbol: 'none',
             smooth: false,
             label: {
               show: true,
               position: 'top',
               fontSize: 10,
-              color: '#2196F3',
+              color: C_PRICE,
               formatter: function(params) {
                 var idx = params.dataIndex;
                 if (idx % 6 === 0 || idx === priceValues.length - 1) {
@@ -759,7 +775,7 @@
             markArea: {
               silent: true,
               data: highYieldZones,
-              itemStyle: { color: 'rgba(76, 175, 80, 0.1)' },
+              itemStyle: { color: C_ZONE },
               label: { show: false }
             },
             markPoint: {
@@ -770,7 +786,7 @@
                   symbol: 'triangle',
                   symbolSize: 14,
                   symbolRotate: 180,
-                  itemStyle: { color: '#FF5722', borderColor: '#fff', borderWidth: 1 }
+                  itemStyle: { color: C_YIELD, borderColor: '#fff', borderWidth: 1 }
                 };
               }),
               animation: false
@@ -781,8 +797,8 @@
             type: 'line',
             data: yieldValues,
             yAxisIndex: 1,
-            lineStyle: { color: '#FF5722', width: 2, type: 'dashed' },
-            itemStyle: { color: '#FF5722' },
+            lineStyle: { color: C_YIELD, width: 2, type: 'dashed' },
+            itemStyle: { color: C_YIELD },
             symbol: 'none',
             smooth: false
           }
