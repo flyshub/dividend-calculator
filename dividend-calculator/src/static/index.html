@@ -463,6 +463,9 @@
           </div>
         </div>
         <p id="pr-explanation" class="explanation" style="margin-top:12px;"></p>
+        <div style="margin-top:6px;padding:6px 10px;background:#f0f4ff;border-radius:6px;font-size:12px;color:#3457a8;line-height:1.5;">
+          <b>适用性</b>：修正市赚率（N 因子版）仅适用于 ROE 稳定且分红大方的价值股；周期股（景气年分红失真）、科技股（回购代替分红）、成长股（高成长需留存利润，分红率低导致 N 因子失真）均不适用，页面会给出对应警示。
+        </div>
         <p id="pr-warning" class="warning hidden"></p>
       </div>
 
@@ -881,9 +884,9 @@
           return;
         }
         var d = payload.data;
-        document.getElementById('pr-basic').textContent = Number(d.pr_basic || 0).toFixed(3);
-        document.getElementById('pr-corrected').textContent = Number(d.pr_corrected || 0).toFixed(3);
-        document.getElementById('pr-pb').textContent = Number(d.pr_pb || 0).toFixed(3);
+        document.getElementById('pr-basic').textContent = d.pr_basic == null ? '无' : Number(d.pr_basic).toFixed(3);
+        document.getElementById('pr-corrected').textContent = d.pr_corrected == null ? '无' : Number(d.pr_corrected).toFixed(3);
+        document.getElementById('pr-pb').textContent = d.pr_pb == null ? '无' : Number(d.pr_pb).toFixed(3);
         document.getElementById('pr-valuation').textContent = d.valuation_zone || '';
         document.getElementById('pr-pe-pb').textContent = Number(d.pe_ttm || 0).toFixed(2) + ' / ' + Number(d.pb || 0).toFixed(2);
         document.getElementById('pr-roe').textContent = Number(d.roe_latest || 0).toFixed(2) + '% / ' + Number(d.roe_5y_median || 0).toFixed(2) + '%' + (d.roe_period ? '（' + d.roe_period + '）' : '');
