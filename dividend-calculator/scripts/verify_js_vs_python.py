@@ -40,7 +40,8 @@ FIELDS_NUMERIC = [
 ]
 FIELDS_STR = ["dividend_year", "valuation_zone", "pr_warning", "industry", "is_loss_stock", "explanation",
               "sustainability_verdict", "sustainability_explanation",
-              "ttm_period", "ttm_source", "roe_period"]
+              "ttm_period", "ttm_source", "roe_period",
+              "is_cyclical", "is_tech", "is_growth"]
 
 
 # ---------------------------------------------------------------------------
@@ -402,7 +403,7 @@ def close(a, b):
 
 
 def main():
-    codes = sys.argv[1:] or ["600900", "600987", "600919", "600887", "600019"]
+    codes = sys.argv[1:] or ["600900", "600987", "600919", "600887", "600019", "601012"]
     print(f"对比股票: {codes}")
 
     fixture = {"stocks": {}}

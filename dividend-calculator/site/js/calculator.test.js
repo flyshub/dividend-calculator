@@ -80,6 +80,10 @@ test('classifyIndustry 成长行业', () => {
   assert.equal(r.isGrowth, true);
   assert.ok(r.warning.includes('成长行业'));
 });
+test('classifyIndustry 成长-太阳能真实标签', () => {
+  const r = Calc.classifyIndustry('电气设备-电源设备-太阳能');
+  assert.equal(r.isGrowth, true);
+});
 test('classifyIndustry 成长AI算力', () => {
   const r = Calc.classifyIndustry('数据中心');
   assert.equal(r.isGrowth, true);

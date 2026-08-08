@@ -142,6 +142,12 @@ class TestClassifyIndustry:
         assert c is False and t is False and g is True
         assert "成长行业" in w
 
+    def test_growth_solar_real_label(self):
+        # 东财真实标签「电气设备-电源设备-太阳能」（隆基/福莱特/阳光电源）
+        c, t, g, w = classify_industry("电气设备-电源设备-太阳能")
+        assert g is True
+        assert "成长行业" in w
+
     def test_growth_ai_adjacent(self):
         # AI 应用行业标签可能是算力/数据中心（不在 TECH 而在 GROWTH）
         c, t, g, w = classify_industry("数据中心")

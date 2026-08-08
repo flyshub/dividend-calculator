@@ -22,7 +22,7 @@
   ];
 
   var GROWTH_INDUSTRIES = [
-    '新能源', '光伏', '锂电', '储能', '风电', '氢能', '新能源汽车',
+    '新能源', '光伏', '太阳能', '锂电', '储能', '风电', '氢能', '新能源汽车',
     '军工', '国防', '机器人', '工业机器人', '智能驾驶', '卫星导航',
     '生物医药', '创新药', 'CXO', '医疗器械', '医美',
     '新材料', '碳纤维', '复合材料',
@@ -968,5 +968,6 @@
     round2: round2,
     CYCLICAL_INDUSTRIES: CYCLICAL_INDUSTRIES,
     TECH_INDUSTRIES: TECH_INDUSTRIES,
+    GROWTH_INDUSTRIES: GROWTH_INDUSTRIES,
   };
 }));
