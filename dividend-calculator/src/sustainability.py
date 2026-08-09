@@ -372,14 +372,15 @@ def assess_with_auto_fetch(stock_code: str,
                           industry: Optional[str] = None,
                           dividend_rows: Optional[List[dict]] = None,
                           financial_rows: Optional[List[dict]] = None,
+                          cashflow_rows: Optional[List[dict]] = None,
                           price_change_1y: Optional[float] = None,
                           top10_holding: Optional[float] = None) -> SustainabilityResult:
     """全自取数版编排：财务/分红/行业/近1年涨跌/股东集中度全走 HTTP 取数。
 
     供 analysis.py 调用 —— 可持续性模块自洽，无需 pr.py 的 mootdx 行业、
     也无需 dividend.py 的 mootdx 分红记录。
-    price_change_1y / top10_holding 可选注入（测试用），默认 None 现场自取；
-    网络失败返回 None 不阻塞评估（#40 B1）。
+    price_change_1y / top10_holding / cashflow_rows 可选注入（测试/预缓存用），
+    默认 None 现场自取；网络失败返回 None 不阻塞评估（#40 B1）。
     """
     if not industry or industry in ("未知行业", "无", ""):
         # 上游（pr.py 走 mootdx）行业不可用时，走东财重取，保证银行/周期判定准确
@@ -408,6 +409,7 @@ def assess_with_auto_fetch(stock_code: str,
         dividend_records=records,
         dividend_fetch_failed=dividend_rows is None,  # 仅取数失败置位；records=[]（真无分红）不置
         financial_rows=financial_rows,
+        cashflow_rows=cashflow_rows,
         price_change_1y=price_change_1y,
         top10_holding=top10_holding,
     )

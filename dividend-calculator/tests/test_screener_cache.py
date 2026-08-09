@@ -18,6 +18,7 @@ from src.screener_cache import (
     QuoteSnapshot,
     DividendSnapshot,
     FinanceSnapshot,
+    SustainabilitySnapshot,
 )
 
 
@@ -96,6 +97,22 @@ class TestFinanceSnapshot:
         got = cache.get_finance("600900")
         assert got.roe_latest == pytest.approx(16.4)
         assert got.payout_ratio == pytest.approx(0.58)
+
+
+class TestSustainabilitySnapshot:
+    def test_upsert_and_read(self, cache):
+        s = SustainabilitySnapshot(
+            code="600900", financial_rows='[{"x":1}]', cashflow_rows='[]',
+            dividend_rows='[]', industry="电力", price_change_1y=0.1,
+            top10_holding=0.2, source="东财")
+        cache.upsert_sustainability(s)
+        got = cache.get_sustainability("600900")
+        assert got is not None
+        assert got.industry == "电力"
+        assert got.price_change_1y == pytest.approx(0.1)
+
+    def test_missing_code_returns_none(self, cache):
+        assert cache.get_sustainability("999999") is None
 
 
 class TestStaleness:

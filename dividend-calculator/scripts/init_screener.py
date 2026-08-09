@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""选股器初始化数据库（spec #67）。
+"""选股器初始化/补全数据库（spec #67）。
 
-从 backtest.db 导入历史成分股（588 只，沪深300+中证500 历史成分）到 screener.db，
-并用腾讯批量行情填充 quote_snapshot。
+从不同来源初始化全 A 股票列表到 screener.db，并用腾讯批量行情填充 quote_snapshot。
 
-步骤：
-1. 从 backtest.db 读成分股代码
-2. 写 screener.db stock_list（低频）
-3. 腾讯批量行情（800/批）→ quote_snapshot
-4. 输出统计
+来源：
+- --source all-a：akshare 全市场列表（~5400 只，全 A 含沪深京）
+- --source backtest：backtest.db 历史成分股（588 只，沪深300+中证500）
+
+增量合并：已存在的股票数据保留（不覆盖），仅补全缺失的。
 
 用法:
-    python scripts/init_screener.py                 # 初始化
-    python scripts/init_screener.py --source backtest  # 从 backtest.db（默认）
+    python scripts/init_screener.py --source all-a              # 全 A 补全
+    python scripts/init_screener.py --source backtest           # 成分股初始化
+    python scripts/init_screener.py --source all-a --with-finance  # 补全 + 导入 ROE
 """
 import argparse
 import sqlite3
@@ -22,8 +22,24 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.screener_cache import QuoteSnapshot, ScreenerCache, StockListItem  # noqa: E402
+from src.screener_cache import ScreenerCache, StockListItem  # noqa: E402
 from src.screener_quotes import fetch_all_quotes  # noqa: E402
+
+
+def load_codes_akshare() -> list:
+    """akshare 全 A 列表（~5400 只，含沪深京）。"""
+    try:
+        import akshare as ak
+        df = ak.stock_info_a_code_name()
+        if df is None or df.empty or "code" not in df.columns:
+            print("✘ akshare 列表为空", file=sys.stderr)
+            return []
+        codes = df["code"].astype(str).str.zfill(6).tolist()
+        print(f"  akshare 全 A: {len(codes)} 只")
+        return codes
+    except Exception as e:
+        print(f"✘ akshare 获取失败: {e}", file=sys.stderr)
+        return []
 
 
 def load_codes_from_backtest() -> list:
@@ -39,12 +55,18 @@ def load_codes_from_backtest() -> list:
     return codes
 
 
+def _existing_codes(cache: ScreenerCache) -> set:
+    """screener.db 已有股票代码。"""
+    with cache._conn() as conn:
+        rows = conn.execute("SELECT code FROM stock_list").fetchall()
+    return {r[0] for r in rows}
+
+
 def _import_finance_from_backtest(cache) -> int:
     """从 backtest.db 批量导入最新 ROE 到 finance_snapshot。"""
     from src.screener_cache import FinanceSnapshot
     db = PROJECT_ROOT / "data" / "backtest.db"
     conn = sqlite3.connect(db)
-    # 每只股票最新年报 ROE
     rows = conn.execute("""
         SELECT code, roe, report_date FROM roe r
         WHERE report_date = (SELECT MAX(report_date) FROM roe r2 WHERE r2.code = r.code)
@@ -56,49 +78,53 @@ def _import_finance_from_backtest(cache) -> int:
         if roe is None:
             continue
         cache.upsert_finance(FinanceSnapshot(
-            code=code,
-            roe_latest=float(roe),
-            roe_period=period,
-            net_profit_annual=None,
-            payout_ratio=None,
-            finance_source="backtest.db",
+            code=code, roe_latest=float(roe), roe_period=period,
+            net_profit_annual=None, payout_ratio=None, finance_source="backtest.db",
         ))
         n += 1
     return n
 
 
 def main():
-    parser = argparse.ArgumentParser(description="选股器初始化数据库")
-    parser.add_argument("--source", choices=["backtest"], default="backtest",
-                        help="成分股来源（当前仅 backtest）")
-    parser.add_argument("--limit", type=int, default=0, help="调试：只初始化前 N 只")
+    parser = argparse.ArgumentParser(description="选股器初始化/补全数据库")
+    parser.add_argument("--source", choices=["all-a", "backtest"], default="all-a",
+                        help="股票列表来源（all-a=akshare全市场 / backtest=成分股）")
+    parser.add_argument("--limit", type=int, default=0, help="调试：只处理前 N 只")
     parser.add_argument("--with-finance", action="store_true",
-                        help="从 backtest.db 批量导入 ROE 到 finance_snapshot（避免逐股拉财务）")
+                        help="从 backtest.db 批量导入 ROE 到 finance_snapshot")
     args = parser.parse_args()
 
-    codes = load_codes_from_backtest()
+    if args.source == "all-a":
+        codes = load_codes_akshare()
+    else:
+        codes = load_codes_from_backtest()
     if not codes:
-        print("✘ 无成分股代码", file=sys.stderr)
+        print("✘ 无股票代码", file=sys.stderr)
         return 1
     if args.limit:
         codes = codes[:args.limit]
-    print(f"成分股代码: {len(codes)} 只")
 
     cache = ScreenerCache()
+    existing = _existing_codes(cache)
 
-    # 1. stock_list（marker 推断市场前缀）
-    items = [
-        StockListItem(code=c, name="", market=("sh" if c.startswith("6") else "sz"))
-        for c in codes
-    ]
-    cache.upsert_stock_list(items)
-    print(f"✓ stock_list: {len(items)} 只")
+    # 1. 新增股票列表（增量：只加缺失的）
+    new_codes = [c for c in codes if c not in existing]
+    if new_codes:
+        items = [
+            StockListItem(code=c, name="", market=_market_of(c))
+            for c in new_codes
+        ]
+        cache.upsert_stock_list(items)
+        print(f"✓ stock_list 新增: {len(items)} 只（已有 {len(existing)}）")
+    else:
+        print(f"✓ stock_list 无新增（已有 {len(existing)} 只）")
 
-    # 2. 腾讯批量行情 → quote_snapshot
-    quotes = fetch_all_quotes(codes, cache=cache)
-    print(f"✓ quote_snapshot: {len(quotes)} 只（腾讯批量）")
+    # 2. 腾讯批量行情 → quote_snapshot（只拉新增的，或全量刷新）
+    fetch_codes = new_codes if new_codes else codes
+    quotes = fetch_all_quotes(fetch_codes, cache=cache)
+    print(f"✓ quote_snapshot 更新: {len(quotes)} 只（腾讯批量）")
 
-    # 3. 从 backtest.db 批量导入 ROE → finance_snapshot（可选加速）
+    # 3. 从 backtest.db 批量导入 ROE（可选）
     if args.with_finance:
         n_fin = _import_finance_from_backtest(cache)
         print(f"✓ finance_snapshot: {n_fin} 只（backtest.db 导入 ROE）")
@@ -107,12 +133,22 @@ def main():
     with cache._conn() as conn:
         n_list = conn.execute("SELECT COUNT(*) FROM stock_list").fetchone()[0]
         n_quote = conn.execute("SELECT COUNT(*) FROM quote_snapshot").fetchone()[0]
-    print(f"\n初始化完成:")
+        n_fin = conn.execute("SELECT COUNT(*) FROM finance_snapshot").fetchone()[0]
+    print(f"\n补全完成:")
     print(f"  stock_list: {n_list} 只")
     print(f"  quote_snapshot: {n_quote} 只")
+    print(f"  finance_snapshot: {n_fin} 只")
     print(f"  数据库: {cache.db_path}")
-
     return 0
+
+
+def _market_of(code: str) -> str:
+    """推断市场前缀（sh/sz/bj）。"""
+    if code.startswith("6"):
+        return "sh"
+    if code.startswith(("8", "4", "92")):
+        return "bj"
+    return "sz"
 
 
 if __name__ == "__main__":

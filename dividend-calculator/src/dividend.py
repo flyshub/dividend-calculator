@@ -70,19 +70,14 @@ def get_latest_full_year_dividend(
 ) -> Tuple[float, Optional[str], List[DividendDetail], str, str]:
     """
     获取最近一个完整财年的现金分红总额和明细
-    多数据源自动降级：mootdx → akshare fhps_detail_em（含预案）→ akshare cninfo
-    """
-    # 方式1: 数据源管理器（mootdx）
-    try:
-        manager = get_data_source_manager()
-        total_div, year, details, expl = manager.get_latest_dividend(stock_code, stock_info)
-        if total_div > 0:
-            logger.info("通过数据源管理器获取分红数据成功: %s %s年", stock_code, year)
-            return total_div, year, details, expl, "mootdx"
-    except Exception as e:
-        logger.debug("数据源管理器（mootdx）获取分红失败: %s", e)
+    多数据源自动降级：akshare fhps_detail_em（对齐 JS 财年判定）→ akshare cninfo → mootdx
 
-    # 方式2: akshare fhps_detail_em（含预案，数据最全）
+    优先级说明（修复 #600662）：akshare fhps_detail_em 按报告期月份判定财年
+    （12月=年报，与 JS calculator.js 一致），且过滤「未实施」预案；mootdx xdxr
+    只含已除权记录，会导致未除权的最新年报（如 600662 2025 年报除权日在未来）
+    财年滞后一年。故 akshare 优先，mootdx 降级兜底。
+    """
+    # 方式1: akshare fhps_detail_em（按报告期判定财年，对齐 JS，数据最全）
     try:
         import akshare as ak
         fhps_df = ak.stock_fhps_detail_em(symbol=stock_code)
@@ -94,7 +89,7 @@ def get_latest_full_year_dividend(
     except Exception as e:
         logger.debug("akshare fhps_detail_em 获取分红失败: %s", e)
 
-    # 方式3: akshare cninfo 分红数据（兜底）
+    # 方式2: akshare cninfo 分红数据（兜底）
     try:
         import akshare as ak
         dividend_df = ak.stock_dividend_cninfo(symbol=stock_code)
@@ -110,6 +105,16 @@ def get_latest_full_year_dividend(
                 return total_div, year, details, expl, "akshare cninfo"
     except Exception as e:
         logger.debug("akshare cninfo 获取分红失败: %s", e)
+
+    # 方式3: 数据源管理器（mootdx，仅含已除权记录，降级兜底）
+    try:
+        manager = get_data_source_manager()
+        total_div, year, details, expl = manager.get_latest_dividend(stock_code, stock_info)
+        if total_div > 0:
+            logger.info("通过数据源管理器获取分红数据成功: %s %s年", stock_code, year)
+            return total_div, year, details, expl, "mootdx"
+    except Exception as e:
+        logger.debug("数据源管理器（mootdx）获取分红失败: %s", e)
 
     return 0.0, None, [], "所有数据源都无法获取分红数据", "无"
 
@@ -154,11 +159,16 @@ def _parse_fhps_detail(
     """
     import datetime
 
-    # 只保留有实际分红金额的记录，排除预披露
+    # 只保留已实施分红（对齐 JS calculator.js T5 规则 + 排除停止/否决/预披露）：
+    # 方案进度须含「实施」且不含「未实施/停止/否决/预披露」——排除一切未落地预案。
     valid = fhps_df[
         fhps_df['现金分红-现金分红比例'].notna()
         & (fhps_df['现金分红-现金分红比例'] > 0)
-        & (fhps_df['方案进度'] != '预披露')
+        & fhps_df['方案进度'].astype(str).str.contains('实施')
+        & ~fhps_df['方案进度'].astype(str).str.contains('未实施')
+        & ~fhps_df['方案进度'].astype(str).str.contains('停止')
+        & ~fhps_df['方案进度'].astype(str).str.contains('否决')
+        & ~fhps_df['方案进度'].astype(str).str.contains('预披露')
     ].copy()
 
     if valid.empty:

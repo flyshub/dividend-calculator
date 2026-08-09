@@ -55,6 +55,23 @@ class FinanceSnapshot:
 
 
 @dataclass(frozen=True)
+class SustainabilitySnapshot:
+    """可持续性评估的预缓存基础数据（提速用，避免逐股重复拉网络）。
+
+    存储 assess_with_auto_fetch 所需的原始数据（JSON 序列化），评估时注入复用。
+    """
+    code: str
+    financial_rows: Optional[str] = None   # JSON: 东财财务行
+    cashflow_rows: Optional[str] = None    # JSON: 东财现金流行
+    dividend_rows: Optional[str] = None    # JSON: 东财分红行
+    industry: Optional[str] = None         # 行业分类
+    price_change_1y: Optional[float] = None  # 1 年涨跌
+    top10_holding: Optional[float] = None  # 前十大股东占比
+    source: str = ""                       # 数据来源（铁律）
+    updated_at: str = field(default_factory=lambda: date.today().isoformat())
+
+
+@dataclass(frozen=True)
 class StockListItem:
     code: str
     name: str
@@ -80,6 +97,11 @@ class ScreenerCache:
     CREATE TABLE IF NOT EXISTS finance_snapshot (
         code TEXT PRIMARY KEY, roe_latest REAL, roe_period TEXT,
         net_profit_annual REAL, payout_ratio REAL, finance_source TEXT, updated_at TEXT);
+
+    CREATE TABLE IF NOT EXISTS sustainability_snapshot (
+        code TEXT PRIMARY KEY, financial_rows TEXT, cashflow_rows TEXT,
+        dividend_rows TEXT, industry TEXT, price_change_1y REAL,
+        top10_holding REAL, source TEXT, updated_at TEXT);
     """
 
     def __init__(self, db_path: Optional[Path] = None):
@@ -181,6 +203,32 @@ class ScreenerCache:
 
     def is_finance_stale(self, code: str, max_age_days: int = 30) -> bool:
         return self._is_stale("finance_snapshot", code, max_age_days)
+
+    # ---- sustainability_snapshot ----
+
+    def upsert_sustainability(self, s: SustainabilitySnapshot):
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO sustainability_snapshot "
+                "(code, financial_rows, cashflow_rows, dividend_rows, industry, "
+                " price_change_1y, top10_holding, source, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (s.code, s.financial_rows, s.cashflow_rows, s.dividend_rows, s.industry,
+                 s.price_change_1y, s.top10_holding, s.source, s.updated_at),
+            )
+
+    def get_sustainability(self, code: str) -> Optional[SustainabilitySnapshot]:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT code, financial_rows, cashflow_rows, dividend_rows, industry, "
+                "price_change_1y, top10_holding, source, updated_at "
+                "FROM sustainability_snapshot WHERE code=?", (code,)
+            ).fetchone()
+        return SustainabilitySnapshot(*row) if row else None
+
+    def is_sustainability_stale(self, code: str, max_age_days: int = 30) -> bool:
+        """可持续性预缓存按 max_age_days 判定过期（默认 30 天，覆盖财报季）。"""
+        return self._is_stale("sustainability_snapshot", code, max_age_days)
 
     # ---- helpers ----
 

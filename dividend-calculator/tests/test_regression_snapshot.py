@@ -129,6 +129,28 @@ class TestFiscalYearGroupingSnapshot:
         assert all(d.report_time == "2024中期分配" for d in details)
         assert sum(d.dividend_per_10 for d in details) == pytest.approx(4.5)
 
+    def test_unimplemented_proposal_filtered(self):
+        """未实施预案（股东大会决议通过）被过滤，只保留已实施（对齐 JS T5）。"""
+        df = pd.DataFrame([
+            # 已实施（保留）
+            {"报告期": "2024-12-31", "方案进度": "实施分配", "现金分红-现金分红比例": 5.0},
+            # 未实施（决议通过，应排除）
+            {"报告期": "2025-12-31", "方案进度": "股东大会决议通过", "现金分红-现金分红比例": 8.0},
+        ])
+        total, year, details, _ = _parse_fhps_detail(df, self._info())
+        assert year == "2024"  # 未实施的 2025 预案被排除，仍选 2024
+        assert len(details) == 1
+        assert details[0].dividend_per_10 == 5.0
+
+    def test_unimplemented_string_filtered(self):
+        """方案进度含「未实施」字样的记录被排除。"""
+        df = pd.DataFrame([
+            {"报告期": "2025-12-31", "方案进度": "实施分配（未实施）", "现金分红-现金分红比例": 6.0},
+        ])
+        total, year, details, _ = _parse_fhps_detail(df, self._info())
+        assert total == 0.0  # 全部被过滤
+        assert year is None
+
 
 # ---------------------------------------------------------------------------
 # 2b. TTM 股息率快照（#19）

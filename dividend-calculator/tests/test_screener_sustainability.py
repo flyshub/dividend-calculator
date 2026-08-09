@@ -69,6 +69,33 @@ class TestEvaluateSustainability:
         assert r["pass_sus"] is False
         assert r["verdict"] == "未评估"
 
+    def test_cache_hit_injects_data_no_network(self, tmp_path):
+        """缓存命中时注入预拉数据，不走 assess_with_auto_fetch 网络。"""
+        from src.screener_cache import SustainabilitySnapshot
+        cache = ScreenerCache(tmp_path / "s.db")
+        cache.upsert_sustainability(SustainabilitySnapshot(
+            code="600900", financial_rows='[{"a":1}]', cashflow_rows='[]',
+            dividend_rows='[]', industry="电力", price_change_1y=0.1,
+            top10_holding=0.2, source="东财预拉"))
+        # 打补丁：缓存命中时调用的 assess_with_auto_fetch 应带注入参数
+        with patch("src.sustainability.assess_with_auto_fetch") as mock_assess:
+            mock_assess.return_value = _FakeResult("可持续")
+            r = evaluate_sustainability("600900", _dividend(), cache=cache)
+            # 缓存命中应触发注入路径（调 assess_with_auto_fetch 但带注入参数）
+            assert mock_assess.called
+            call_kwargs = mock_assess.call_args.kwargs
+            assert call_kwargs["industry"] == "电力"  # 用缓存的行业
+            assert call_kwargs["price_change_1y"] == 0.1
+        assert r["pass_sus"] is True
+
+    def test_cache_miss_falls_back_to_assessor(self, tmp_path):
+        """缓存未命中时回退到 assessor。"""
+        cache = ScreenerCache(tmp_path / "s.db")
+        r = evaluate_sustainability("600900", _dividend(),
+                                    assessor=lambda c: _FakeResult("可持续"),
+                                    cache=cache)
+        assert r["pass_sus"] is True
+
     def test_caches_verdict(self):
         calls = []
         def assessor(code):

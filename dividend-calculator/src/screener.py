@@ -93,13 +93,17 @@ def run_screener(
 
     # 漏斗③ PR 估值（复用 calculate_pr，写 finance_snapshot；仅候选池）
     pr_eval = evaluate_pr_batch(real_pool_codes(real_pool), cache, pr_zone=pr_zone)
-    # 附加 dividend / industry / total_shares 供漏斗④
+    # 附加 dividend / industry / total_shares / dividend_total 供漏斗④
     by_div = {s.code: s for s in div_snaps}
     for ev in pr_eval:
         ev["dividend"] = by_div.get(ev["code"])
         quote = cache.get_quote(ev["code"])
         if quote is not None:
             ev["total_shares"] = quote.total_shares
+        # dividend_total = 真实股息率(%) × 市值 / 100（可持续性评估核心输入）
+        div = by_div.get(ev["code"])
+        if div is not None and div.real_yield is not None:
+            ev["dividend_total"] = div.real_yield / 100.0 * (quote.market_cap if quote and quote.market_cap else 0)
         if ev.get("industry") is None and quote is not None:
             pass  # industry 已由 evaluate_stock_full 从 calculate_pr 提供
     pr_pool = screen_pr(pr_eval)
