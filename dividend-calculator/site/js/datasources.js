@@ -28,7 +28,7 @@
 
   /* ── 腾讯行情（qt.gtimg.cn，GBK）──
    * 字段索引与 tencent_quote.py 对齐:
-   *   1=名称 3=价格 33=PE-TTM 46=PB 72=A股股本 73=总股本 */
+   *   1=名称 3=价格 39=PE-TTM 46=PB 72=A股股本 73=总股本（33 是当日最高价，勿混） */
   function fetchTencentQuote(stockCode) {
     var prefix = stockCode[0] === '6' ? 'sh' : 'sz';
     var url = 'https://qt.gtimg.cn/q=' + prefix + stockCode;
@@ -42,7 +42,7 @@
         stock_code: stockCode,
         name: f[1] || null,
         price: safeFloat(f, 3),
-        pe_ttm: safeFloat(f, 33),
+        pe_ttm: safeFloat(f, 39),
         pb: safeFloat(f, 46),
         a_shares: safeFloat(f, 72),
         total_shares: safeFloat(f, 73),

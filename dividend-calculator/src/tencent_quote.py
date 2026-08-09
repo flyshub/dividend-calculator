@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 # 腾讯行情接口字段索引常量（方便查阅，不暴露给外部）
 _FIELD_NAME = 1          # 股票名称
 _FIELD_PRICE = 3         # 最新价格
-_FIELD_PE_TTM = 33       # 市盈率（TTM）
+_FIELD_PE_TTM = 39       # 市盈率（TTM）——字段 39（33 是当日最高价，勿混）
 _FIELD_PB = 46           # 市净率
 _FIELD_A_SHARES = 72     # A股股本（仅A股）
 _FIELD_TOTAL_SHARES = 73 # 总股本（含A+H等全部股份）
