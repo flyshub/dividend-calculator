@@ -3,3 +3,6 @@
 
 # 本地工具状态
 .cortexkit/
+
+# Agent skills（个人通用技能，放全局 ~/.claude/skills/，不入项目仓库）
+.agents/
