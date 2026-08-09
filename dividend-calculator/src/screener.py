@@ -24,7 +24,7 @@ from src.screener_cache import (
     QuoteSnapshot,
     ScreenerCache,
 )
-from src.screener_dividend import screen_real_yield
+from src.screener_dividend import compute_real_yield, screen_real_yield
 from src.screener_pr import evaluate_pr_batch, screen_pr
 from src.screener_sustainability import (
     evaluate_sustainability_batch,
@@ -105,10 +105,10 @@ def run_screener(
         quote = all_quotes.get(ev["code"])
         if quote is not None:
             ev["total_shares"] = quote.total_shares
-        # dividend_total = 真实股息率(%) × 市值 / 100（可持续性评估核心输入）
+        # dividend_total = 最近完整财年分红总额（月频不变，可持续性评估核心输入）
         div = by_div.get(ev["code"])
-        if div is not None and div.real_yield is not None:
-            ev["dividend_total"] = div.real_yield / 100.0 * (quote.market_cap if quote and quote.market_cap else 0)
+        if div is not None and div.total_dividend is not None:
+            ev["dividend_total"] = div.total_dividend
     pr_pool = screen_pr(pr_eval)
     print(f"漏斗③ PR {pr_zone}: {len(pr_pool)} 只", file=sys.stderr)
 
@@ -144,7 +144,6 @@ def _build_output_rows(cache: ScreenerCache, final: List[dict]) -> List[dict]:
         sus = all_sus.get(code)
         industry = ev.get("industry") or (sus.industry if sus else "") or ""
         # 实时股息率 = 分红总额 / 当日市值（每日随市值变化，非月频旧值）
-        from src.screener_dividend import compute_real_yield
         market_cap = quote.market_cap if quote else None
         real_yield_now = compute_real_yield(dividend.total_dividend if dividend else None, market_cap)
         ttm_yield_now = compute_real_yield(dividend.ttm_dividend if dividend else None, market_cap)

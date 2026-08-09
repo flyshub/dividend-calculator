@@ -36,7 +36,7 @@ def to_dividend_snapshot(result: DividendResult, source: str = "mootdx") -> Divi
         ttm_yield=result.dividend_yield_ttm_before_tax,
         real_yield_year=result.latest_year,
         ttm_period=result.ttm_period,
-        total_dividend=getattr(result, 'total_dividend', None),
+        total_dividend=result.total_dividend,
         ttm_dividend=getattr(result, 'ttm_dividend', None),
         dividend_source=result.dividend_source or source,
     )

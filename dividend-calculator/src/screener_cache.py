@@ -35,8 +35,8 @@ class QuoteSnapshot:
 @dataclass(frozen=True)
 class DividendSnapshot:
     code: str
-    real_yield: Optional[float]        # 真实股息率（最近完整财年，实时 = total_dividend/市值）
-    ttm_yield: Optional[float]         # TTM 股息率（近12个月，实时 = ttm_dividend/市值）
+    real_yield: Optional[float]        # 真实股息率（拉取时旧值；筛选用 total_dividend/当日市值 实时重算）
+    ttm_yield: Optional[float]         # TTM 股息率（同上）
     real_yield_year: Optional[str]     # 对应财年
     ttm_period: Optional[str]          # TTM 期间
     total_dividend: Optional[float] = None   # 最近完整财年分红总额（元，月频不变）
@@ -112,6 +112,20 @@ class ScreenerCache:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._conn() as conn:
             conn.executescript(self._SCHEMA)
+            self._migrate(conn)
+
+    def _migrate(self, conn: sqlite3.Connection):
+        """增量迁移：为旧 DB 补新列（ALTER TABLE ADD COLUMN）。
+
+        修复股息率实时化后，旧 dividend_snapshot 缺 total_dividend/ttm_dividend 列，
+        其他机器/CI 用旧 DB 会报 no such column。此处幂等补齐。
+        """
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(dividend_snapshot)").fetchall()}
+        if "total_dividend" not in cols:
+            conn.execute("ALTER TABLE dividend_snapshot ADD COLUMN total_dividend REAL")
+        if "ttm_dividend" not in cols:
+            conn.execute("ALTER TABLE dividend_snapshot ADD COLUMN ttm_dividend REAL")
+        conn.commit()
 
     def _conn(self) -> sqlite3.Connection:
         return sqlite3.connect(self.db_path)

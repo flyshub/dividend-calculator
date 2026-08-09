@@ -105,3 +105,49 @@ class TestScreenRealYield:
     def test_mixed_pool(self):
         pool = [self._snap(real=6.0, ttm=6.5), self._snap(real=3.0, ttm=4.0)]
         assert len(screen_real_yield(pool)) == 1
+
+
+class TestComputeRealYield:
+    def test_basic(self):
+        from src.screener_dividend import compute_real_yield
+        # 分红总额 100亿 / 市值 1000亿 = 10%
+        assert compute_real_yield(1e10, 1e11) == pytest.approx(10.0)
+
+    def test_market_cap_change_affects_yield(self):
+        from src.screener_dividend import compute_real_yield
+        # 同一分红，市值涨 → 股息率降（每日实时）
+        assert compute_real_yield(1e10, 1e11) == pytest.approx(10.0)
+        assert compute_real_yield(1e10, 2e11) == pytest.approx(5.0)
+
+    def test_none_inputs(self):
+        from src.screener_dividend import compute_real_yield
+        assert compute_real_yield(None, 1e11) is None
+        assert compute_real_yield(1e10, None) is None
+        assert compute_real_yield(1e10, 0) is None
+
+
+class TestScreenRealYieldRealtime:
+    def _snap(self, total=1e10, ttm_total=1.05e10):
+        return DividendSnapshot(code="600900", real_yield=10.0, ttm_yield=10.5,
+                                real_yield_year="2025", ttm_period="p",
+                                total_dividend=total, ttm_dividend=ttm_total,
+                                dividend_source="m")
+
+    def test_market_caps_recompute_overrides_stored(self):
+        # 提供 market_caps → 实时重算（市值 2e11 → 股息率 5%）
+        from src.screener_dividend import screen_real_yield
+        pool = screen_real_yield([self._snap()], market_caps={"600900": 2e11})
+        # 重算后 5% 不达 5.5 阈值（原存储 10%），应被筛掉
+        assert pool == []
+
+    def test_market_caps_lower_keeps(self):
+        from src.screener_dividend import screen_real_yield
+        # 市值 1e11 → 股息率 10%，达阈值
+        pool = screen_real_yield([self._snap()], market_caps={"600900": 1e11}, min_real=5.0, min_ttm=5.0)
+        assert len(pool) == 1
+
+    def test_no_market_caps_falls_back_stored(self):
+        from src.screener_dividend import screen_real_yield
+        # 无 market_caps → 用存储 real_yield（10%）
+        pool = screen_real_yield([self._snap()], min_real=5.0, min_ttm=5.0)
+        assert len(pool) == 1
