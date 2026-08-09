@@ -230,6 +230,15 @@ class ScreenerCache:
                 "FROM finance_snapshot").fetchall()
         return {r[0]: FinanceSnapshot(*r) for r in rows}
 
+    def get_all_sustainability(self) -> Dict[str, SustainabilitySnapshot]:
+        """一次读全表可持续性快照 → {code: SustainabilitySnapshot}。"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT code, financial_rows, cashflow_rows, dividend_rows, industry, "
+                "price_change_1y, top10_holding, source, updated_at "
+                "FROM sustainability_snapshot").fetchall()
+        return {r[0]: SustainabilitySnapshot(*r) for r in rows}
+
     # ---- sustainability_snapshot ----
 
     def upsert_sustainability(self, s: SustainabilitySnapshot):

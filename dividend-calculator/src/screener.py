@@ -127,14 +127,21 @@ def real_pool_codes(real_pool: List) -> List[str]:
 def _build_output_rows(cache: ScreenerCache, final: List[dict]) -> List[dict]:
     """汇总最终结果行（代码/名称/三指标/估值/可持续性/行业/辅助字段）。
 
-    复用漏斗③ 已算的 ev（pr/valuation_zone/industry），不重复计算。
+    复用漏斗③ 已算的 ev（pr/valuation_zone）+ 批量读缓存补辅助字段；
+    行业从 sustainability_snapshot 取（纯缓存路径无行业，用预拉数据补）。
     """
+    all_quotes = cache.get_all_quotes()
+    all_dividends = cache.get_all_dividends()
+    all_finance = cache.get_all_finance()
+    all_sus = cache.get_all_sustainability()
     rows = []
     for ev in final:
         code = ev["code"]
-        quote = cache.get_quote(code)
-        dividend = cache.get_dividend(code)
-        finance = cache.get_finance(code)
+        quote = all_quotes.get(code)
+        dividend = all_dividends.get(code)
+        finance = all_finance.get(code)
+        sus = all_sus.get(code)
+        industry = ev.get("industry") or (sus.industry if sus else "") or ""
         rows.append({
             "代码": code,
             "名称": quote.name if quote else "",
@@ -142,7 +149,7 @@ def _build_output_rows(cache: ScreenerCache, final: List[dict]) -> List[dict]:
             "真实股息率%": round(dividend.real_yield, 2) if dividend and dividend.real_yield else "",
             "估值区间": ev.get("valuation_zone", ""),
             "市赚率PR": ev.get("pr", ""),
-            "行业": ev.get("industry") or "",
+            "行业": industry,
             "可持续性": ev.get("verdict", ""),
             "ROE%": finance.roe_latest if finance else "",
             "总市值(亿)": round(quote.market_cap / 1e8, 2) if quote and quote.market_cap else "",
