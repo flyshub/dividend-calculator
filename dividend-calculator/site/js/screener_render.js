@@ -37,17 +37,19 @@
   }
 
   // 单行渲染（行字段拼接，返回值拼进 innerHTML；字符串列已 esc）
+  // 列序须与 site/screener.html 的 <th> 表头一致
   function rowHtml(r) {
     return '<td>' + esc(r['代码']) + '</td>' +
       '<td>' + esc(r['名称']) + '</td>' +
-      '<td class="num">' + fmtNum(r['TTM股息率%'], 2) + '</td>' +
       '<td class="num yield">' + fmtNum(r['真实股息率%'], 2) + '</td>' +
+      '<td>' + susBadge(esc(r['可持续性'])) + '</td>' +
       '<td>' + zoneBadge(esc(r['估值区间'])) + '</td>' +
       '<td class="num">' + fmtNum(r['市赚率PR'], 2) + '</td>' +
-      '<td>' + esc(r['行业']) + '</td>' +
-      '<td>' + susBadge(esc(r['可持续性'])) + '</td>' +
       '<td class="num">' + fmtNum(r['ROE%'], 2) + '</td>' +
-      '<td class="num">' + fmtNum(r['总市值(亿)'], 1) + '</td>';
+      '<td class="num">' + fmtNum(r['总市值(亿)'], 1) + '</td>' +
+      '<td class="num">' + fmtNum(r['TTM股息率%'], 2) + '</td>' +
+      '<td>' + esc(r['行业']) + '</td>' +
+      '<td>' + esc(r['数据来源']) + '</td>';
   }
 
   return { esc: esc, fmtNum: fmtNum, zoneBadge: zoneBadge, susBadge: susBadge, rowHtml: rowHtml };

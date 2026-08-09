@@ -41,15 +41,17 @@ test('rowHtml 完整 11 列 + 转义 + 数字格式化', () => {
   const r = {
     '代码': '600900', '名称': '长<江>电力', 'TTM股息率%': 3.80, '真实股息率%': 3.80,
     '估值区间': '低估', '市赚率PR': 0.52, '行业': '公用事业-电力',
-    '可持续性': '可持续', 'ROE%': '—', '总市值(亿)': 6800.5,
+    '可持续性': '可持续', 'ROE%': '—', '总市值(亿)': 6800.5, '数据来源': 'mootdx',
   };
   const html = R.rowHtml(r);
   assert.ok(html.includes('<td>600900</td>'));
   assert.ok(html.includes('长&lt;江&gt;电力'));     // 名称被转义
-  assert.ok(html.includes('class="num">3.80</td>'));
+  // 列序：真实股息率(3) → ROE(7) → TTM(9)；ROE% 占位符 → 空
+  assert.ok(html.indexOf('class="num yield">3.80</td>') < html.indexOf('<td>mootdx</td>'));
   assert.ok(html.includes('badge-green'));
   assert.ok(html.includes('<td class="num"></td>'), 'ROE% 占位符 → 空，不渲染 NaN');
   assert.ok(html.includes('6800.5'));
+  assert.ok(html.includes('<td>mootdx</td>'), '新增数据来源列');
   // 关键：HTML 中不得出现原始 < 字符（XSS 断言）
   assert.ok(!html.includes('长<江'));
 });
