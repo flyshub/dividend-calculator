@@ -151,15 +151,31 @@ def _build_output_rows(cache: ScreenerCache, final: List[dict]) -> List[dict]:
     return rows
 
 
+# 默认 CSV 导出目录（data/screener/，自动创建）
+DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent.parent / "data" / "screener"
+
+
 def write_csv(rows: List[dict], output: str):
-    """写 CSV。output 为空 → stdout。"""
+    """写 CSV。
+
+    output 为空 → 自动导出到 data/screener/screener_<时间戳>.csv（新建目录）。
+    output 为路径 → 写入指定路径。
+    output 为 '-' → stdout。
+    """
+    # 自动导出：data/screener/ 目录 + 时间戳文件名
+    if output == "":
+        import datetime
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        DEFAULT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        output = str(DEFAULT_OUTPUT_DIR / f"screener_{ts}.csv")
+
     if not rows:
         print("无符合条件的股票", file=sys.stderr)
-        if output:
+        if output != "-":
             Path(output).write_text("代码,名称,TTM股息率%,真实股息率%,估值区间,市赚率PR,可持续性,ROE%,总市值(亿),数据来源\n", encoding="utf-8")
         return
     fieldnames = list(rows[0].keys())
-    if output:
+    if output != "-":
         with open(output, "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=fieldnames)
             w.writeheader()
@@ -173,7 +189,7 @@ def write_csv(rows: List[dict], output: str):
 
 def main():
     parser = argparse.ArgumentParser(description="全 A 股息率+市赚率+可持续性选股器")
-    parser.add_argument("--output", default="", help="CSV 输出路径（空=stdout）")
+    parser.add_argument("--output", default="", help="CSV 输出路径（默认 data/screener/screener_<时间戳>.csv；'-'=stdout）")
     parser.add_argument("--min-ttm-yield", type=float, default=5.0, help="TTM 股息率阈值（默认 5）")
     parser.add_argument("--min-real-yield", type=float, default=5.0, help="真实股息率阈值（默认 5）")
     parser.add_argument("--pr-zone", nargs="+", default=["合理偏低", "低估"],

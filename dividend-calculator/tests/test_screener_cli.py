@@ -119,7 +119,7 @@ class TestWriteCsv:
         rows = [{"代码": "600900", "名称": "长江电力", "真实股息率%": 6.0}]
         buf = io.StringIO()
         with redirect_stdout(buf):
-            write_csv(rows, "")
+            write_csv(rows, "-")
         out = buf.getvalue()
         assert "代码,名称,真实股息率%" in out
         assert "600900" in out
