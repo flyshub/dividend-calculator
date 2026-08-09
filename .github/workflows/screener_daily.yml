@@ -66,6 +66,17 @@ jobs:
             git push
           fi
 
+      # 回传更新后的 screener.db 到 Release（每日行情累积，下次从最新 DB 开始）
+      - name: Upload updated screener.db to Release
+        if: steps.run_screener.outcome == 'success'
+        run: |
+          gh release upload screener-seed \
+            --repo ${{ github.repository }} \
+            dividend-calculator/data/screener.db \
+            --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       # 失败建 Issue 通知
       - name: Create issue on failure
         if: steps.run_screener.outcome != 'success'

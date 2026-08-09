@@ -1,0 +1,88 @@
+name: Screener Monthly Refresh
+
+on:
+  schedule:
+    # 每月 1 日 02:30 UTC（北京 10:30）——重拉股息/财务/可持续性（30 天过期数据）
+    # 避开每日任务时段，凌晨跑耗时任务（全 A 限流约 60-70 分钟可接受）
+    - cron: '30 2 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install -r dividend-calculator/requirements.txt
+
+      # 从 Release 拉取当前 seed（已有每日行情累积）
+      - name: Download screener.db from Release
+        run: |
+          mkdir -p dividend-calculator/data
+          gh release download screener-seed \
+            --repo ${{ github.repository }} \
+            --pattern "screener.db" \
+            --dir dividend-calculator/data \
+            --clobber \
+            || echo "seed 不存在，跳过"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # 月频重拉：股息 + 财务（fill_screener_data，限流 0.8s/只，增量复用未过期数据）
+      - name: Refresh dividend data
+        id: refresh_dividend
+        working-directory: dividend-calculator
+        continue-on-error: true
+        run: |
+          if [ -f data/screener.db ]; then
+            python scripts/fill_screener_data.py --dividend
+            python scripts/fill_screener_data.py --finance
+          else
+            echo "缺少 screener.db"
+            exit 1
+          fi
+
+      # 月频重拉：可持续性预拉（高股息候选）
+      - name: Refresh sustainability prefetch
+        id: refresh_sus
+        working-directory: dividend-calculator
+        continue-on-error: true
+        run: |
+          python scripts/prefetch_sustainability.py
+
+      # 回传更新后的 screener.db 到 Release
+      - name: Upload refreshed screener.db to Release
+        if: steps.refresh_dividend.outcome == 'success' || steps.refresh_sus.outcome == 'success'
+        run: |
+          gh release upload screener-seed \
+            --repo ${{ github.repository }} \
+            dividend-calculator/data/screener.db \
+            --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # 失败建 Issue 通知
+      - name: Create issue on failure
+        if: steps.refresh_dividend.outcome != 'success' || steps.refresh_sus.outcome != 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '⚠️ 选股器月频数据刷新失败',
+              body: `## 选股器月频数据刷新失败\n\n- **运行**: [查看日志](${context.serverUrl}/${context.repo.full_name}/actions/runs/${context.runId})\n- **时间**: ${new Date().toISOString()}\n\n股息/财务/可持续性数据可能过期（30 天），请检查并重跑`,
+              labels: ['bug', 'automation'],
+            })
