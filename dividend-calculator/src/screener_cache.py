@@ -14,7 +14,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent  # 项目根（dividend-calculator/）
 
@@ -203,6 +203,32 @@ class ScreenerCache:
 
     def is_finance_stale(self, code: str, max_age_days: int = 30) -> bool:
         return self._is_stale("finance_snapshot", code, max_age_days)
+
+    # ---- 批量读（性能优化：一次读全表，替代逐股查询）----
+
+    def get_all_quotes(self) -> Dict[str, QuoteSnapshot]:
+        """一次读全表行情 → {code: QuoteSnapshot}。"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT code, name, price, pe_ttm, pb, total_shares, market_cap, quote_time, source, updated_at "
+                "FROM quote_snapshot").fetchall()
+        return {r[0]: QuoteSnapshot(*r) for r in rows}
+
+    def get_all_dividends(self) -> Dict[str, DividendSnapshot]:
+        """一次读全表股息 → {code: DividendSnapshot}。"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT code, real_yield, ttm_yield, real_yield_year, ttm_period, dividend_source, updated_at "
+                "FROM dividend_snapshot").fetchall()
+        return {r[0]: DividendSnapshot(*r) for r in rows}
+
+    def get_all_finance(self) -> Dict[str, FinanceSnapshot]:
+        """一次读全表财务 → {code: FinanceSnapshot}。"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT code, roe_latest, roe_period, net_profit_annual, payout_ratio, finance_source, updated_at "
+                "FROM finance_snapshot").fetchall()
+        return {r[0]: FinanceSnapshot(*r) for r in rows}
 
     # ---- sustainability_snapshot ----
 

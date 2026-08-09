@@ -24,7 +24,7 @@ from src.screener_cache import (
     QuoteSnapshot,
     ScreenerCache,
 )
-from src.screener_dividend import compute_dividends_for_candidates, screen_real_yield
+from src.screener_dividend import screen_real_yield
 from src.screener_pr import evaluate_pr_batch, screen_pr
 from src.screener_sustainability import (
     evaluate_sustainability_batch,
@@ -76,36 +76,38 @@ def run_screener(
     if limit:
         codes = codes[:limit]
 
-    # 漏斗① 行情快照（腾讯批量；refresh_quotes=False 时跳过刷新）
+    # 批量读缓存（性能优化：一次读全表，替代逐股查询）
+    all_quotes = cache.get_all_quotes()
+    all_dividends = cache.get_all_dividends()
+
+    # 漏斗① 行情快照（腾讯批量；refresh_quotes=False 时读缓存）
     from src.screener_quotes import build_candidate_pool, fetch_all_quotes
     if refresh_quotes:
         quotes = fetch_all_quotes(codes, cache=cache)
     else:
-        quotes = [cache.get_quote(c) for c in codes if cache.get_quote(c) is not None]
+        quotes = [all_quotes[c] for c in codes if c in all_quotes]
     base_pool = build_candidate_pool(quotes)
     print(f"漏斗① 行情可用: {len(base_pool)} 只", file=sys.stderr)
 
-    # 漏斗② 真实股息率（仅候选池）
+    # 漏斗② 真实股息率（仅候选池，从批量缓存读）
     base_codes = [q.code for q in base_pool]
-    div_snaps = compute_dividends_for_candidates(base_codes, cache)
+    div_snaps = [all_dividends[c] for c in base_codes if c in all_dividends]
     real_pool = screen_real_yield(div_snaps, min_real=min_real, min_ttm=min_ttm)
     print(f"漏斗② 真实股息率>{min_real}%: {len(real_pool)} 只", file=sys.stderr)
 
-    # 漏斗③ PR 估值（复用 calculate_pr，写 finance_snapshot；仅候选池）
+    # 漏斗③ PR 估值（纯缓存，仅候选池；性能优化：不调网络）
     pr_eval = evaluate_pr_batch(real_pool_codes(real_pool), cache, pr_zone=pr_zone)
     # 附加 dividend / industry / total_shares / dividend_total 供漏斗④
     by_div = {s.code: s for s in div_snaps}
     for ev in pr_eval:
         ev["dividend"] = by_div.get(ev["code"])
-        quote = cache.get_quote(ev["code"])
+        quote = all_quotes.get(ev["code"])
         if quote is not None:
             ev["total_shares"] = quote.total_shares
         # dividend_total = 真实股息率(%) × 市值 / 100（可持续性评估核心输入）
         div = by_div.get(ev["code"])
         if div is not None and div.real_yield is not None:
             ev["dividend_total"] = div.real_yield / 100.0 * (quote.market_cap if quote and quote.market_cap else 0)
-        if ev.get("industry") is None and quote is not None:
-            pass  # industry 已由 evaluate_stock_full 从 calculate_pr 提供
     pr_pool = screen_pr(pr_eval)
     print(f"漏斗③ PR {pr_zone}: {len(pr_pool)} 只", file=sys.stderr)
 

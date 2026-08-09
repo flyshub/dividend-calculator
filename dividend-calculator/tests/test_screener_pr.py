@@ -70,17 +70,34 @@ class TestEvaluateStockFull:
 
 class TestEvaluatePrBatch:
     def test_batch_and_dividend_totals(self, tmp_path):
+        from src.screener_cache import FinanceSnapshot, QuoteSnapshot
         cache = ScreenerCache(tmp_path / "s.db")
-        calls = []
-        def provider(code):
-            calls.append(code)
-            return _pr(code=code, zone="合理偏低")
+        # 纯缓存路径：需预填 quote_snapshot + finance_snapshot（ROE）
+        for code in ["600900", "600987"]:
+            cache.upsert_quote(QuoteSnapshot(code=code, name="x", price=10, pe_ttm=8.0,
+                                             pb=1.0, total_shares=1e9, market_cap=1e10,
+                                             quote_time="", source="腾讯"))
+            cache.upsert_finance(FinanceSnapshot(code=code, roe_latest=16.0, roe_period="2025年报",
+                                                 net_profit_annual=1e9, payout_ratio=0.5,
+                                                 finance_source="东财"))
         results = evaluate_pr_batch(
-            ["600900", "600987"], cache, pr_provider=provider,
+            ["600900", "600987"], cache,
             dividend_totals={"600900": 1e9, "600987": 2e9})
         assert len(results) == 2
-        assert len(calls) == 2
         assert all(r["pass_pr"] for r in results)
+        # PE 8 / ROE 16 = PR 0.5 → 低估
+        assert results[0]["valuation_zone"] == "低估"
+
+    def test_skips_missing_roe(self, tmp_path):
+        """缺 ROE 的股票被跳过（不调网络）。"""
+        from src.screener_cache import QuoteSnapshot
+        cache = ScreenerCache(tmp_path / "s.db")
+        # 只有 quote，无 finance（缺 ROE）
+        cache.upsert_quote(QuoteSnapshot(code="600900", name="x", price=10, pe_ttm=8.0,
+                                         pb=1.0, total_shares=1e9, market_cap=1e10,
+                                         quote_time="", source="腾讯"))
+        results = evaluate_pr_batch(["600900"], cache)
+        assert results == []  # 缺 ROE 跳过
 
     def test_empty(self, tmp_path):
         cache = ScreenerCache(tmp_path / "s.db")

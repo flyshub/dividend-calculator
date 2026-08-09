@@ -42,9 +42,8 @@ def _seed_cache(cache):
 class TestRunScreener:
     @patch("src.screener._load_stock_list", return_value=["600900", "600987", "600919"])
     @patch("src.screener_quotes.fetch_all_quotes")
-    @patch("src.screener.compute_dividends_for_candidates")
     @patch("src.screener.evaluate_pr_batch")
-    def test_four_funnel_pipeline(self, mock_pr, mock_div, mock_fetch, mock_list, tmp_path):
+    def test_four_funnel_pipeline(self, mock_pr, mock_fetch, mock_list, tmp_path):
         cache = ScreenerCache(tmp_path / "s.db")
         _seed_cache(cache)
 
@@ -52,10 +51,7 @@ class TestRunScreener:
             return [cache.get_quote(c) for c in codes if cache.get_quote(c) is not None]
 
         mock_fetch.side_effect = fake_fetch
-        # 股息从缓存读（不触发真实计算）
-        mock_div.side_effect = lambda codes, cache, **kw: [
-            cache.get_dividend(c) for c in codes if cache.get_dividend(c) is not None
-        ]
+        # 股息从缓存读（run_screener 用批量缓存，_seed_cache 已预填）
         # PR 评估注入：600900/600987 通过（低估），其余拒绝
         def fake_pr(codes, cache, **kw):
             return [{"code": c, "pr": 0.5, "valuation_zone": "低估",
