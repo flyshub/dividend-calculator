@@ -1,0 +1,81 @@
+name: Screener Daily
+
+on:
+  schedule:
+    # 北京 18:30（UTC+8，A股收盘后）每日跑；cron 用 UTC，10:30 UTC = 18:30 北京
+    - cron: '30 10 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install -r dividend-calculator/requirements.txt
+
+      # 从 GitHub Release 拉取 seed 数据库（screener.db 139MB，超 git 100MB 限制，
+      # 用 Release asset 存 seed。首次或 seed 更新时手动 gh release upload）
+      - name: Download seed screener.db from Release
+        run: |
+          mkdir -p dividend-calculator/data
+          gh release download screener-seed \
+            --repo ${{ github.repository }} \
+            --pattern "screener.db" \
+            --dir dividend-calculator/data \
+            --clobber \
+            || echo "seed 不存在，跳过（首次需手动上传）"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # 每日跑选股器：刷新行情（腾讯批量，全球可用）+ 出 CSV
+      - name: Run screener (refresh quotes)
+        id: run_screener
+        working-directory: dividend-calculator
+        continue-on-error: true
+        run: |
+          if [ -f data/screener.db ]; then
+            python -m src.screener --refresh quotes
+          else
+            echo "缺少 seed screener.db，无法运行"
+            exit 1
+          fi
+
+      # 提交 CSV 结果回仓库
+      - name: Commit screener CSV
+        if: steps.run_screener.outcome == 'success'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add dividend-calculator/data/screener/
+          if git diff --cached --quiet; then
+            echo "No CSV changes"
+          else
+            git commit -m "chore(screener): daily update [skip ci]"
+            git push
+          fi
+
+      # 失败建 Issue 通知
+      - name: Create issue on failure
+        if: steps.run_screener.outcome != 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '⚠️ 选股器每日更新失败',
+              body: `## 选股器每日更新失败\n\n- **运行**: [查看日志](${context.serverUrl}/${context.repo.full_name}/actions/runs/${context.runId})\n- **时间**: ${new Date().toISOString()}\n\n请检查日志并手动触发 workflow_dispatch 重跑`,
+              labels: ['bug', 'automation'],
+            })

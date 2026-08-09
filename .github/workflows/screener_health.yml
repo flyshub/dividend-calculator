@@ -1,0 +1,42 @@
+name: Screener Health Check
+
+on:
+  schedule:
+    # 周一和周四 08:00 UTC —— 检查选股器每日任务是否停止
+    - cron: '0 8 * * 1,4'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check recent runs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const now = new Date();
+            const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString();
+            const runs = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'screener_daily.yml',
+              created: `>=${threeDaysAgo}`,
+              per_page: 5,
+            });
+
+            const successRuns = runs.data.workflow_runs.filter(r => r.conclusion === 'success');
+            if (successRuns.length === 0) {
+              const recentUrl = `${context.serverUrl}/${context.repo.full_name}/actions`;
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: '🔔 选股器定时任务可能已停止',
+                body: `## 定时任务异常\n\n最近 3 天没有发现成功的选股器每日更新。\n\n可能原因：\n- GitHub Actions cron 被静默禁用\n- workflow 文件语法错误\n- 上游依赖变更（akshare/东财限流）\n\n请检查：[Actions 页面](${recentUrl})`,
+                labels: ['bug', 'automation'],
+              });
+            } else {
+              console.log(`Found ${successRuns.length} successful runs in the last 3 days. Health OK.`);
+            }
