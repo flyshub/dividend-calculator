@@ -236,6 +236,15 @@ class TestScreenerRoutes:
             assert r.headers["Content-Type"].startswith("text/html")
             body = r.read().decode("utf-8")
             assert "每日选股结果" in body
+            assert "js/screener_render.js" in body, "页面应引用渲染模块"
+
+    def test_serve_screener_render_js(self, _server):
+        """本地 Web 版依赖的 JS 必须可加载（否则页面白屏）。"""
+        with urllib.request.urlopen(f"{_server}/js/screener_render.js") as r:
+            assert r.status == 200
+            assert r.headers["Content-Type"].startswith("application/javascript")
+            body = r.read().decode("utf-8")
+            assert "rowHtml" in body and "fmtNum" in body
 
     def test_serve_screener_latest_json(self, _server):
         with urllib.request.urlopen(f"{_server}/screener/latest.json") as r:

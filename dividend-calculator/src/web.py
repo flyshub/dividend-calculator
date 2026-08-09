@@ -68,6 +68,12 @@ class DividendRequestHandler(BaseHTTPRequestHandler):
             self._send_file(STATIC_DIR / "screener" / rel, "application/json; charset=utf-8")
             return
 
+        if parsed_url.path.startswith("/js/"):
+            # 页面引用的 JS（src/static/js/），如 screener_render.js
+            rel = Path(parsed_url.path).name
+            self._send_file(STATIC_DIR / "js" / rel, "application/javascript; charset=utf-8")
+            return
+
         if parsed_url.path == "/health":
             self._send_json(200, {"ok": True})
             return
