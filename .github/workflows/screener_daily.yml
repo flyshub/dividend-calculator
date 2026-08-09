@@ -66,6 +66,38 @@ jobs:
             git push
           fi
 
+      # 导出 JSON 供 Pages 展示（读 data/screener/*.csv → site/screener/，纯标准库）
+      - name: Export screener JSON
+        if: steps.run_screener.outcome == 'success'
+        id: export_json
+        working-directory: dividend-calculator
+        continue-on-error: true
+        run: python scripts/export_screener_json.py
+
+      # 提交 site/screener/*.json（site/ 不被 gitignore，正常 add）
+      - name: Commit & push screener JSON
+        if: steps.export_json.outcome == 'success'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add dividend-calculator/site/screener/
+          if git diff --cached --quiet; then
+            echo "No screener JSON changes"
+          else
+            git commit -m "chore(screener): update pages json [skip ci]"
+            git push
+          fi
+
+      # 显式触发 Pages 部署（push 落地后 dispatch；gh workflow run 默认跑 main）
+      - name: Trigger Pages deploy
+        if: steps.export_json.outcome == 'success'
+        run: |
+          sleep 10
+          gh workflow run pages.yml --repo ${{ github.repository }} \
+            || echo "pages 触发失败，请手动 gh workflow run pages.yml"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       # 回传更新后的 screener.db 到 Release（每日行情累积，下次从最新 DB 开始）
       - name: Upload updated screener.db to Release
         if: steps.run_screener.outcome == 'success'
