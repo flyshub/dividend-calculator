@@ -89,10 +89,11 @@ def run_screener(
     base_pool = build_candidate_pool(quotes)
     print(f"漏斗① 行情可用: {len(base_pool)} 只", file=sys.stderr)
 
-    # 漏斗② 真实股息率（仅候选池，从批量缓存读）
+    # 漏斗② 真实股息率（仅候选池，从批量缓存读；结合当日市值实时重算）
     base_codes = [q.code for q in base_pool]
     div_snaps = [all_dividends[c] for c in base_codes if c in all_dividends]
-    real_pool = screen_real_yield(div_snaps, min_real=min_real, min_ttm=min_ttm)
+    market_caps = {q.code: q.market_cap for q in base_pool if q.market_cap}
+    real_pool = screen_real_yield(div_snaps, market_caps=market_caps, min_real=min_real, min_ttm=min_ttm)
     print(f"漏斗② 真实股息率>{min_real}%: {len(real_pool)} 只", file=sys.stderr)
 
     # 漏斗③ PR 估值（纯缓存，仅候选池；性能优化：不调网络）
@@ -142,17 +143,22 @@ def _build_output_rows(cache: ScreenerCache, final: List[dict]) -> List[dict]:
         finance = all_finance.get(code)
         sus = all_sus.get(code)
         industry = ev.get("industry") or (sus.industry if sus else "") or ""
+        # 实时股息率 = 分红总额 / 当日市值（每日随市值变化，非月频旧值）
+        from src.screener_dividend import compute_real_yield
+        market_cap = quote.market_cap if quote else None
+        real_yield_now = compute_real_yield(dividend.total_dividend if dividend else None, market_cap)
+        ttm_yield_now = compute_real_yield(dividend.ttm_dividend if dividend else None, market_cap)
         rows.append({
             "代码": code,
             "名称": quote.name if quote else "",
-            "TTM股息率%": round(dividend.ttm_yield, 2) if dividend and dividend.ttm_yield else "",
-            "真实股息率%": round(dividend.real_yield, 2) if dividend and dividend.real_yield else "",
+            "TTM股息率%": round(ttm_yield_now, 2) if ttm_yield_now else "",
+            "真实股息率%": round(real_yield_now, 2) if real_yield_now else "",
             "估值区间": ev.get("valuation_zone", ""),
             "市赚率PR": ev.get("pr", ""),
             "行业": industry,
             "可持续性": ev.get("verdict", ""),
             "ROE%": finance.roe_latest if finance else "",
-            "总市值(亿)": round(quote.market_cap / 1e8, 2) if quote and quote.market_cap else "",
+            "总市值(亿)": round(market_cap / 1e8, 2) if market_cap else "",
             "数据来源": (dividend.dividend_source if dividend else "") + " / " + (quote.source if quote else "腾讯"),
         })
     # 按真实股息率降序

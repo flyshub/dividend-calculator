@@ -29,13 +29,15 @@ def compute_dividend(
 
 
 def to_dividend_snapshot(result: DividendResult, source: str = "mootdx") -> DividendSnapshot:
-    """DividendResult → 缓存快照（只取筛选需要的字段）。"""
+    """DividendResult → 缓存快照（存分红总额，股息率筛选时按当日市值实时重算）。"""
     return DividendSnapshot(
         code=result.stock_code,
         real_yield=result.dividend_yield_before_tax,
         ttm_yield=result.dividend_yield_ttm_before_tax,
         real_yield_year=result.latest_year,
         ttm_period=result.ttm_period,
+        total_dividend=getattr(result, 'total_dividend', None),
+        ttm_dividend=getattr(result, 'ttm_dividend', None),
         dividend_source=result.dividend_source or source,
     )
 
@@ -69,14 +71,31 @@ def compute_dividends_for_candidates(
     return snapshots
 
 
+def compute_real_yield(total_dividend: Optional[float], market_cap: Optional[float]) -> Optional[float]:
+    """真实股息率 = 分红总额 / 当前总市值 × 100（实时，随市值每日变化）。"""
+    if total_dividend is None or market_cap is None or market_cap <= 0:
+        return None
+    return (total_dividend / market_cap) * 100
+
+
 def screen_real_yield(
     snapshots: List[DividendSnapshot],
+    market_caps: Optional[Dict[str, float]] = None,
     min_real: float = 5.0,
     min_ttm: float = 5.0,
 ) -> List[DividendSnapshot]:
-    """漏斗②：真实股息率 > min_real 且 TTM > min_ttm（两级都过）。"""
-    return [
-        s for s in snapshots
-        if s.real_yield is not None and s.real_yield > min_real
-        and s.ttm_yield is not None and s.ttm_yield > min_ttm
-    ]
+    """漏斗②：真实股息率 > min_real 且 TTM > min_ttm（两级都过）。
+
+    market_caps: {code: 当日市值}。提供时实时重算股息率（分红总额/当日市值），
+    否则用存储的 real_yield（月频拉取时的旧值）。
+    """
+    result = []
+    for s in snapshots:
+        if market_caps and s.code in market_caps:
+            real = compute_real_yield(s.total_dividend, market_caps[s.code])
+            ttm = compute_real_yield(s.ttm_dividend, market_caps[s.code])
+        else:
+            real, ttm = s.real_yield, s.ttm_yield
+        if real is not None and real > min_real and ttm is not None and ttm > min_ttm:
+            result.append(s)
+    return result

@@ -33,10 +33,13 @@ def _seed_cache(cache):
             code=code, roe_latest=16.0, roe_period="2025年报",
             net_profit_annual=1e9, payout_ratio=0.5, finance_source="东财"))
     # 600900/600987 高股息过漏斗②；600919 低股息被拒
+    # total_dividend 按 real_yield 反推（市值 1e10）：total = real/100 × 1e10
     for code, real in [("600900", 6.0), ("600987", 6.5), ("600919", 2.0)]:
         cache.upsert_dividend(DividendSnapshot(
             code=code, real_yield=real, ttm_yield=real + 0.5,
-            real_yield_year="2025", ttm_period="p", dividend_source="mootdx"))
+            real_yield_year="2025", ttm_period="p",
+            total_dividend=real / 100.0 * 1e10, ttm_dividend=(real + 0.5) / 100.0 * 1e10,
+            dividend_source="mootdx"))
 
 
 class TestRunScreener:

@@ -35,10 +35,12 @@ class QuoteSnapshot:
 @dataclass(frozen=True)
 class DividendSnapshot:
     code: str
-    real_yield: Optional[float]        # 真实股息率（最近完整财年）
-    ttm_yield: Optional[float]         # TTM 股息率（近12个月）
+    real_yield: Optional[float]        # 真实股息率（最近完整财年，实时 = total_dividend/市值）
+    ttm_yield: Optional[float]         # TTM 股息率（近12个月，实时 = ttm_dividend/市值）
     real_yield_year: Optional[str]     # 对应财年
     ttm_period: Optional[str]          # TTM 期间
+    total_dividend: Optional[float] = None   # 最近完整财年分红总额（元，月频不变）
+    ttm_dividend: Optional[float] = None     # TTM 分红总额（元，月频不变）
     dividend_source: str = ""          # 分红数据来源（铁律）
     updated_at: str = field(default_factory=lambda: date.today().isoformat())
 
@@ -92,7 +94,8 @@ class ScreenerCache:
 
     CREATE TABLE IF NOT EXISTS dividend_snapshot (
         code TEXT PRIMARY KEY, real_yield REAL, ttm_yield REAL,
-        real_yield_year TEXT, ttm_period TEXT, dividend_source TEXT, updated_at TEXT);
+        real_yield_year TEXT, ttm_period TEXT, total_dividend REAL, ttm_dividend REAL,
+        dividend_source TEXT, updated_at TEXT);
 
     CREATE TABLE IF NOT EXISTS finance_snapshot (
         code TEXT PRIMARY KEY, roe_latest REAL, roe_period TEXT,
@@ -163,16 +166,16 @@ class ScreenerCache:
         with self._conn() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO dividend_snapshot "
-                "(code, real_yield, ttm_yield, real_yield_year, ttm_period, dividend_source, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "(code, real_yield, ttm_yield, real_yield_year, ttm_period, total_dividend, ttm_dividend, dividend_source, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (d.code, d.real_yield, d.ttm_yield, d.real_yield_year, d.ttm_period,
-                 d.dividend_source, d.updated_at),
+                 d.total_dividend, d.ttm_dividend, d.dividend_source, d.updated_at),
             )
 
     def get_dividend(self, code: str) -> Optional[DividendSnapshot]:
         with self._conn() as conn:
             row = conn.execute(
-                "SELECT code, real_yield, ttm_yield, real_yield_year, ttm_period, dividend_source, updated_at "
+                "SELECT code, real_yield, ttm_yield, real_yield_year, ttm_period, total_dividend, ttm_dividend, dividend_source, updated_at "
                 "FROM dividend_snapshot WHERE code=?", (code,)
             ).fetchone()
         return DividendSnapshot(*row) if row else None
@@ -218,7 +221,7 @@ class ScreenerCache:
         """一次读全表股息 → {code: DividendSnapshot}。"""
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT code, real_yield, ttm_yield, real_yield_year, ttm_period, dividend_source, updated_at "
+                "SELECT code, real_yield, ttm_yield, real_yield_year, ttm_period, total_dividend, ttm_dividend, dividend_source, updated_at "
                 "FROM dividend_snapshot").fetchall()
         return {r[0]: DividendSnapshot(*r) for r in rows}
 
