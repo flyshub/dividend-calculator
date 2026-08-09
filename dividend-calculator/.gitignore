@@ -34,5 +34,11 @@ Thumbs.db
 .env
 .env.local
 
-# Backtest data (SQLite db + downloaded constituents, regenerable)
-data/
+# 选股结果 CSV（data/screener/）是版本化产物，由 GitHub Actions 每日生成并跟踪；
+# 其余 data/ 为本地缓存/数据库，不跟踪
+data/backtest.db
+data/screener.db
+data/*.csv
+data/industry_cache.json
+data/result_summary.json
+data/.DS_Store
