@@ -1,12 +1,18 @@
+import json
 import sys
+import threading
+import urllib.request
+from http.server import ThreadingHTTPServer
 from pathlib import Path
+
+import pytest
 
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.dividend import DividendDetail, DividendResult
 from src.pr import PRResult
-from src.web import serialize_result, serialize_pr_result
+from src.web import DividendRequestHandler, serialize_result, serialize_pr_result
 
 
 def test_serialize_result_with_dividend_details():
@@ -206,3 +212,57 @@ def test_serialize_pr_result_all_fields():
         "industry_source", "errors", "roe_period",
     }
     assert set(data.keys()) == expected_keys
+
+
+# ---------------------------------------------------------------------------
+# 静态路由：/screener.html 与 /screener/*.json（code-review 修复：本地 Web 版接入选股页）
+# ---------------------------------------------------------------------------
+
+class TestScreenerRoutes:
+    @pytest.fixture(autouse=True)
+    def _server(self):
+        """临时起服于随机端口，测完即关。"""
+        server = ThreadingHTTPServer(("127.0.0.1", 0), DividendRequestHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        port = server.server_address[1]
+        yield f"http://127.0.0.1:{port}"
+        server.shutdown()
+        server.server_close()
+
+    def test_serve_screener_html(self, _server):
+        with urllib.request.urlopen(f"{_server}/screener.html") as r:
+            assert r.status == 200
+            assert r.headers["Content-Type"].startswith("text/html")
+            body = r.read().decode("utf-8")
+            assert "每日选股结果" in body
+            assert "js/screener_render.js" in body, "页面应引用渲染模块"
+
+    def test_serve_screener_render_js(self, _server):
+        """本地 Web 版依赖的 JS 必须可加载（否则页面白屏）。"""
+        with urllib.request.urlopen(f"{_server}/js/screener_render.js") as r:
+            assert r.status == 200
+            assert r.headers["Content-Type"].startswith("application/javascript")
+            body = r.read().decode("utf-8")
+            assert "rowHtml" in body and "fmtNum" in body
+
+    def test_serve_screener_latest_json(self, _server):
+        with urllib.request.urlopen(f"{_server}/screener/latest.json") as r:
+            assert r.status == 200
+            assert r.headers["Content-Type"].startswith("application/json")
+            data = json.loads(r.read().decode("utf-8"))
+            assert isinstance(data, list) and len(data) > 0
+            assert "代码" in data[0]
+
+    def test_serve_screener_history_json(self, _server):
+        with urllib.request.urlopen(f"{_server}/screener/history.json") as r:
+            assert r.status == 200
+            history = json.loads(r.read().decode("utf-8"))
+            assert isinstance(history, list)
+            assert history[0]["date"] and history[0]["file"]
+
+    def test_index_still_serves(self, _server):
+        """回归：原首页路由不受影响。"""
+        with urllib.request.urlopen(f"{_server}/") as r:
+            assert r.status == 200
+            assert "真实股息率计算器" in r.read().decode("utf-8")

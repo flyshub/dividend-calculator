@@ -9,6 +9,8 @@ on:
 permissions:
   contents: write
   issues: write
+  # gh workflow run（创建 workflow_dispatch 事件）需要 actions: write
+  actions: write
 
 jobs:
   update:
@@ -66,6 +68,52 @@ jobs:
             git push
           fi
 
+      # 导出 JSON 供 Pages 展示（读 data/screener/*.csv → site/screener/ + src/static/screener/，纯标准库）
+      - name: Export screener JSON
+        if: steps.run_screener.outcome == 'success'
+        id: export_json
+        working-directory: dividend-calculator
+        continue-on-error: true
+        run: python scripts/export_screener_json.py
+
+      # 提交 JSON（site/ 与 src/static/ 均不被 gitignore，正常 add）
+      - name: Commit & push screener JSON
+        id: commit_json
+        if: steps.export_json.outcome == 'success'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add dividend-calculator/site/screener/ dividend-calculator/src/static/screener/
+          if git diff --cached --quiet; then
+            echo "No screener JSON changes"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git commit -m "chore(screener): update pages json [skip ci]"
+            git push
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            # 输出本次 push 的 SHA，供 Trigger 步轮询远端 ref 落地
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 显式触发 Pages 部署（仅当 JSON 有变更；轮询远端 SHA 落地后再 dispatch，避免部署旧数据）
+      - name: Trigger Pages deploy
+        if: steps.export_json.outcome == 'success' && steps.commit_json.outputs.changed == 'true'
+        run: |
+          target="${{ steps.commit_json.outputs.sha }}"
+          for i in $(seq 1 30); do
+            remote=$(git ls-remote origin -h refs/heads/main | cut -f1)
+            if [ "$remote" = "$target" ]; then
+              echo "remote main == $target"
+              break
+            fi
+            echo "waiting for push to land ($i/30)..."
+            sleep 5
+          done
+          gh workflow run pages.yml --repo ${{ github.repository }} \
+            || echo "pages 触发失败，请手动 gh workflow run pages.yml"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       # 回传更新后的 screener.db 到 Release（每日行情累积，下次从最新 DB 开始）
       - name: Upload updated screener.db to Release
         if: steps.run_screener.outcome == 'success'
@@ -77,9 +125,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-      # 失败建 Issue 通知
+      # 失败建 Issue 通知（含 export 失败——continue-on-error 步失败不会让 job 红，需显式监听）
       - name: Create issue on failure
-        if: steps.run_screener.outcome != 'success'
+        if: steps.run_screener.outcome != 'success' || steps.export_json.outcome != 'success'
         uses: actions/github-script@v7
         with:
           script: |

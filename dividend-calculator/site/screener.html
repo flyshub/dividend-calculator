@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>每日选股结果 · 真实股息率计算器</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232e5be6'/%3E%3Ctext x='16' y='22' font-size='17' text-anchor='middle' fill='%23fff' font-family='-apple-system,sans-serif'%3E息%3C/text%3E%3C/svg%3E">
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f5f6f8;
+      --ink: #1c212b;
+      --muted: #6e7683;
+      --line: #e2e5ea;
+      --line-strong: #cfd4dc;
+      --brand: #2e5be6;
+      --brand-dark: #1d3fc7;
+      --brand-soft: #eef2ff;
+      --brand-line: #c7d2fe;
+      --green: #0d7a4e;
+      --green-soft: #e7f5ee;
+      --green-line: #b7e3cd;
+      --amber: #a85a12;
+      --amber-soft: #fdf4e3;
+      --amber-line: #f2ddab;
+      --red: #be2a2a;
+      --red-soft: #fbeeed;
+      --red-line: #f2c6c3;
+      --neutral-soft: #f7f8fa;
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 16px;
+      --radius-pill: 999px;
+      --shadow-sm: 0 1px 3px rgba(20, 24, 38, 0.05);
+      --fs-xs: 11px;
+      --fs-sm: 12px;
+      --fs-base: 14px;
+      --fs-lg: 16px;
+      --fs-xl: 18px;
+      --fs-2xl: 22px;
+      --fs-3xl: 26px;
+      --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
+      --sp-5: 20px; --sp-6: 24px; --sp-7: 32px; --sp-8: 40px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--paper); color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      line-height: 1.6; -webkit-font-smoothing: antialiased;
+    }
+    main { max-width: 1040px; margin: 0 auto; padding: var(--sp-6) 20px 64px; }
+
+    /* Header */
+    .hero {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: var(--sp-6); padding: var(--sp-6) var(--sp-7);
+      background: #fff; border: 1px solid var(--line); border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-sm); margin-bottom: var(--sp-6);
+    }
+    .brand { display: flex; align-items: center; gap: var(--sp-4); }
+    .brand-mark {
+      width: 44px; height: 44px; display: grid; place-items: center;
+      border-radius: 12px; background: linear-gradient(135deg, #3b82f6, #1d3fc7);
+      color: #fff; font-weight: 700; font-size: 18px;
+    }
+    h1 { margin: 0 0 2px; font-size: var(--fs-3xl); letter-spacing: -0.02em; }
+    .subtitle { margin: 0; color: var(--muted); font-size: var(--fs-base); }
+    .back-link {
+      padding: 6px 14px; border: 1px solid var(--brand-line); border-radius: var(--radius-md);
+      background: var(--brand-soft); color: var(--brand); font-size: var(--fs-sm);
+      font-weight: 600; text-decoration: none; white-space: nowrap;
+    }
+    .back-link:hover { background: var(--brand-line); }
+
+    /* Toolbar */
+    .toolbar {
+      display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: var(--sp-3); margin-bottom: var(--sp-4);
+      padding: var(--sp-3) var(--sp-4); background: #fff;
+      border: 1px solid var(--line); border-radius: var(--radius-lg);
+    }
+    .toolbar .date-label { font-weight: 600; }
+    #history-select {
+      padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-md);
+      font: inherit; font-size: var(--fs-sm); color: var(--ink); background: #fff;
+    }
+    .count-badge {
+      padding: 2px 10px; border-radius: var(--radius-pill);
+      background: var(--brand-soft); color: var(--brand); font-size: var(--fs-sm); font-weight: 600;
+    }
+
+    /* Table */
+    .result-card {
+      background: #fff; border: 1px solid var(--line); border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-sm); padding: var(--sp-5); overflow-x: auto;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: var(--fs-base); }
+    th, td {
+      border-bottom: 1px solid var(--line); padding: 10px 8px; text-align: left;
+      white-space: nowrap;
+    }
+    th { color: var(--muted); font-weight: 600; font-size: var(--fs-sm); }
+    td.num { font-variant-numeric: tabular-nums; }
+    .yield { color: var(--green); font-weight: 700; }
+    .badge {
+      display: inline-block; padding: 1px 8px; border-radius: var(--radius-pill);
+      font-size: var(--fs-xs); font-weight: 600;
+    }
+    .badge-green { background: var(--green-soft); color: var(--green); border: 1px solid var(--green-line); }
+    .badge-amber { background: var(--amber-soft); color: var(--amber); border: 1px solid var(--amber-line); }
+    .badge-gray { background: var(--neutral-soft); color: var(--muted); border: 1px solid var(--line); }
+
+    /* Empty state */
+    .empty {
+      padding: var(--sp-8); text-align: center; color: var(--muted);
+      font-size: var(--fs-lg);
+    }
+    /* Loading */
+    .loading { padding: var(--sp-8); text-align: center; color: var(--muted); }
+
+    /* Footer */
+    .site-note {
+      margin-top: var(--sp-6); padding-top: var(--sp-4); border-top: 1px solid var(--line);
+      text-align: center; color: var(--muted); font-size: var(--fs-sm);
+    }
+
+    @media (max-width: 720px) {
+      main { padding: var(--sp-4) 12px 40px; }
+      .hero { flex-direction: column; align-items: flex-start; padding: var(--sp-5); }
+      h1 { font-size: var(--fs-2xl); }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="hero">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">息</span>
+        <div>
+          <h1>每日选股结果</h1>
+          <p class="subtitle">全 A 高股息 + 低估 + 可持续性筛选（TTM/真实股息率 >5%，市赚率低估）</p>
+        </div>
+      </div>
+      <a href="index.html" class="back-link">← 返回计算器</a>
+    </header>
+
+    <div class="toolbar">
+      <div class="date-label">日期：<span id="current-date">—</span></div>
+      <div style="display:flex;align-items:center;gap:var(--sp-3);">
+        <span id="count-badge" class="count-badge">—</span>
+        <select id="history-select" aria-label="选择历史日期"></select>
+      </div>
+    </div>
+
+    <div class="result-card">
+      <div id="loading" class="loading">加载中...</div>
+      <div id="table-wrap" style="display:none;">
+        <table>
+          <thead>
+            <tr>
+              <th>代码</th><th>名称</th><th>TTM股息率%</th><th>真实股息率%</th>
+              <th>估值区间</th><th>市赚率PR</th><th>行业</th>
+              <th>可持续性</th><th>ROE%</th><th>总市值(亿)</th>
+            </tr>
+          </thead>
+          <tbody id="result-body"></tbody>
+        </table>
+      </div>
+      <div id="empty" class="empty" style="display:none;">今日无符合条件的股票</div>
+    </div>
+
+    <footer class="site-note">
+      <p>每日由 GitHub Actions 自动运行 · 数据来源：腾讯行情 + 东方财富 + akshare</p>
+    </footer>
+  </main>
+
+  <script src="js/screener_render.js"></script>
+  <script>
+    // 仿 datasources.js 的 jsonFetch 模式（同源 fetch JSON）
+    function jsonFetch(url) {
+      return fetch(url).then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + url);
+        return r.json();
+      });
+    }
+
+    // esc/fmtNum/zoneBadge/susBadge/rowHtml 在 js/screener_render.js（Node 可测）
+    var R = window.ScreenerRender;
+
+    function renderRows(rows) {
+      var body = document.getElementById('result-body');
+      var empty = document.getElementById('empty');
+      var tableWrap = document.getElementById('table-wrap');
+      var countBadge = document.getElementById('count-badge');
+      body.innerHTML = '';
+      if (!rows || !rows.length) {
+        tableWrap.style.display = 'none';
+        empty.style.display = 'block';
+        countBadge.textContent = '0 只';
+        return;
+      }
+      tableWrap.style.display = '';
+      empty.style.display = 'none';
+      countBadge.textContent = rows.length + ' 只';
+      rows.forEach(function (r) {
+        var tr = document.createElement('tr');
+        tr.innerHTML = R.rowHtml(r);
+        body.appendChild(tr);
+      });
+    }
+
+    // 加载指定日期（默认最新）
+    function loadDate(file) {
+      var loading = document.getElementById('loading');
+      var tableWrap = document.getElementById('table-wrap');
+      var empty = document.getElementById('empty');
+      loading.style.display = '';
+      tableWrap.style.display = 'none';
+      empty.style.display = 'none';
+      jsonFetch('screener/' + file).then(function (rows) {
+        loading.style.display = 'none';
+        renderRows(rows);
+      }).catch(function () {
+        loading.style.display = 'none';
+        tableWrap.style.display = 'none';
+        empty.style.display = 'block';
+        document.getElementById('empty').textContent = '加载失败：' + file;
+      });
+    }
+
+    // 初始化：读 history.json（下拉）+ latest.json（默认渲染，避免重复请求按日文件）
+    var select = document.getElementById('history-select');
+    jsonFetch('screener/history.json').then(function (history) {
+      if (!history || !history.length) {
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('empty').style.display = 'block';
+        document.getElementById('empty').textContent = '暂无历史结果';
+        return;
+      }
+      // 填充历史日期下拉（最新在前）
+      history.slice().reverse().forEach(function (h) {
+        var opt = document.createElement('option');
+        opt.value = h.file;
+        opt.textContent = h.date + '（' + h.count + ' 只）';
+        select.appendChild(opt);
+      });
+      select.value = history[history.length - 1].file; // 默认最新
+      document.getElementById('current-date').textContent = history[history.length - 1].date;
+      // 默认渲染 latest.json；若失败（如数据文件缺失）回落到历史最后一日
+      jsonFetch('screener/latest.json').then(function (rows) {
+        document.getElementById('loading').style.display = 'none';
+        renderRows(rows);
+      }).catch(function () {
+        loadDate(history[history.length - 1].file);
+      });
+    }).catch(function () {
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('empty').style.display = 'block';
+      document.getElementById('empty').textContent = '历史数据加载失败';
+    });
+
+    // 历史切换
+    select.addEventListener('change', function () {
+      document.getElementById('current-date').textContent =
+        select.options[select.selectedIndex].textContent.split('（')[0];
+      loadDate(select.value);
+    });
+  </script>
+</body>
+</html>

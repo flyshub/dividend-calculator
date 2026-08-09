@@ -39,7 +39,7 @@ jobs:
 
       - name: Run node tests
         working-directory: dividend-calculator
-        run: node --test site/js/calculator.test.js
+        run: node --test site/js/*.test.js
 
   verify-dual-end:
     name: JS/Python 双端一致性验证

@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 INDEX_FILE = STATIC_DIR / "index.html"
+SCREENER_FILE = STATIC_DIR / "screener.html"
 
 
 def serialize_pr_result(result: PRResult) -> dict:
@@ -55,6 +56,22 @@ class DividendRequestHandler(BaseHTTPRequestHandler):
 
         if parsed_url.path == "/":
             self._send_file(INDEX_FILE, "text/html; charset=utf-8")
+            return
+
+        if parsed_url.path == "/screener.html":
+            self._send_file(SCREENER_FILE, "text/html; charset=utf-8")
+            return
+
+        if parsed_url.path.startswith("/screener/"):
+            # 选股结果 JSON（src/static/screener/，与 site/screener/ 双目录同源）
+            rel = Path(parsed_url.path).name
+            self._send_file(STATIC_DIR / "screener" / rel, "application/json; charset=utf-8")
+            return
+
+        if parsed_url.path.startswith("/js/"):
+            # 页面引用的 JS（src/static/js/），如 screener_render.js
+            rel = Path(parsed_url.path).name
+            self._send_file(STATIC_DIR / "js" / rel, "application/javascript; charset=utf-8")
             return
 
         if parsed_url.path == "/health":
