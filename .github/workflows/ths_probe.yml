@@ -1,0 +1,21 @@
+name: ths-probe
+
+# THS（同花顺）接口海外可用性探针 —— 手动触发，实测海外 runner 上
+# akshare stock_financial_abstract_ths 的成功率与耗时，评估「THS 升为主数据源」。
+# 用法：Actions 页手动 Run workflow，或 gh workflow run ths_probe.yml
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install akshare (only, no mootdx)
+        run: pip install --quiet akshare
+      - name: Run THS probe
+        run: python dividend-calculator/scripts/probe_ths_overseas.py
