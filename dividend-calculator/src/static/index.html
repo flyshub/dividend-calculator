@@ -629,6 +629,26 @@
       margin-right: 4px;
     }
 
+    /* 市赚率计算说明（pr-explanation）：tip + 公式分条 + 口径说明 */
+    .pr-explain {
+      margin: var(--sp-3) 0;
+      display: flex;
+      flex-direction: column;
+      gap: var(--sp-2);
+    }
+    .pr-explain .tip__title {
+      font-weight: 650;
+    }
+    .pr-explain .formula-line {
+      padding: 2px 8px;
+      border-radius: var(--radius-sm);
+      color: var(--muted);
+      font-size: var(--fs-sm);
+    }
+    .pr-explain .formula-line b {
+      color: var(--ink);
+    }
+
     table {
       width: 100%;
       border-collapse: collapse;
@@ -990,7 +1010,7 @@
             <div id="pr-sources" class="value value--base"></div>
           </div>
         </div>
-        <p id="pr-explanation" class="explanation"></p>
+        <div id="pr-explanation" class="pr-explain"></div>
         <p id="pr-warning" class="warning hidden"></p>
       </div>
 
@@ -1578,17 +1598,25 @@
           indEl.textContent = (d.industry && d.industry !== '未知行业') ? '| ' + d.industry : '';
         }
 
-        // 构建计算说明
-        var explanation = '核心公式: 市赚率 = PE_TTM × N因子 / ROE_latest × 100';
-        explanation += '\n  基本版: ' + Number(d.pe_ttm || 0).toFixed(2) + ' × ' + Number(d.n_factor || 0).toFixed(4) + ' / ' + Number(d.roe_5y_median || 0).toFixed(2) + '% × 100 = ' + Number(d.pr_basic || 0).toFixed(3);
-        explanation += '\n  修正版: ' + Number(d.pr_corrected || 0).toFixed(3) + '（对亏损股/周期股/N倍增长股进行修正）';
-        explanation += '\n  PB版: PE/PB × ROE修正 = ' + Number(d.pr_pb || 0).toFixed(3);
-        explanation += '\n估值区间: ' + (d.valuation_zone || '无') + '（市赚率≤0.5低估，0.5-1.0合理偏低，1.0-3.0合理，>3.0高估）';
-        explanation += '\n净利润: 最新报告期 ' + (Number(d.net_profit_latest_period || 0) / 1e8).toFixed(2) + '亿, 年度 ' + (Number(d.net_profit_annual || 0) / 1e8).toFixed(2) + '亿';
-        explanation += '\n分红率: ' + Number(d.payout_ratio * 100 || 0).toFixed(1) + '%（近一年分红总额 / 年度净利润）';
-        explanation += '\n口径说明: PE 为 TTM（含最新季报），ROE 为最新年报（' + (d.roe_period || '未知报告期') + '）——ROE 仅定期披露无实时值，与 PE 组合是市赚率公式的定义口径';
-        if (d.is_loss_stock) explanation += '\n⚠️ 该公司处于亏损状态，市赚率参考价值有限';
-        document.getElementById('pr-explanation').textContent = explanation;
+        // 构建计算说明（卡片化：核心公式 + 估值/口径，参考回测提示与适用性卡风格）
+        var explainEl = document.getElementById('pr-explanation');
+        var h = '';
+        h += '<div class="tip tip--applicability">';
+        h += '<div class="tip__title">市赚率计算 · 核心公式</div>';
+        h += '<div class="formula-line">市赚率 = <b>PE_TTM × N因子 / ROE</b> × 100</div>';
+        h += '<div class="formula-line">基本版: <b>' + Number(d.pe_ttm || 0).toFixed(2) + ' × ' + Number(d.n_factor || 0).toFixed(4) + ' / ' + Number(d.roe_5y_median || 0).toFixed(2) + '% × 100 = ' + Number(d.pr_basic || 0).toFixed(3) + '</b></div>';
+        h += '<div class="formula-line">修正版: <b>' + Number(d.pr_corrected || 0).toFixed(3) + '</b>（对亏损股/周期股/N倍增长股进行修正）</div>';
+        h += '<div class="formula-line">PB版: PE/PB × ROE修正 = <b>' + Number(d.pr_pb || 0).toFixed(3) + '</b></div>';
+        h += '</div>';
+        h += '<div class="tip tip--backtest">';
+        h += '<div class="tip__title">估值与口径</div>';
+        h += '<div class="formula-line">估值区间: <b>' + (d.valuation_zone || '无') + '</b>（市赚率≤0.5低估，0.5-1.0合理偏低，1.0-3.0合理，&gt;3.0高估）</div>';
+        h += '<div class="formula-line">净利润: 最新报告期 <b>' + (Number(d.net_profit_latest_period || 0) / 1e8).toFixed(2) + '亿</b>，年度 <b>' + (Number(d.net_profit_annual || 0) / 1e8).toFixed(2) + '亿</b></div>';
+        h += '<div class="formula-line">分红率: <b>' + Number(d.payout_ratio * 100 || 0).toFixed(1) + '%</b>（近一年分红总额 / 年度净利润）</div>';
+        h += '<div class="formula-line">口径: PE 为 TTM（含最新季报），ROE 为最新年报（' + (d.roe_period || '未知报告期') + '）——ROE 仅定期披露无实时值，与 PE 组合是市赚率公式的定义口径</div>';
+        h += '</div>';
+        if (d.is_loss_stock) h += '<div class="tip tip--backtest">⚠️ 该公司处于亏损状态，市赚率参考价值有限</div>';
+        explainEl.innerHTML = h;
 
         // 适用性卡：点亮当前股票所属情况（优先级：周期 > 科技 > 成长；无则默认价值股）
         const activeKind = d.is_cyclical ? 'cyclical' : (d.is_tech ? 'tech' : (d.is_growth ? 'growth' : 'value'));

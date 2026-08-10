@@ -287,7 +287,8 @@ def _get_financial_ths(stock_code: str) -> Tuple[
             (net_profit_latest_period or 0) / 1e8,
             net_profit_annual / 1e8,
         )
-        return roe_latest, roe_5y_median, net_profit_latest_period, net_profit_annual, "同花顺（akshare）", errors, int(years.max() // 10000)
+        # roe_period = 最新年报年份（同花顺「报告期」为 4 位年份如 2025，非 8 位日期）
+        return roe_latest, roe_5y_median, net_profit_latest_period, net_profit_annual, "同花顺（akshare）", errors, int(years.max())
 
     except Exception as e:
         errors.append(f"同花顺财报获取失败: {e}")
