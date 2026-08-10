@@ -132,14 +132,14 @@ def get_ttm_dividend(
     """
     try:
         from .api import _get_all_dividend_records
-        records = _get_all_dividend_records(stock_code)
+        records, source = _get_all_dividend_records(stock_code)
         if not records:
             return None, None, None, "无"
         ttm_total, start, end, count = compute_ttm_dividend(records, stock_info.total_shares)
         if ttm_total is None:
             return None, None, None, "无"
         period = f"{start}~{end}" if start and end else None
-        return ttm_total, period, f"{count}次派息", "东财"
+        return ttm_total, period, f"{count}次派息", source
     except Exception as e:
         logger.debug("TTM 分红获取失败 %s: %s", stock_code, e)
         return None, None, None, "无"

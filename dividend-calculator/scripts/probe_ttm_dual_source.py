@@ -17,7 +17,6 @@ SAMPLE = ["600036", "600900", "601398", "601857", "000333"]
 def records_mootdx(stock_code):
     """mootdx xdxr 链路（显式 server，避免默认构造在本沙箱挂起）"""
     from mootdx.quotes import Quotes
-    from src.utils import infer_fiscal_year
     from src.datasource.base import DividendRecord
 
     client = Quotes.factory(market='std', server=('110.41.147.114', 7709), timeout=8)
@@ -37,7 +36,7 @@ def records_mootdx(stock_code):
         results.append(DividendRecord(
             ex_dividend_date=f"{y:04d}-{m:02d}-{d:02d}",
             dividend_per_10=fenhong,
-            report_time=infer_fiscal_year(y, m).report_time,
+            report_time="",  # TTM 窗口对比只比较除权日与金额，report_time 不参与
         ))
     return results
 
@@ -109,7 +108,7 @@ def main() -> int:
                 print(f"  仅东财有: {sorted(only_em)}")
         print()
 
-    print(f"结论: {5 - mismatches}/{len(codes)} 一致")
+    print(f"结论: {len(codes) - mismatches}/{len(codes)} 一致")
     return 0 if mismatches == 0 else 1
 
 

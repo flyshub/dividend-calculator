@@ -6,7 +6,7 @@ get_historical_data: 月度价格 + 分红记录聚合（尚未提取到 adapter
 """
 import logging
 import math
-from typing import Optional
+from typing import Optional, Tuple
 
 import requests
 
@@ -140,8 +140,11 @@ def _get_monthly_prices(stock_code: str) -> list:
 # 分红记录（走势图用，尚未提取到 adapter）
 # ────────────────────────────────────────────────────────────────
 
-def _get_all_dividend_records(stock_code: str) -> list:
+def _get_all_dividend_records(stock_code: str) -> Tuple[list, str]:
     """获取全部分红记录（含除权除息日），按除权日升序。
+
+    返回 (records, source)，source 为实际数据来源（"东财" / "mootdx xdxr" / "无"），
+    供调用方如实标注（数据铁律：来源可追溯）。
 
     主：东财分红明细（RPT_SHAREBONUS_DET，报告期口径，与 site/js datasources.js 同源，
     财年按报告期判定 month==12）；mootdx xdxr 兜底（仅含已除权记录，fenhong 浮点 round(4)）。
@@ -155,12 +158,16 @@ def _get_all_dividend_records(stock_code: str) -> list:
         from .eastmoney_fetcher import fetch_dividend_rows
         from .sustainability import parse_dividend_rows
         rows = fetch_dividend_rows(stock_code)
+        if rows is None:
+            # 网络/HTTP 取数失败（#38 M5 语义），不短路，落入 mootdx 兜底
+            raise ConnectionError("东财分红接口取数失败")
         if not rows:
-            return []
+            # 请求成功但真无分红——直接返回，无需兜底（避免把无分红公司误判为取数失败）
+            return [], "东财"
         records, _ = parse_dividend_rows(rows)
         records.sort(key=lambda r: r.ex_dividend_date or "")
         logger.debug("通过东财获取分红记录 %s: %d 条", stock_code, len(records))
-        return records
+        return records, "东财"
     except Exception as e:
         logger.warning("东财获取分红记录失败 %s: %s", stock_code, e)
 
@@ -196,11 +203,11 @@ def _get_all_dividend_records(stock_code: str) -> list:
                 if results:
                     results.sort(key=lambda r: r.ex_dividend_date)
                     logger.debug("mootdx 兜底获取分红记录 %s: %d 条", stock_code, len(results))
-                    return results
+                    return results, "mootdx xdxr"
     except Exception as e:
         logger.warning("mootdx 获取分红记录失败 %s: %s", stock_code, e)
 
-    return []
+    return [], "无"
 
 
 # ────────────────────────────────────────────────────────────────
@@ -218,7 +225,7 @@ def get_historical_data(stock_input: str) -> Optional[HistoricalData]:
     stock_name = quote.name if quote else None
 
     monthly_prices = _get_monthly_prices(stock_code)
-    dividend_records = _get_all_dividend_records(stock_code)
+    dividend_records, _ = _get_all_dividend_records(stock_code)
 
     if not monthly_prices:
         logger.warning("无法获取 %s 的月度价格数据", stock_code)
