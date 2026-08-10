@@ -4,7 +4,7 @@
 
 项目采用 **腾讯 + mootdx + akshare + 东方财富 datacenter 多引擎**：腾讯 HTTP 提供实时价格/总股本/PE/PB/K线（主引擎），mootdx 通达信二进制协议提供 F10 财务/行业与降级兜底，akshare 提供分红明细/财务/新浪行情，东方财富 datacenter 提供可持续性全部字段并作为 JS 静态版（浏览器直连）数据源。
 
-实时价格/股本/PE/PB/K线以腾讯为主源（全球可用）；mootdx 与 akshare 作为降级链；mootdx 不可用（海外或受限网络）时自动落到 akshare 同花顺。
+实时价格/股本/PE/PB/K线以腾讯为主源（全球可用）；mootdx 与 akshare 作为降级链；mootdx 不可用（海外或受限网络）时自动落到 akshare 同花顺（该接口 2026-08 海外探针实测 10/10 可用、平均 2s，见下方修复历史）。
 
 ## 架构图
 
@@ -182,6 +182,7 @@ quote = fetch_tencent_quote('600036')
 
 ## 修复历史
 
+- 2026-08-10：THS 海外可用性探针（`scripts/probe_ths_overseas.py` + `ths_probe.yml`）—— GitHub Actions 海外 runner 实测同花顺接口 10/10 成功、平均 2s、数据零差异；当初"akshare/同花顺海外限流"的迁移动机经实测不成立。决策：**维持 mootdx 主源**（ROE 口径与回测一致，双源统一），东财 datacenter 海外可用性未实测、限流警示保留
 - 2026-08-10：文档对齐代码 —— 分红主源改为 akshare fhps_detail_em（按报告期判财年，与 JS 双端一致）；实时价格/股本/K线主源为腾讯；行业备用改为东财 datacenter；补充可持续性东财 datacenter 链路与选股器说明
 - 2026-06-01：新增 akshare 降级链路 —— mootdx 不可用时自动回退 akshare 同花顺（分红/ROE/净利润），确保受限网络环境可用
 - 2026-05-31：数据源从 akshare/baostock 迁移到 mootdx + 腾讯双引擎，不再依赖东方财富服务器

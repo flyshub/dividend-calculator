@@ -127,13 +127,13 @@ N 因子 = 50% / 股利支付率，区间 [1.0, 2.0]（支付率 ≥50% → N=1.
 | 行业分类 | mootdx F10 行业分析 | 东方财富 datacenter |
 | 可持续性字段 | 东方财富 datacenter | — |
 
-所有数据源均为全球可用（mootdx 走二进制通达信协议，腾讯走 HTTP）；可持续性模块与 JS 静态版刻意走东方财富 datacenter（浏览器可直连、与 Python 同源），其余主链路不依赖东方财富服务器。
+所有数据源均为全球可用（mootdx 走二进制通达信协议，腾讯走 HTTP，akshare/同花顺经 2026-08 海外探针实测 10/10 可用、平均 2s）；可持续性模块与 JS 静态版刻意走东方财富 datacenter（浏览器可直连、与 Python 同源），其余主链路不依赖东方财富服务器。
 
 > 注：GitHub Pages 静态版（`site/`）因浏览器无法访问 mootdx 二进制协议，改用东方财富 datacenter HTTP 接口（分红/财务/行业）作为浏览器数据源，全部接口已验证支持 CORS。计算逻辑与 Python 实现逐字段一致（见 `scripts/verify_js_vs_python.py`）。
 
 ## 开发坑位
 
-- mootdx 通达信协议全球可用，不依赖东方财富（解决海外 IP 限流问题）
+- mootdx 通达信协议全球可用，不依赖东方财富；ROE 主源保留 mootdx F10（注：当初"akshare/同花顺海外限流"的迁移动机经 2026-08 海外探针实测已不成立，同花顺接口海外 10/10 可用、平均 2s，详见 docs/DATASOURCE_README.md 修复历史）
 - 东财 datacenter HTTP 接口对海外 IP 限流，CI（GitHub Actions 海外 runner）访问易超时：所有 requests 调用须带重试（3 次退避 + 30s 读取超时），参考 `scripts/verify_js_vs_python.py` 的 `_get()` 统一会话
 - 腾讯 fqkline 接口全球可用，走势图数据源首选
 - 半年报除权日通常在 9-12 月，要用除权日而非公告日推断财年
