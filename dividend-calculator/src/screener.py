@@ -186,7 +186,11 @@ def write_csv(rows: List[dict], output: str):
     if not rows:
         print("无符合条件的股票", file=sys.stderr)
         if output != "-":
-            Path(output).write_text("代码,名称,TTM股息率%,真实股息率%,估值区间,市赚率PR,可持续性,ROE%,总市值(亿),数据来源\n", encoding="utf-8")
+            # 空结果也写完整表头（11 列，含「行业」，与 _build_output_rows 列序一致，
+            # 否则 export_screener_json.py 的表头校验会拦截）
+            Path(output).write_text(
+                "代码,名称,TTM股息率%,真实股息率%,估值区间,市赚率PR,行业,可持续性,ROE%,总市值(亿),数据来源\n",
+                encoding="utf-8")
         return
     fieldnames = list(rows[0].keys())
     if output != "-":

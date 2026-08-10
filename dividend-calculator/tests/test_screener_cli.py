@@ -131,7 +131,9 @@ class TestWriteCsv:
         assert "600900" in f.read_text(encoding="utf-8")
 
     def test_empty_writes_header(self, tmp_path):
+        """空结果也写完整 11 列表头（含行业），否则 export 表头校验会拦截。"""
         f = tmp_path / "out.csv"
         write_csv([], str(f))
         assert f.exists()
-        assert "代码" in f.read_text(encoding="utf-8")
+        header = f.read_text(encoding="utf-8").strip()
+        assert header == "代码,名称,TTM股息率%,真实股息率%,估值区间,市赚率PR,行业,可持续性,ROE%,总市值(亿),数据来源"
