@@ -114,14 +114,40 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-      # 回传更新后的 screener.db 到 Release（每日行情累积，下次从最新 DB 开始）
+      # 回传更新后的 screener.db 到 Release，并保留最近 7 天历史版（防意外损坏无法回退）
       - name: Upload updated screener.db to Release
         if: steps.run_screener.outcome == 'success'
         run: |
-          gh release upload screener-seed \
-            --repo ${{ github.repository }} \
-            dividend-calculator/data/screener.db \
-            --clobber
+          set -euo pipefail
+          DB=dividend-calculator/data/screener.db
+          # 1) 覆盖前先把 Release 当前版（上一日结果）存为按数据日期命名的历史备份
+          if gh release view screener-seed --repo ${{ github.repository }} --json assets \
+              --jq '.assets[].name' 2>/dev/null | grep -qx "screener.db"; then
+            gh release download screener-seed --repo ${{ github.repository }} \
+              --pattern "screener.db" --dir /tmp --clobber
+            PREV_DATE=$(sqlite3 /tmp/screener.db \
+              "SELECT REPLACE(MAX(updated_at), '-', '') FROM quote_snapshot" 2>/dev/null || true)
+            if [ -n "$PREV_DATE" ]; then
+              mv /tmp/screener.db "/tmp/screener_${PREV_DATE}.db"
+              gh release upload screener-seed --repo ${{ github.repository }} \
+                "/tmp/screener_${PREV_DATE}.db" --clobber
+              echo "已保留历史版 screener_${PREV_DATE}.db"
+            else
+              rm -f /tmp/screener.db
+            fi
+          fi
+          # 2) 覆盖上传今日新 DB
+          gh release upload screener-seed --repo ${{ github.repository }} "$DB" --clobber
+          # 3) 清理 7 天前的历史备份（只删 screener_YYYYMMDD.db 命名的）
+          cutoff=$(date -u -d '7 days ago' +%Y%m%d)
+          gh release view screener-seed --repo ${{ github.repository }} --json assets \
+            --jq '.assets[].name' 2>/dev/null | grep -E '^screener_[0-9]{8}\.db$' | while read -r a; do
+            d="${a#screener_}"; d="${d%.db}"
+            if [ "$d" -lt "$cutoff" ]; then
+              gh release delete-asset screener-seed "$a" --repo ${{ github.repository }} --yes
+              echo "清理过期备份 ${a}"
+            fi
+          done || true
         env:
           GH_TOKEN: ${{ github.token }}
 
