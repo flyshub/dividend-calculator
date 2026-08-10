@@ -89,6 +89,19 @@
       background: var(--brand-soft); color: var(--brand); font-size: var(--fs-sm); font-weight: 600;
     }
 
+    /* 选股口径说明 */
+    .criteria-card {
+      margin-bottom: var(--sp-4); padding: var(--sp-3) var(--sp-5) var(--sp-4);
+      background: var(--brand-soft); border: 1px solid var(--brand-line);
+      border-radius: var(--radius-md); font-size: var(--fs-sm); color: var(--ink);
+    }
+    .criteria-card h2 {
+      margin: 0 0 2px; font-size: var(--fs-base); color: var(--brand-dark); font-weight: 700;
+    }
+    .criteria-card ol { margin: 0; padding-left: 20px; }
+    .criteria-card li { margin: 1px 0; }
+    .criteria-card strong { font-weight: 700; }
+
     /* Table */
     .result-card {
       background: #fff; border: 1px solid var(--line); border-radius: var(--radius-lg);
@@ -138,7 +151,7 @@
         <span class="brand-mark" aria-hidden="true">息</span>
         <div>
           <h1>每日选股结果</h1>
-          <p class="subtitle">全 A 高股息 + 低估 + 可持续性筛选（TTM/真实股息率 >5%，市赚率低估）</p>
+          <p class="subtitle">全 A 高股息 + 低估 + 可持续性筛选（TTM/真实股息率 &gt;5%，市赚率 PR≤1）</p>
         </div>
       </div>
       <a href="index.html" class="back-link">← 返回计算器</a>
@@ -150,6 +163,17 @@
         <span id="count-badge" class="count-badge">—</span>
         <select id="history-select" aria-label="选择历史日期"></select>
       </div>
+    </div>
+
+    <div class="criteria-card" aria-label="选股口径说明">
+      <h2>选股口径</h2>
+      <p style="margin:0 0 4px;">全 A 股池，四层漏斗全部通过才入选（默认阈值）：</p>
+      <ol>
+        <li><strong>TTM 股息率 &gt; 5%</strong>：滚动 12 个月股息率，严格大于</li>
+        <li><strong>真实股息率 &gt; 5%</strong>：最近完整财年现金分红总额 ÷ 当前总市值（总额法，不受转送股影响）</li>
+        <li><strong>市赚率估值 ∈ 低估 / 合理偏低</strong>：PR ≤ 1.0（≤0.5 低估、0.5–1.0 合理偏低；历史回测 PR≤1 有超额收益）</li>
+        <li><strong>股息可持续性 ∈ 可持续 / 偏弱</strong>：排除「不可持续」（分红与盈利/现金流明显不匹配，或存在致命红旗）</li>
+      </ol>
     </div>
 
     <div class="result-card">
