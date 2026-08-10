@@ -997,33 +997,13 @@
           </ul>
         </div>
         <div id="pr-explanation" class="pr-explain"></div>
-        <div class="metric-row">
-          <div class="metric">
-            <div class="label">最新报告期净利润</div>
-            <div id="pr-profit-ttm" class="value"></div>
-          </div>
-          <div class="metric">
-            <div class="label">年度净利润</div>
-            <div id="pr-profit-annual" class="value"></div>
-          </div>
-          <div class="metric">
-            <div class="label">近一年现金分红总额</div>
-            <div id="pr-dividend-total" class="value"></div>
-          </div>
-        </div>
-        <div class="metric-row">
-          <div class="metric">
-            <div class="label">分红率</div>
-            <div id="pr-payout" class="value"></div>
-          </div>
-          <div class="metric">
-            <div class="label">N因子</div>
-            <div id="pr-nfactor" class="value"></div>
-          </div>
-          <div class="metric">
-            <div class="label">数据来源</div>
-            <div id="pr-sources" class="value value--base"></div>
-          </div>
+        <div class="tip tip--applicability">
+          <div class="tip__title">输入数据与溯源</div>
+          <div class="formula-line">净利润: 最新报告期 <b><span id="pr-profit-ttm"></span></b>，年度 <b><span id="pr-profit-annual"></span></b></div>
+          <div class="formula-line">近一年现金分红总额: <b><span id="pr-dividend-total"></span></b></div>
+          <div class="formula-line">分红率: <b><span id="pr-payout"></span></b>（近一年分红总额 / 年度净利润）</div>
+          <div class="formula-line">N因子: <b><span id="pr-nfactor"></span></b>（0.5/股利支付率，夹取 [1,2]）</div>
+          <div class="formula-line">数据来源: <b><span id="pr-sources"></span></b></div>
         </div>
         <p id="pr-warning" class="warning hidden"></p>
       </div>
@@ -1529,8 +1509,6 @@
       h += '<div class="tip tip--backtest">';
       h += '<div class="tip__title">估值与口径</div>';
       h += '<div class="formula-line">估值区间: <b>' + (d.valuation_zone || '无') + '</b>（市赚率≤0.5低估，0.5-1.0合理偏低，1.0-3.0合理，&gt;3.0高估）</div>';
-      h += '<div class="formula-line">净利润: 最新报告期 <b>' + (Number(d.net_profit_latest_period || 0) / 1e8).toFixed(2) + '亿</b>，年度 <b>' + (Number(d.net_profit_annual || 0) / 1e8).toFixed(2) + '亿</b></div>';
-      h += '<div class="formula-line">分红率: <b>' + (d.payout_ratio == null ? '无' : Number(d.payout_ratio * 100).toFixed(1) + '%') + '</b>（近一年分红总额 / 年度净利润）</div>';
       h += '<div class="formula-line">口径: PE 为 TTM（含最新季报），ROE 为最新年报（' + (d.roe_period || '未知报告期') + '）——ROE 仅定期披露无实时值，与 PE 组合是市赚率公式的定义口径</div>';
       h += '</div>';
       if (d.is_loss_stock) h += '<div class="tip tip--backtest">⚠️ 该公司处于亏损状态，市赚率参考价值有限</div>';
