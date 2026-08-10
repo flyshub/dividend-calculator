@@ -179,6 +179,26 @@ class TestScreenRealYield:
                                 real_yield_year="2025", ttm_period="p", dividend_source="m")
         assert screen_real_yield([snap], market_caps={"600900": 1e11}) == []
 
+    def test_fallback_diag_reports_counts(self, capsys):
+        """降级诊断输出：缺 total/ttm_dividend 回退的触发数与入选数（capsys 捕获 stderr）。"""
+        snap = DividendSnapshot(code="600900", real_yield=6.0, ttm_yield=6.5,
+                                total_dividend=None, ttm_dividend=None,
+                                real_yield_year="2025", ttm_period="p", dividend_source="m")
+        result = screen_real_yield([snap], market_caps={"600900": 1e11})
+        captured = capsys.readouterr()
+        assert "漏斗② 降级: 1 只缺 total/ttm_dividend" in captured.err
+        assert "其中 1 只入选" in captured.err
+        assert len(result) == 1
+
+    def test_fallback_diag_zero_silent(self, capsys):
+        """无降级（total_dividend 完整）→ 不输出降级诊断。"""
+        snap = DividendSnapshot(code="600900", real_yield=6.0, ttm_yield=6.5,
+                                total_dividend=1e10, ttm_dividend=1.05e10,
+                                real_yield_year="2025", ttm_period="p", dividend_source="m")
+        screen_real_yield([snap], market_caps={"600900": 1e11})
+        captured = capsys.readouterr()
+        assert "漏斗② 降级" not in captured.err
+
 
 class TestComputeRealYield:
     def test_basic(self):

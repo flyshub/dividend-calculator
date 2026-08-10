@@ -7,6 +7,7 @@
 TTM 股息率（近12个月）并存快照，供漏斗① 完整判定（TTM >5%）。
 """
 from typing import Callable, Dict, List, Optional
+import sys
 
 from src.dividend import DividendResult, calculate_true_dividend_yield
 from src.screener_cache import DividendSnapshot, ScreenerCache
@@ -102,7 +103,6 @@ def screen_real_yield(
     诊断：结束时打印降级统计（回退触发的股票数 / 其中最终入选数），
     便于确认降级是否实际影响入选集合（生产可观测，见 total_dividend 缺失调研）。
     """
-    import sys
     result = []
     fallback_count = 0
     fallback_passed = 0
@@ -116,7 +116,7 @@ def screen_real_yield(
                 used_fallback = True
                 real, ttm = s.real_yield, s.ttm_yield
         else:
-            used_fallback = True
+            # 无 market_caps（缓存路径）或该股不在当日市值 → 用存储旧值，非降级，不计入
             real, ttm = s.real_yield, s.ttm_yield
         if real is not None and real > min_real and ttm is not None and ttm > min_ttm:
             result.append(s)
@@ -126,8 +126,7 @@ def screen_real_yield(
             fallback_count += 1
     if fallback_count:
         print(
-            f"漏斗② 降级: {fallback_count} 只走存储旧值（缺 total/ttm_dividend），"
+            f"漏斗② 降级: {fallback_count} 只缺 total/ttm_dividend 用存储旧值，"
             f"其中 {fallback_passed} 只入选",
             file=sys.stderr)
-    return result
     return result
