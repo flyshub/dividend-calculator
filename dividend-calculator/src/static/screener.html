@@ -103,6 +103,17 @@
     .criteria-card li { margin: 1px 0; }
     .criteria-card strong { font-weight: 700; }
 
+    /* 理性使用提醒 */
+    .callout {
+      margin-bottom: var(--sp-4); padding: var(--sp-3) var(--sp-5) var(--sp-4);
+      background: #fffbeb; border: 1px solid #fde68a; border-left: 3px solid #d97706;
+      border-radius: var(--radius-md); font-size: var(--fs-sm); color: var(--ink);
+    }
+    .callout h2 {
+      margin: 0 0 2px; font-size: var(--fs-base); color: #92400e; font-weight: 700;
+    }
+    .callout p { margin: 0; }
+
     /* Table */
     .result-card {
       background: #fff; border: 1px solid var(--line); border-radius: var(--radius-lg);
@@ -192,6 +203,11 @@
         </table>
       </div>
       <div id="empty" class="empty" style="display:none;">今日无符合条件的股票</div>
+    </div>
+
+    <div class="callout" aria-label="理性使用提醒">
+      <h2>⚠️ 理性使用提醒</h2>
+      <p>本页为初筛过滤结果。选出的标的仍需深入阅读年报、关注行业景气度与公司治理。「数学上便宜」≠「值得买」，请结合个人风险偏好与资产配置需求独立决策。</p>
     </div>
 
     <footer class="site-note">
