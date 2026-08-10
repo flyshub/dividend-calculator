@@ -53,7 +53,7 @@
   /* ── 腾讯月度K线（web.ifzq.gtimg.cn，前复权）──
    * 返回 [{date:'YYYY-MM-DD', close, price}] 升序 */
   function fetchMonthlyPrices(stockCode, months) {
-    months = months || 36;
+    months = months || 120;
     var prefix = stockCode[0] === '6' ? 'sh' : 'sz';
     var url = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=' + prefix + stockCode +
       ',month,,,' + months + ',qfq';

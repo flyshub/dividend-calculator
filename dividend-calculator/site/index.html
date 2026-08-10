@@ -1194,8 +1194,8 @@
       }
 
       var title = apiData.stock_name
-        ? apiData.stock_name + '（' + apiData.stock_code + '）近三年股价与股息率走势'
-        : apiData.stock_code + ' 近三年股价与股息率走势';
+        ? apiData.stock_name + '（' + apiData.stock_code + '）近十年股价与股息率走势'
+        : apiData.stock_code + ' 近十年股价与股息率走势';
 
       return {
         title: {
@@ -1325,7 +1325,7 @@
     /* 浏览器端历史数据：腾讯月度K线 + 东财分红（含除权日），组装为图表期望的形态 */
     function fetchChartData(stockCode, stockName) {
       return Promise.all([
-        DataSources.fetchMonthlyPrices(stockCode, 36),
+        DataSources.fetchMonthlyPrices(stockCode, 120),
         DataSources.fetchDividendRecords(stockCode),
       ]).then(function (results) {
         var monthlyPrices = results[0];

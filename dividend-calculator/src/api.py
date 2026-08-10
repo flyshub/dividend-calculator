@@ -78,7 +78,7 @@ def _get_monthly_prices_mootdx(stock_code: str) -> list:
     try:
         from .datasource.mootdx_source import get_quotes_client
         client = get_quotes_client()
-        df = client.bars(symbol=stock_code, frequency=6, offset=36)
+        df = client.bars(symbol=stock_code, frequency=6, offset=120)
         if df is None or df.empty:
             return []
 
@@ -106,7 +106,7 @@ def _get_monthly_prices_tencent(stock_code: str) -> list:
     try:
         prefix = "sh" if stock_code.startswith("6") else "sz"
         url = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
-        params = {"param": f"{prefix}{stock_code},month,,,36,qfq"}
+        params = {"param": f"{prefix}{stock_code},month,,,120,qfq"}
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
             "Referer": "https://gu.qq.com/",
@@ -143,7 +143,7 @@ def _get_monthly_prices_tencent(stock_code: str) -> list:
 
 
 def _get_monthly_prices(stock_code: str) -> list:
-    """获取近36个月月度收盘价（前复权），多数据源自动降级"""
+    """获取近120个月（10年）月度收盘价（前复权），多数据源自动降级"""
     results = _get_monthly_prices_tencent(stock_code)
     if results:
         return results
