@@ -371,6 +371,12 @@
     return round2(pb / (roeDecimal * roeDecimal) / 100.0);
   }
 
+  // N 因子（股利支付率修正系数），与 Python compute_n_factor 逐字一致。
+  // N = 50% / 股利支付率；payout ≥ 50% → N=1.0，≤ 25% → N=2.0，之间按比例，区间 [1.0, 2.0]。
+  // 出处与依据（数据铁律：如实标注，不编造理论）：市赚率为雪球用户 ericwarn丁宁（丁宁）
+  // 发明的估值参数；修正市赚率是作者自认的「经验公式」（原话「没什么道理可讲」），
+  // 非理论推导，无学术/券商研报出处。50% 基准取贵州茅台多年平均股利支付率
+  // （作者以茅台为「赚真钱」估值锚，支付率低于 50% 视为「赚假钱」，N 相应放大）。
   function computeNFactor(payoutRatio) {
     if (payoutRatio == null) return null;
     if (payoutRatio <= 0) return 2.0;
