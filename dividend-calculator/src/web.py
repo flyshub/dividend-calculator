@@ -212,6 +212,7 @@ class DividendRequestHandler(BaseHTTPRequestHandler):
                         "ex_dividend_date": d.ex_dividend_date,
                         "dividend_per_10": d.dividend_per_10,
                         "report_time": d.report_time,
+                        "plan_notice_date": d.plan_notice_date,
                     }
                     for d in data.dividend_records
                 ],

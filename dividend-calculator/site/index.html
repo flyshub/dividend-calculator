@@ -1088,14 +1088,16 @@
         var year = parseInt(yearMatch[0]);
 
         if (!fiscalYears[year]) {
-          fiscalYears[year] = { totalPer10: 0, hasAnnual: false, latestExDate: '' };
+          fiscalYears[year] = { totalPer10: 0, hasAnnual: false, availDate: '' };
         }
         fiscalYears[year].totalPer10 += rec.dividend_per_10;
         if (rec.report_time.indexOf('年报') !== -1 && rec.report_time.indexOf('半年报') === -1) {
           fiscalYears[year].hasAnnual = true;
         }
-        if (rec.ex_dividend_date > fiscalYears[year].latestExDate) {
-          fiscalYears[year].latestExDate = rec.ex_dividend_date;
+        // 财年股息生效起点：预案公告日（该财年股息已公布），回退除权日（mootdx 兜底无预案字段）
+        var effDate = rec.plan_notice_date || rec.ex_dividend_date;
+        if (effDate > fiscalYears[year].availDate) {
+          fiscalYears[year].availDate = effDate;
         }
       }
 
@@ -1106,17 +1108,17 @@
           completeYears.push({
             year: parseInt(y),
             totalPer10: fiscalYears[y].totalPer10,
-            availableDate: fiscalYears[y].latestExDate
+            availDate: fiscalYears[y].availDate
           });
         }
       }
       completeYears.sort(function(a, b) { return a.year - b.year; });
 
       return monthlyPrices.map(function(month) {
-        // Latest complete fiscal year whose annual dividend was paid by this month
+        // Latest complete fiscal year whose dividend was announced by this month
         var selected = null;
         for (var i = 0; i < completeYears.length; i++) {
-          if (completeYears[i].availableDate <= month.date) {
+          if (completeYears[i].availDate <= month.date) {
             selected = completeYears[i];
           }
         }
@@ -1340,6 +1342,8 @@
             ex_dividend_date: r.EX_DIVIDEND_DATE.slice(0, 10),
             dividend_per_10: r.PRETAX_BONUS_RMB,
             report_time: y + (isAnnual ? '年报' : '中期分配'),
+            /* 预案公告日：财年股息生效起点（走势图按此归因，非除权日）；无则空串回退除权日 */
+            plan_notice_date: r.PLAN_NOTICE_DATE ? r.PLAN_NOTICE_DATE.slice(0, 10) : '',
           };
         });
         return {

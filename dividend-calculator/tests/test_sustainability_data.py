@@ -219,6 +219,24 @@ def test_parse_dividend_rows_distinguishes_annual():
     assert "2025中期分配" in labels
 
 
+def test_parse_dividend_rows_populates_plan_notice_date():
+    """plan_notice_date 从 PLAN_NOTICE_DATE 填充（走势图按预案公告日归因）。"""
+    rows = [
+        {"REPORT_DATE": "2019-12-31", "PRETAX_BONUS_RMB": 7.0, "ASSIGN_PROGRESS": "实施",
+         "EX_DIVIDEND_DATE": "2020-07-17", "PLAN_NOTICE_DATE": "2020-04-30"},
+        {"REPORT_DATE": "2020-12-31", "PRETAX_BONUS_RMB": 7.0, "ASSIGN_PROGRESS": "实施",
+         "EX_DIVIDEND_DATE": "2021-07-16", "PLAN_NOTICE_DATE": "2021-04-30"},
+        # 无 PLAN_NOTICE_DATE（旧数据/兜底）→ 空串，前端回退除权日
+        {"REPORT_DATE": "2018-12-31", "PRETAX_BONUS_RMB": 6.8, "ASSIGN_PROGRESS": "实施",
+         "EX_DIVIDEND_DATE": "2019-07-17"},
+    ]
+    records, _ = parse_dividend_rows(rows)
+    by_time = {r.report_time: r for r in records}
+    assert by_time["2019年报"].plan_notice_date == "2020-04-30"
+    assert by_time["2020年报"].plan_notice_date == "2021-04-30"
+    assert by_time["2018年报"].plan_notice_date == "", "无 PLAN_NOTICE_DATE 应为空串"
+
+
 def test_parse_dividend_rows_empty():
     records, year = parse_dividend_rows([])
     assert records == []

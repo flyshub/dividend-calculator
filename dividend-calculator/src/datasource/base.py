@@ -37,6 +37,7 @@ class DividendRecord:
     ex_dividend_date: str   # 除权除息日 YYYY-MM-DD
     dividend_per_10: float  # 每10股派息金额
     report_time: str        # 报告期
+    plan_notice_date: str = ""  # 预案公告日 YYYY-MM-DD（该财年股息生效起点；mootdx 兜底无此字段）
 
 
 @dataclass

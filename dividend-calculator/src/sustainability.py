@@ -160,10 +160,14 @@ def parse_dividend_rows(rows: List[dict]) -> Tuple[List[DividendRecord], Optiona
         label = f"{year}年报" if is_annual else f"{year}中期分配"
 
         ex_date = str(row.get("EX_DIVIDEND_DATE") or "")[:10]
+        # 预案公告日：该财年股息「生效」的起点（走势图按此归因，非除权日）。
+        # 年报预案次年 4 月公告（如 2019 年报 → 2020-04-30），中期分配预案当期 12 月。
+        plan_date = str(row.get("PLAN_NOTICE_DATE") or "")[:10]
         records.append(DividendRecord(
             ex_dividend_date=ex_date,
             dividend_per_10=dp10,
             report_time=label,
+            plan_notice_date=plan_date,
         ))
 
         if year not in yearly:
