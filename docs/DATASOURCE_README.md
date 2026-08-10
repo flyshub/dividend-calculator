@@ -81,7 +81,7 @@ df = client.quotes(symbol='600036')
 ```python
 # frequency: 4=日, 5=周, 6=月, 9=日, 10=季, 11=年
 # 前复权通过 mootdx tools/reversion 实现
-df = client.bars(symbol='600036', frequency=6, offset=36)  # 36个月K线
+df = client.bars(symbol='600036', frequency=6, offset=120)  # 120个月（10年）月K线
 ```
 
 #### 3. 除权除息 (`xdxr`)
