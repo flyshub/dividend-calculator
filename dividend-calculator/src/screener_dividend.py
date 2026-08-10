@@ -98,17 +98,36 @@ def screen_real_yield(
     降级策略：当 market_caps 有值但该股 total_dividend 缺失（NULL，如旧 DB 迁移
     ALTER TABLE 补列后未回填）时，回退到存储的 real_yield/ttm_yield 旧值继续筛选，
     而非静默判不过——避免「数据缺失」伪装成「市场无股可筛」（#81）。
+
+    诊断：结束时打印降级统计（回退触发的股票数 / 其中最终入选数），
+    便于确认降级是否实际影响入选集合（生产可观测，见 total_dividend 缺失调研）。
     """
+    import sys
     result = []
+    fallback_count = 0
+    fallback_passed = 0
     for s in snapshots:
+        used_fallback = False
         if market_caps and s.code in market_caps:
             real = compute_real_yield(s.total_dividend, market_caps[s.code])
             ttm = compute_real_yield(s.ttm_dividend, market_caps[s.code])
             if real is None or ttm is None:
                 # total_dividend/ttm_dividend 缺失 → 降级到存储旧值（仅缺失时，非 0）
+                used_fallback = True
                 real, ttm = s.real_yield, s.ttm_yield
         else:
+            used_fallback = True
             real, ttm = s.real_yield, s.ttm_yield
         if real is not None and real > min_real and ttm is not None and ttm > min_ttm:
             result.append(s)
+            if used_fallback:
+                fallback_passed += 1
+        if used_fallback:
+            fallback_count += 1
+    if fallback_count:
+        print(
+            f"漏斗② 降级: {fallback_count} 只走存储旧值（缺 total/ttm_dividend），"
+            f"其中 {fallback_passed} 只入选",
+            file=sys.stderr)
+    return result
     return result
