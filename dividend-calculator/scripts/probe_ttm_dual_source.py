@@ -10,6 +10,10 @@
     cd dividend-calculator && python scripts/probe_ttm_dual_source.py [600036,600900,...]
 """
 import sys
+from pathlib import Path
+
+# 引导 src 包导入（与仓库其他脚本惯例一致，如 verify_js_vs_python.py）
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 SAMPLE = ["600036", "600900", "601398", "601857", "000333"]
 
@@ -53,9 +57,12 @@ def records_eastmoney(stock_code):
     return records
 
 
-def ttm_window(records, as_of="2026-08-10"):
+def ttm_window(records, as_of=None):
     """滚动 365 天窗口（按除权除息日），返回 (总额每10股, 次数, [(ex_date, per_10)])"""
     from datetime import date, timedelta
+
+    if as_of is None:
+        as_of = date.today().isoformat()
 
     as_of = date.fromisoformat(as_of)
     cutoff = as_of - timedelta(days=365)
