@@ -1501,10 +1501,10 @@
       var h = '';
       h += '<div class="tip tip--applicability">';
       h += '<div class="tip__title">市赚率计算 · 核心公式</div>';
-      h += '<div class="formula-line">市赚率 = <b>PE_TTM × N因子 / ROE</b> × 100</div>';
+      h += '<div class="formula-line">修正市赚率 = <b>PE_TTM × N因子 / ROE</b>（PE、ROE 均取百分数值直接相除）</div>';
       h += '<div class="formula-line">基本版: <b>' + fmtNum(d.pe_ttm, 2) + ' / ' + fmtNum(d.roe_latest, 2) + '% = ' + fmtNum(d.pr_basic, 3) + '</b></div>';
       h += '<div class="formula-line">修正版: <b>' + fmtNum(d.pr_corrected, 3) + '</b>（对亏损股/周期股/N倍增长股进行修正）</div>';
-      h += '<div class="formula-line">PB版: PE/PB × ROE修正 = <b>' + fmtNum(d.pr_pb, 3) + '</b></div>';
+      h += '<div class="formula-line">PB版 = <b>PB / ROE² × 100</b>: <b>' + fmtNum(d.pr_pb, 3) + '</b></div>';
       h += '</div>';
       h += '<div class="tip tip--backtest">';
       h += '<div class="tip__title">估值与口径</div>';
