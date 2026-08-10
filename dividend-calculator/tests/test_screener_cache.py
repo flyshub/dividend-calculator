@@ -146,6 +146,42 @@ class TestStaleness:
     def test_missing_code_stale(self, cache):
         assert cache.is_quote_stale("999999", max_age_days=1) is True
 
+    def test_prune_stale_rows(self, cache):
+        """prune_stale_rows 删超期（>90 天）+ NULL updated_at 行，保留近期行；quote 不受影响。"""
+        # 超期（100 天前）：dividend 与 finance
+        cache.upsert_dividend(DividendSnapshot(code="600900", real_yield=5.2, ttm_yield=5.5,
+                                               real_yield_year="2025", ttm_period="p",
+                                               dividend_source="mootdx",
+                                               updated_at=self._ts(100)))
+        cache.upsert_finance(FinanceSnapshot(code="600900", roe_latest=15, roe_period="2025",
+                                             net_profit_annual=1e9, payout_ratio=0.5,
+                                             finance_source="ths", updated_at=self._ts(100)))
+        # NULL updated_at：sustainability
+        cache.upsert_sustainability(SustainabilitySnapshot(code="600887", financial_rows="[]",
+                                                           cashflow_rows="[]", dividend_rows="[]",
+                                                           industry="x", price_change_1y=0,
+                                                           top10_holding=0, source="s",
+                                                           updated_at=None))
+        # 近期（10 天前）：dividend 保留
+        cache.upsert_dividend(DividendSnapshot(code="600887", real_yield=5.2, ttm_yield=5.5,
+                                               real_yield_year="2025", ttm_period="p",
+                                               dividend_source="mootdx",
+                                               updated_at=self._ts(10)))
+        # quote_snapshot 超期但不应被清理（每日全量覆盖，不做时间裁剪）
+        cache.upsert_quote(QuoteSnapshot(code="600900", price=10, pe_ttm=1, pb=1,
+                                         total_shares=1, market_cap=1,
+                                         quote_time="t", source="s",
+                                         updated_at=self._ts(100)))
+
+        pruned = cache.prune_stale_rows(max_age_days=90)
+        assert pruned == 3  # 600900-dividend + 600900-finance + 600887-sustainability(NULL)
+
+        # 删除后：600900 dividend/finance 不存在，600887 dividend 保留
+        assert cache.is_dividend_stale("600900", max_age_days=90) is True
+        assert cache.is_dividend_stale("600887", max_age_days=90) is False
+        # quote_snapshot 保留（虽超期）
+        assert cache.is_quote_stale("600900", max_age_days=90) is True
+
 
 class TestSourceTracking:
     def test_source_stored(self, cache):

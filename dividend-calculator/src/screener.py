@@ -227,6 +227,11 @@ def main():
     )
     rows = _build_output_rows(cache, final)
     write_csv(rows, args.output)
+
+    # 数据保留策略：清理超 90 天未刷新的快照行（幂等，无 stale 行则 0 删除）
+    pruned = cache.prune_stale_rows()
+    if pruned:
+        print(f"  清理 {pruned} 条超期快照行（保留 {90} 天）", file=sys.stderr)
     return 0
 
 

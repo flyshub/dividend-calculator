@@ -94,6 +94,16 @@ N 因子 = 50% / 股利支付率，区间 [1.0, 2.0]（支付率 ≥50% → N=1.
 
 验证不通过的功能不实现、不合并。
 
+### 数据保留策略（选股器）
+
+选股器每日产出 CSV/JSON/DB，按 **90 天保留周期**自动清理：
+
+- **CSV / 按日 JSON**：`scripts/export_screener_json.py` 每次运行时删除日期 < 保留期（默认 90 天，`--retention-days` 可覆盖）的过期 CSV 与孤儿按日 JSON；`history.json` 由全量重扫天然截断。解析失败的文件**跳过不删**（宁留不误删）
+- **DB（screener.db）**：`ScreenerCache.prune_stale_rows()` 清理超 90 天未刷新的 `stock_list`/`dividend_snapshot`/`finance_snapshot`/`sustainability_snapshot` 行；`quote_snapshot` 每日全量覆盖，不做时间裁剪
+- **git 历史即回滚层**：被清理的 CSV/JSON 仍可从 git log 取回，更早数据无需在线保留
+
+改保留天数时，需同时更新 `export_screener_json.py` 的 `RETENTION_DAYS` 与 `screener_cache.py`/`screener.py` 的 `prune_stale_rows` 默认值（双端一致，防漂移）。
+
 ### A+H 股两地上市
 
 对于中远海控、中国铝业等 A+H 股，**必须用总股本**（含全部股份），不能用流通股本：

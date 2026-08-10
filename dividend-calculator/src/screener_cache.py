@@ -12,7 +12,7 @@ PR 不建表（由 quote.pe_ttm + finance.roe_latest 派生，筛选时实时算
 """
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -296,3 +296,24 @@ class ScreenerCache:
         except ValueError:
             return True
         return (date.today() - updated).days > max_age_days
+
+    def prune_stale_rows(self, max_age_days: int = 90) -> int:
+        """清理超期未刷新的快照行（保留策略：仅保留 N 天内刷新过的）。
+
+        覆盖 INSERT OR REPLACE 的死角——上游 stock_list 已剔除、但旧 DB 残留的
+        过时快照行。quote_snapshot 每日全量覆盖，不做时间裁剪（避免月频断跑时误删）。
+        返回删除行数。
+        """
+        cutoff = (date.today() - timedelta(days=max_age_days)).isoformat()
+        tables = ("stock_list", "dividend_snapshot", "finance_snapshot",
+                  "sustainability_snapshot")
+        total = 0
+        with self._conn() as conn:
+            for table in tables:
+                cur = conn.execute(
+                    f"DELETE FROM {table} WHERE updated_at IS NULL OR date(updated_at) < ?",
+                    (cutoff,),
+                )
+                total += cur.rowcount
+            conn.commit()
+        return total

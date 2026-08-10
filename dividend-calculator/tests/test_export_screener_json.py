@@ -188,3 +188,55 @@ class TestHeaderValidation:
             writer.writerow({c: "x" for c in header})
         with pytest.raises(ValueError, match="表头与 FIELDS 不一致"):
             ex.parse_csv(p)
+
+
+class TestRetention:
+    """90 天保留策略：过期 CSV/孤儿 JSON 清理，history 自动截断。"""
+
+    def test_collect_csvs_prunes_expired(self, ex, tmp_path, monkeypatch):
+        """collect_csvs 删过期 CSV（< cutoff），保留期内保留，解析失败跳过不删。"""
+        csv_dir = tmp_path / "csv"
+        csv_dir.mkdir()
+        # 过期（2026-02-01 << 2026-08-10 cutoff 2026-05-12）与保留期 CSV
+        _write_csv(csv_dir / "screener_20260201_100000.csv", _sample_rows())
+        _write_csv(csv_dir / "screener_20260809_100000.csv", _sample_rows())
+        # 无法解析日期的文件（宁留不误删）
+        _write_csv(csv_dir / "screener_bad.csv", _sample_rows())
+        monkeypatch.setattr(ex, "CSV_DIR", csv_dir)
+        monkeypatch.setattr(ex, "RETENTION_DAYS", 90)
+
+        cutoff = "2026-05-12"  # date(2026,8,10) - 90d
+        csvs = ex.collect_csvs(cutoff)
+        assert not (csv_dir / "screener_20260201_100000.csv").exists(), "过期 CSV 应被删"
+        assert (csv_dir / "screener_20260809_100000.csv").exists(), "保留期 CSV 应保留"
+        assert (csv_dir / "screener_bad.csv").exists(), "解析失败 CSV 应跳过不删"
+        assert [c.name for c in csvs] == ["screener_20260809_100000.csv"]
+
+    def test_main_truncates_history_and_prunes_orphans(self, ex, tmp_path, monkeypatch):
+        """main 后：history 只含保留期日期，过期按日 JSON 被清理，双端一致。"""
+        csv_dir = tmp_path / "csv"
+        site_dir = tmp_path / "site"
+        static_dir = tmp_path / "static"
+        csv_dir.mkdir()
+        # 过期（2026-02-01）与保留期（2026-08-09）CSV
+        _write_csv(csv_dir / "screener_20260201_100000.csv", _sample_rows()[:1])
+        _write_csv(csv_dir / "screener_20260809_100000.csv", _sample_rows())
+        monkeypatch.setattr(ex, "CSV_DIR", csv_dir)
+        monkeypatch.setattr(ex, "SITE_DIR", site_dir)
+        monkeypatch.setattr(ex, "STATIC_SITE_DIR", static_dir)
+        monkeypatch.setattr(ex, "RETENTION_DAYS", 90)
+        # 预写一个过期按日 JSON 孤儿（模拟旧产物残留）
+        site_dir.mkdir(parents=True)
+        (site_dir / "screener_2026-02-01.json").write_text("[]", encoding="utf-8")
+
+        assert ex.main() == 0
+
+        # history 只含保留期日期
+        history = json.loads((site_dir / "history.json").read_text(encoding="utf-8"))
+        assert [h["date"] for h in history] == ["2026-08-09"]
+        # 过期 CSV 被删、孤儿 JSON 被删
+        assert not (csv_dir / "screener_20260201_100000.csv").exists()
+        assert not (site_dir / "screener_2026-02-01.json").exists(), "孤儿按日 JSON 应被清理"
+        # 双端一致（含清理后）
+        for fname in ["latest.json", "history.json", "screener_2026-08-09.json"]:
+            assert (site_dir / fname).read_bytes() == (static_dir / fname).read_bytes(), fname

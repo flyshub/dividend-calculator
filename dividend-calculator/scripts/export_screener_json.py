@@ -16,6 +16,7 @@ import csv
 import json
 import sys
 from collections import defaultdict
+from datetime import date, timedelta
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -23,11 +24,44 @@ CSV_DIR = PROJECT_ROOT / "data" / "screener"
 SITE_DIR = PROJECT_ROOT / "site" / "screener"
 STATIC_SITE_DIR = PROJECT_ROOT / "src" / "static" / "screener"
 
+# 保留策略：仅保留最近 RETENTION_DAYS 天的 CSV / 按日 JSON（history.json 由重扫天然截断）。
+# 90 天覆盖一个完整财报季；git 历史可回滚更早数据。--retention-days 可覆盖。
+RETENTION_DAYS = 90
+
 # CSV 11 列 → JSON 字段（数字列转 float）。两处均与 site/screener.html 的列定义同步
 # （screener_daily.yml 每日跑本脚本时，export 会校验 CSV 表头与 FIELDS 一致，防漂移）。
 FIELDS = ["代码", "名称", "TTM股息率%", "真实股息率%", "估值区间", "市赚率PR",
           "行业", "可持续性", "ROE%", "总市值(亿)", "数据来源"]
 NUMERIC = {"TTM股息率%", "真实股息率%", "市赚率PR", "ROE%", "总市值(亿)"}
+
+
+def _csv_date(path: Path):
+    """从文件名 screener_YYYYMMDD_HHMMSS.csv 提取日期 'YYYY-MM-DD'；无法解析返回 None。"""
+    parts = path.stem.split("_")
+    if len(parts) >= 2 and len(parts[1]) == 8:
+        ymd = parts[1]
+        return f"{ymd[:4]}-{ymd[4:6]}-{ymd[6:8]}"
+    return None
+
+
+def collect_csvs(cutoff_date: str) -> list:
+    """收集保留期内的 CSV，物理删除过期的（保留策略：git 可恢复，见设计文档）。
+
+    cutoff_date: 'YYYY-MM-DD'，文件日期 < cutoff 视为过期删除。解析失败的文件跳过不删
+    （宁留不误删，数据铁律）。
+    """
+    csvs = []
+    for c in sorted(CSV_DIR.glob("screener_*.csv")):
+        date_str = _csv_date(c)
+        if date_str is None:
+            print(f"⚠ 无法解析日期，跳过: {c.name}", file=sys.stderr)
+            continue
+        if date_str < cutoff_date:
+            c.unlink()
+            print(f"  prune CSV: {c.name}", file=sys.stderr)
+        else:
+            csvs.append(c)
+    return csvs
 
 
 def parse_csv(path: Path) -> list:
@@ -83,29 +117,40 @@ def write_json_files(out_dir: Path, by_date: dict) -> list:
     # history.json
     (out_dir / "history.json").write_text(
         json.dumps(history, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    # 清理孤儿按日 JSON（不在本批 history 的旧文件，防 Pages 目录残留不一致）
+    kept = {h["file"] for h in history}
+    for f in out_dir.glob("screener_*.json"):
+        if f.name not in kept:
+            f.unlink()
+            print(f"  prune JSON: {f.name}", file=sys.stderr)
     return history
 
 
-def main():
+def main(argv: list = None):
+    import argparse
+    parser = argparse.ArgumentParser(description="选股器 CSV → Pages JSON（含保留期清理）")
+    parser.add_argument("--retention-days", type=int, default=RETENTION_DAYS,
+                        help="保留最近 N 天的 CSV/按日 JSON（默认 90）")
+    # argv=None 时用 sys.argv[1:]（CLI）；测试传 [] 避免读到 pytest 参数
+    args = parser.parse_args([] if argv is None else argv)
+
     if not CSV_DIR.exists():
         print(f"✘ 缺少 {CSV_DIR}", file=sys.stderr)
         return 1
 
-    # 收集所有 CSV，按日期聚合（同日多批次取最新）
-    csvs = sorted(CSV_DIR.glob("screener_*.csv"))
+    # 收集保留期内 CSV（物理删除过期的），按日期聚合
+    cutoff = (date.today() - timedelta(days=args.retention_days)).isoformat()
+    csvs = collect_csvs(cutoff)
     if not csvs:
-        print("✘ 无 CSV 结果", file=sys.stderr)
+        print("✘ 无 CSV 结果（保留期内无数据）", file=sys.stderr)
         return 1
 
     by_date = defaultdict(list)
     for c in csvs:
-        # 文件名 screener_YYYYMMDD_HHMMSS.csv → 日期 YYYY-MM-DD
-        stem = c.stem  # screener_20260809_144134
-        parts = stem.split("_")
-        if len(parts) >= 2:
-            date = parts[1]
-            if len(date) == 8:
-                by_date[f"{date[:4]}-{date[4:6]}-{date[6:8]}"].append(c)
+        date_str = _csv_date(c)
+        if date_str is not None:
+            by_date[date_str].append(c)
 
     if not by_date:
         print("✘ 无法解析日期", file=sys.stderr)
@@ -127,4 +172,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
