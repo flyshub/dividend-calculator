@@ -118,14 +118,16 @@ N 因子 = 50% / 股利支付率，区间 [1.0, 2.0]（支付率 ≥50% → N=1.
 
 | 数据 | 主数据源 | 备用 |
 |------|---------|------|
-| 实时价格 + K线 | mootdx（通达信协议，全球可用） | 腾讯 fqkline |
-| PE_TTM / PB | 腾讯行情 | 东方财富 push2 |
-| 总股本 | 腾讯 Index 73 / mootdx finance | — |
-| 除权除息 / 分红 | mootdx xdxr | — |
-| ROE / 净利润 | mootdx F10 财务分析 | 东方财富 push2 |
-| 行业分类 | mootdx F10 行业分析 | 东方财富 push2 |
+| 实时价格 + 总股本 | 腾讯行情 | 新浪(价) → mootdx finance |
+| K线（走势图） | 腾讯 fqkline | mootdx bars |
+| PE_TTM / PB | 腾讯行情 | akshare 同花顺(EPS 推算) → 东方财富 push2 |
+| 总股本 | 腾讯 Index 73 | mootdx finance |
+| 除权除息 / 分红 | akshare fhps_detail_em（东财 datacenter，按报告期判财年） | akshare cninfo → mootdx xdxr |
+| ROE / 净利润 | mootdx F10 财务分析 | akshare 同花顺 |
+| 行业分类 | mootdx F10 行业分析 | 东方财富 datacenter |
+| 可持续性字段 | 东方财富 datacenter | — |
 
-所有数据源均为全球可用（mootdx 走二进制通达信协议，腾讯走 HTTP），不再依赖东方财富服务器。
+所有数据源均为全球可用（mootdx 走二进制通达信协议，腾讯走 HTTP）；可持续性模块与 JS 静态版刻意走东方财富 datacenter（浏览器可直连、与 Python 同源），其余主链路不依赖东方财富服务器。
 
 > 注：GitHub Pages 静态版（`site/`）因浏览器无法访问 mootdx 二进制协议，改用东方财富 datacenter HTTP 接口（分红/财务/行业）作为浏览器数据源，全部接口已验证支持 CORS。计算逻辑与 Python 实现逐字段一致（见 `scripts/verify_js_vs_python.py`）。
 

@@ -1,14 +1,14 @@
 """
 市赚率（PR）计算模块
 
-公式体系（完整版）：
-  基础PR  = PE / ROE / 100
-  修正PR  = N × PE / ROE / 100   （N 基于股利支付率修正）
-  PB-PR   = PB / ROE² / 100       （周期股参考）
+公式体系（完整版，PE 与 ROE 均取百分数值直接相除）：
+  基础PR  = PE_TTM / ROE
+  修正PR  = N × PE_TTM / ROE      （N 基于股利支付率修正）
+  PB-PR   = PB / ROE² × 100       （周期股参考；ROE 为百分数）
 
 数据来源（多源降级）：
-  PE-TTM / PB: 腾讯行情 [主] → 东方财富 push2 [备]
-  ROE / 净利润: 同花顺财报 [主] → 东方财富 push2 [备]
+  PE-TTM / PB: 腾讯行情 [主] → akshare 同花顺 EPS 推算 → 东方财富 push2 [备]
+  ROE / 净利润: mootdx F10 [主] → akshare 同花顺 [备]
   行业分类:     mootdx F10 → 东方财富 datacenter(RPT_F10_BASIC_ORGINFO) → 降级为 "未知行业"
 """
 import logging
@@ -45,9 +45,9 @@ class PRResult:
     stock_name: Optional[str]
 
     # 市赚率三值
-    pr_basic: Optional[float]           # 基础PR = PE / ROE / 100
-    pr_corrected: Optional[float]        # 修正PR = N × PE / ROE / 100
-    pr_pb: Optional[float]               # PB-PR = PB / ROE² / 100
+    pr_basic: Optional[float]           # 基础PR = PE_TTM / ROE
+    pr_corrected: Optional[float]        # 修正PR = N × PE_TTM / ROE
+    pr_pb: Optional[float]               # PB-PR = PB / ROE² × 100
 
     # 估值档位（基于基础PR或修正PR，取两者较低值）
     valuation_zone: str                   # 低估 / 合理偏低 / 合理 / 高估

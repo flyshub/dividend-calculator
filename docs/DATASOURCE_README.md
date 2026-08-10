@@ -2,9 +2,9 @@
 
 ## 概述
 
-项目采用 **mootdx + 腾讯 + akshare 三引擎**，通过通达信二进制协议、腾讯 HTTP 接口和 akshare 同花顺 API 互补，实现 A 股数据获取。
+项目采用 **腾讯 + mootdx + akshare + 东方财富 datacenter 多引擎**：腾讯 HTTP 提供实时价格/总股本/PE/PB/K线（主引擎），mootdx 通达信二进制协议提供 F10 财务/行业与降级兜底，akshare 提供分红明细/财务/新浪行情，东方财富 datacenter 提供可持续性全部字段并作为 JS 静态版（浏览器直连）数据源。
 
-当 mootdx 可用时（中国大陆网络环境），优先使用通达信协议获取行情/分红/财务数据；当 mootdx 不可用时（海外或受限网络），自动降级到 akshare 同花顺和腾讯行情。
+实时价格/股本/PE/PB/K线以腾讯为主源（全球可用）；mootdx 与 akshare 作为降级链；mootdx 不可用（海外或受限网络）时自动落到 akshare 同花顺。
 
 ## 架构图
 
@@ -65,7 +65,7 @@
 
 ## 数据职责分工
 
-### mootdx — 主力数据引擎
+### mootdx — 通达信协议引擎
 
 通过通达信协议获取以下数据：
 
@@ -109,7 +109,7 @@ f10 = client.F10(symbol='600036')
 #   股东研究 → 股东结构
 ```
 
-### 腾讯行情 — PE/PB/总股本
+### 腾讯行情 — 实时价格/PE/PB/总股本/K线（主引擎）
 
 ```python
 from src.tencent_quote import fetch_tencent_quote
@@ -130,7 +130,7 @@ quote = fetch_tencent_quote('600036')
 
 ### 东方财富 push2 — 最后备用
 
-仅在 mootdx 和腾讯均不可用时启用，用于 PE/PB 和行业分类的兜底。
+仅在 mootdx 和腾讯均不可用时启用，用于 PE/PB 的兜底；行业分类兜底走东方财富 datacenter（RPT_F10_BASIC_ORGINFO，与 JS 静态版/可持续性同源）。
 
 ## 降级优先级
 
@@ -138,11 +138,9 @@ quote = fetch_tencent_quote('600036')
 ```
 1. 腾讯行情（价格+总股本，一次请求）
    ↓ 失败
-2. 新浪行情 + 腾讯总股本
+2. 新浪行情（价格） + 腾讯/mootdx 总股本
    ↓ 失败
-3. DataSourceManager（mootdx）
-   ↓ 失败
-4. mootdx 直接获取
+3. mootdx finance（价格 + 总股本兜底）
 ```
 
 ### 月度K线 (`get_historical_data`)
@@ -154,9 +152,11 @@ quote = fetch_tencent_quote('600036')
 
 ### 分红数据
 ```
-1. mootdx xdxr（通达信协议，除权除息日完整）
+1. akshare fhps_detail_em（东财 datacenter，含报告期字段 → 精确判财年）
    ↓ 失败
-2. akshare cninfo（同花顺，全国统一格式）
+2. akshare cninfo（全国统一格式，含报告期）
+   ↓ 失败
+3. mootdx xdxr（通达信协议，无报告期，按除权日近似推断，兜底）
 ```
 
 ### 财务数据（ROE/净利润）
@@ -170,7 +170,7 @@ quote = fetch_tencent_quote('600036')
 ```
 1. mootdx F10 行业分析（文本解析）
    ↓ 失败
-2. 东方财富 push2 f127
+2. 东方财富 datacenter RPT_F10_BASIC_ORGINFO（EM2016，与 JS/可持续性同源）
 ```
 
 ## mootdx 注意事项
@@ -182,6 +182,7 @@ quote = fetch_tencent_quote('600036')
 
 ## 修复历史
 
+- 2026-08-10：文档对齐代码 —— 分红主源改为 akshare fhps_detail_em（按报告期判财年，与 JS 双端一致）；实时价格/股本/K线主源为腾讯；行业备用改为东财 datacenter；补充可持续性东财 datacenter 链路与选股器说明
 - 2026-06-01：新增 akshare 降级链路 —— mootdx 不可用时自动回退 akshare 同花顺（分红/ROE/净利润），确保受限网络环境可用
 - 2026-05-31：数据源从 akshare/baostock 迁移到 mootdx + 腾讯双引擎，不再依赖东方财富服务器
 - 2026-05-26：修复中远海控、中国铝业等 A+H股公司错误使用流通股本的问题

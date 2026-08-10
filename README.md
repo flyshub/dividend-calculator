@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/badge/Python-3.9%2B-blue)](https://www.python.org/)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPLv3-blue.svg)](#-许可证)
 [![GitHub Pages](https://img.shields.io/badge/GitHub%20Pages-online-brightgreen)](https://flyshub.github.io/dividend-calculator/)
-[![Tests](https://img.shields.io/badge/Tests-242%20Python%20%2B%2078%20JS-green)](dividend-calculator/tests/)
+[![Tests](https://img.shields.io/badge/Tests-398%20Python%20%2B%2083%20JS-green)](dividend-calculator/tests/)
 
 > 📈 **在线体验**（纯前端，无需安装）：<https://flyshub.github.io/dividend-calculator/>
 >
@@ -22,6 +22,7 @@
 - **A+H 股正确处理**：使用总股本（腾讯 Index 73）而非流通股本
 - **多引擎降级**：mootdx（通达信协议）+ 腾讯 + 东方财富，全球可用
 - **双端一致性**：Python 与 JS 实现逐字段对齐，脚本交叉验证
+- **每日选股器**：全 A 四层漏斗筛选（TTM/真实股息率 >5%、市赚率 PR≤1、可持续性），GitHub Actions 每日自动产出选股结果页（`site/screener.html`）
 
 ## 🚀 快速开始
 
@@ -66,6 +67,7 @@ python -m src.web
 | `GET /api/pr?stock=600987` | 股票代码或名称 | 市赚率计算 |
 | `GET /api/historical-data?stock=600987` | 股票代码 | 走势图数据 |
 | `GET /health` | 无 | 健康检查 |
+| `GET /screener.html` | 无 | 每日选股结果页（含 `/screener/` 静态资源） |
 
 ### 作为库使用
 
@@ -82,8 +84,8 @@ print(f"市赚率: {result.pr_basic:.3f}")
 ### 运行测试
 
 ```bash
-python -m pytest tests/ -q      # Python 221 个测试
-node --test site/js/            # JS 70 个测试
+python -m pytest tests/ -q      # Python 398 个测试
+node --test "site/js/*.test.js" # JS 83 个测试
 python scripts/verify_js_vs_python.py   # 双端一致性验证
 ```
 
@@ -120,15 +122,17 @@ TTM 会把不同财年的分红混在一起（如招行 2025/7 发 2024 年报�
 - 报告期 **12-31** → **年报**；报告期 03-31 / 06-30 / 09-30 → 中期分配
 - 半年报与年报合并计入同一财年
 
-> mootdx xdxr 数据源无报告期字段，仅能按除权除息日近似推断（3-8 月除权 → 上年度年报；9-12 月 → 当年度中报）。该近似在常规情形（年报除权 6-7 月、中报除权 9-11 月）与报告期口径一致；边界情形自动降级到含报告期字段的东财数据源。
+> mootdx xdxr 无报告期字段，仅能按除权除息日近似推断（3-8 月除权 → 上年度年报；9-12 月 → 当年度中报）。该近似在常规情形（年报除权 6-7 月、中报除权 9-11 月）与报告期口径一致。**分红主源为 akshare fhps_detail_em（东财 datacenter，含报告期字段），mootdx xdxr 仅作降级兜底。**
 
 ### 市赚率公式
 
 ```
-基础市赚率  = PE / ROE / 100
-修正市赚率  = N × PE / ROE / 100
-PB-市赚率   = PB / ROE² / 100
+基础市赚率  = PE_TTM / ROE
+修正市赚率  = N × PE_TTM / ROE
+PB-市赚率   = PB / ROE² × 100
 ```
+
+> PE 与 ROE 均取百分数值（如 PE=13.5、ROE=15.2），基础/修正版直接相除；PB 版 ROE 为百分数，×100 等价于转小数后平方取倒数。
 
 > 周期股（煤炭/钢铁/有色/化工/航运/证券/保险等行业）PB-市赚率使用 **5 年 ROE 中位数**而非最新年报 ROE——周期股单年 ROE 受景气波动失真，用多年中位数平滑（对齐市赚率原始定义的「多年 ROE」思路，中位数抗单年极端值）。
 >
@@ -154,23 +158,27 @@ dividend-calculator/
 │   ├── dividend.py       # 股息率计算
 │   ├── pr.py             # 市赚率计算
 │   ├── sustainability.py # 分红可持续性评估
-│   └── datasource/       # mootdx/腾讯/东财 多数据源降级
+│   ├── screening.py      # 选股器四级漏斗口径
+│   ├── screener*.py      # 选股器采集/缓存/可持续性
+│   └── datasource/       # 腾讯/新浪/mootdx 多数据源降级
 ├── site/                 # GitHub Pages 纯前端（browser 直连数据源）
-├── scripts/              # JS 与 Python 一致性验证
+├── scripts/              # 一致性验证 + 选股器初始化/导出
 ├── tests/                # Python 单元测试
-└── .github/workflows/    # CI + Pages 自动部署
+└── .github/workflows/    # CI + Pages 部署 + 选股器每日任务
 ```
 
 ## 🔌 数据源架构
 
 | 数据 | 主数据源 | 备用 |
 |------|---------|------|
-| 实时价格 + K线 | mootdx（通达信协议） | 腾讯 fqkline |
-| PE_TTM / PB | 腾讯行情 | 东方财富 push2 |
+| 实时价格 + 总股本 | 腾讯行情 | 新浪(价) → mootdx finance |
+| K线（走势图） | 腾讯 fqkline | mootdx bars |
+| PE_TTM / PB | 腾讯行情 | akshare 同花顺(EPS 推算) → 东方财富 push2 |
 | 总股本 | 腾讯 Index 73 | mootdx finance |
-| 除权除息 / 分红 | mootdx xdxr | 东方财富 datacenter |
-| ROE / 净利润 | mootdx F10 财务分析 | 东方财富 push2 |
+| 除权除息 / 分红 | akshare fhps_detail_em（东财 datacenter，按报告期判财年） | akshare cninfo → mootdx xdxr |
+| ROE / 净利润 | mootdx F10 财务分析 | akshare 同花顺 |
 | 行业分类 | mootdx F10 行业分析 | 东方财富 datacenter |
+| 可持续性字段 | 东方财富 datacenter | — |
 
 全部数据源全球可用（mootdx 走二进制通达信协议，腾讯走 HTTP）。详见 [数据源说明](docs/DATASOURCE_README.md)。
 
@@ -185,7 +193,7 @@ dividend-calculator/
 
 ## ✅ 质量保证
 
-- **221 Python 单元测试 + 70 JS 单元测试**：财年推断、市赚率公式、可持续性评分、数据源注入、双端对齐
+- **398 Python 单元测试 + 83 JS 单元测试**：财年推断、市赚率公式、可持续性评分、数据源注入、双端对齐、选股器
 - **跨语言一致性验证**：`scripts/verify_js_vs_python.py` 让 JS 与 Python 消费**相同原始数据**逐字段对比，含可持续性全部字段
 - **CI 自动运行**：GitHub Actions 每次提交跑全部测试（见 `.github/workflows/ci.yml`）
 
