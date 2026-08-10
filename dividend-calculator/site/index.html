@@ -986,6 +986,17 @@
             <div id="pr-roe" class="value value--lg"></div>
           </div>
         </div>
+        <div class="tip tip--backtest">回测提示（2016-2024 沪深300）：市赚率用于<b>避贵</b> + <b>选低估值</b>——PR&gt;3 组年均跑输基准 5pct+，PR≤1（低估+合理偏低）超额 +4%+，最低 PR 组有 alpha（+6.2%，行业中性化后仍成立）。</div>
+        <div class="tip tip--applicability">
+          <div class="tip__title">适用性 · 修正市赚率（N 因子版）</div>
+          <ul class="appl-list">
+            <li class="appl-item" data-kind="value">仅适用于 <b>ROE 稳定且分红大方</b>的价值股</li>
+            <li class="appl-item" data-kind="cyclical">周期股 · 盈利随景气波动，单年分红失真，建议优先参考 <b>PB-市赚率</b></li>
+            <li class="appl-item" data-kind="tech">科技股 · 常以回购代替分红，股利支付率失真，修正市赚率可能不适用</li>
+            <li class="appl-item" data-kind="growth">成长股 · 高成长需留存利润、分红率低，N 因子失真，修正市赚率可能不适用</li>
+          </ul>
+        </div>
+        <div id="pr-explanation" class="pr-explain"></div>
         <div class="metric-row">
           <div class="metric">
             <div class="label">最新报告期净利润</div>
@@ -1014,17 +1025,6 @@
             <div id="pr-sources" class="value value--base"></div>
           </div>
         </div>
-        <div class="tip tip--backtest">回测提示（2016-2024 沪深300）：市赚率用于<b>避贵</b> + <b>选低估值</b>——PR&gt;3 组年均跑输基准 5pct+，PR≤1（低估+合理偏低）超额 +4%+，最低 PR 组有 alpha（+6.2%，行业中性化后仍成立）。</div>
-        <div class="tip tip--applicability">
-          <div class="tip__title">适用性 · 修正市赚率（N 因子版）</div>
-          <ul class="appl-list">
-            <li class="appl-item" data-kind="value">仅适用于 <b>ROE 稳定且分红大方</b>的价值股</li>
-            <li class="appl-item" data-kind="cyclical">周期股 · 盈利随景气波动，单年分红失真，建议优先参考 <b>PB-市赚率</b></li>
-            <li class="appl-item" data-kind="tech">科技股 · 常以回购代替分红，股利支付率失真，修正市赚率可能不适用</li>
-            <li class="appl-item" data-kind="growth">成长股 · 高成长需留存利润、分红率低，N 因子失真，修正市赚率可能不适用</li>
-          </ul>
-        </div>
-        <div id="pr-explanation" class="pr-explain"></div>
         <p id="pr-warning" class="warning hidden"></p>
       </div>
     </section>
