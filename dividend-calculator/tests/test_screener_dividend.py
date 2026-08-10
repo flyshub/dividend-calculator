@@ -75,6 +75,48 @@ class TestComputeDividends:
         cache = ScreenerCache(tmp_path / "s.db")
         assert compute_dividends_for_candidates([], cache) == []
 
+    def test_total_dividend_missing_force_refresh(self, tmp_path):
+        """缓存有 total_dividend=None 的快照（旧 DB 迁移未回填）→ 即使未过期也强制重拉（#82）。
+
+        否则 fill_screener_data --dividend 的增量复用会跳过，total_dividend 永远 NULL。
+        """
+        cache = ScreenerCache(tmp_path / "s.db")
+        # 预置一个未过期但 total_dividend=None 的快照（模拟旧 DB）
+        stale_snap = DividendSnapshot(
+            code="600900", real_yield=6.0, ttm_yield=6.5,
+            total_dividend=None, ttm_dividend=None,
+            real_yield_year="2025", ttm_period="p", dividend_source="m")
+        cache.upsert_dividend(stale_snap)
+
+        calls = []
+
+        def fake_calc(code):
+            calls.append(code)
+            return _result(code=code)  # total_dividend=4e10
+
+        snaps = compute_dividends_for_candidates(
+            ["600900"], cache, calc_provider=fake_calc)
+        # 应重拉（provider 被调用），而非复用缓存
+        assert calls == ["600900"]
+        # 重拉后 total_dividend 有值
+        assert cache.get_dividend("600900").total_dividend == pytest.approx(4e10)
+
+    def test_total_dividend_present_reuses(self, tmp_path):
+        """缓存 total_dividend 有值且未过期 → 增量复用，不重拉。"""
+        cache = ScreenerCache(tmp_path / "s.db")
+        fresh_snap = DividendSnapshot(
+            code="600900", real_yield=6.0, ttm_yield=6.5,
+            total_dividend=4e10, ttm_dividend=4.4e10,
+            real_yield_year="2025", ttm_period="p", dividend_source="m")
+        cache.upsert_dividend(fresh_snap)
+
+        calls = []
+        snaps = compute_dividends_for_candidates(
+            ["600900"], cache, calc_provider=lambda c: calls.append(c) or _result(code=c))
+        assert calls == [], "total_dividend 有值应复用缓存不重拉"
+        assert len(snaps) == 1
+        assert snaps[0].total_dividend == pytest.approx(4e10)
+
 
 class TestScreenRealYield:
     def _snap(self, real=6.0, ttm=6.5):
@@ -105,6 +147,37 @@ class TestScreenRealYield:
     def test_mixed_pool(self):
         pool = [self._snap(real=6.0, ttm=6.5), self._snap(real=3.0, ttm=4.0)]
         assert len(screen_real_yield(pool)) == 1
+
+    # ---- market_caps 传入（实时重算） + total_dividend 缺失降级（#81） ----
+
+    def test_market_caps_recompute_uses_total_dividend(self):
+        """market_caps 传入且 total_dividend 有值 → 用分红总额/市值实时重算。"""
+        snap = DividendSnapshot(code="600900", real_yield=1.0, ttm_yield=1.0,
+                                total_dividend=1e10, ttm_dividend=1.1e10,
+                                real_yield_year="2025", ttm_period="p", dividend_source="m")
+        # 市值 1000亿 → 真实股息率 10% / 11%，都 >5% → 通过（尽管 real_yield 旧值仅 1%）
+        assert screen_real_yield([snap], market_caps={"600900": 1e11}) == [snap]
+
+    def test_market_caps_missing_total_dividend_falls_back(self):
+        """total_dividend 缺失（NULL，旧 DB 迁移未回填）→ 回退到 real_yield 旧值，而非静默 0 只。"""
+        snap = DividendSnapshot(code="600900", real_yield=6.0, ttm_yield=6.5,
+                                total_dividend=None, ttm_dividend=None,
+                                real_yield_year="2025", ttm_period="p", dividend_source="m")
+        assert screen_real_yield([snap], market_caps={"600900": 1e11}) == [snap]
+
+    def test_market_caps_missing_ttm_dividend_falls_back(self):
+        """仅 ttm_dividend 缺失 → 回退到存储旧值（含 real 与 ttm 一起回退，保持同源）。"""
+        snap = DividendSnapshot(code="600900", real_yield=6.0, ttm_yield=6.5,
+                                total_dividend=1e10, ttm_dividend=None,
+                                real_yield_year="2025", ttm_period="p", dividend_source="m")
+        assert screen_real_yield([snap], market_caps={"600900": 1e11}) == [snap]
+
+    def test_market_caps_fallback_still_enforces_threshold(self):
+        """回退后仍按阈值筛选：real_yield 旧值低于阈值则不过。"""
+        snap = DividendSnapshot(code="600900", real_yield=3.0, ttm_yield=6.5,
+                                total_dividend=None, ttm_dividend=None,
+                                real_yield_year="2025", ttm_period="p", dividend_source="m")
+        assert screen_real_yield([snap], market_caps={"600900": 1e11}) == []
 
 
 class TestComputeRealYield:

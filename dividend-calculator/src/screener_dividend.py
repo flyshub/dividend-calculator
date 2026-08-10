@@ -56,9 +56,15 @@ def compute_dividends_for_candidates(
     from src.screener_rate_limit import batch_wait
     snapshots: List[DividendSnapshot] = []
     for code in codes:
-        # 增量复用：缓存未过期则跳过重拉
+        # 增量复用：缓存未过期且 total_dividend 完整则跳过重拉。
+        # total_dividend 缺失（如旧 DB 迁移 ALTER TABLE 补列后未回填）→ 强制重拉，
+        # 否则股息率实时化逻辑永远拿不到分红总额（#82）。
         existing = cache.get_dividend(code)
-        if existing is not None and not cache.is_dividend_stale(code):
+        if (
+            existing is not None
+            and not cache.is_dividend_stale(code)
+            and existing.total_dividend is not None
+        ):
             snapshots.append(existing)
             continue
         batch_wait()  # 限流：控制请求间隔
@@ -88,12 +94,19 @@ def screen_real_yield(
 
     market_caps: {code: 当日市值}。提供时实时重算股息率（分红总额/当日市值），
     否则用存储的 real_yield（月频拉取时的旧值）。
+
+    降级策略：当 market_caps 有值但该股 total_dividend 缺失（NULL，如旧 DB 迁移
+    ALTER TABLE 补列后未回填）时，回退到存储的 real_yield/ttm_yield 旧值继续筛选，
+    而非静默判不过——避免「数据缺失」伪装成「市场无股可筛」（#81）。
     """
     result = []
     for s in snapshots:
         if market_caps and s.code in market_caps:
             real = compute_real_yield(s.total_dividend, market_caps[s.code])
             ttm = compute_real_yield(s.ttm_dividend, market_caps[s.code])
+            if real is None or ttm is None:
+                # total_dividend/ttm_dividend 缺失 → 降级到存储旧值（仅缺失时，非 0）
+                real, ttm = s.real_yield, s.ttm_yield
         else:
             real, ttm = s.real_yield, s.ttm_yield
         if real is not None and real > min_real and ttm is not None and ttm > min_ttm:
