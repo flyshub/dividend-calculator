@@ -6,9 +6,6 @@
   <title>真实股息率计算器</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232e5be6'/%3E%3Ctext x='16' y='22' font-size='17' text-anchor='middle' fill='%23fff' font-family='-apple-system,sans-serif'%3E息%3C/text%3E%3C/svg%3E">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
-  <script src="js/calculator.js"></script>
-  <script src="js/datasources.js"></script>
-  <script src="js/app.js"></script>
   <style>
     :root {
       color-scheme: light;
@@ -1010,7 +1007,7 @@
     </section>
 
     <footer class="site-note">
-      <p class="note">本工具完全使用公开市场真实数据（腾讯行情 + 东方财富），全部在浏览器本地计算，不依赖任何后端服务；结果依赖数据源实时可用性。</p>
+      <p class="note">本工具完全使用公开市场真实数据；结果依赖数据源实时可用性。股票名称目前使用精确匹配，不做模糊搜索。</p>
       <p class="note">本工具为初筛参考：便宜 ≠ 值得买，请结合年报、行业景气度与个人风险偏好独立决策。</p>
       <p style="text-align:center;margin:0;">
         <a href="screener.html" class="site-link">📊 每日选股结果</a>
@@ -1028,6 +1025,8 @@
 
     let chartInstance = null;
     let chartResizeHandler = null;
+    // 算式牌徽章：暂存 dividend 关键字段，供 PR 异步返回后刷新可持续性徽章
+    let _eqDividendData = null;
 
     function formatPercent(value) {
       return `${Number(value || 0).toFixed(2)}%`;
@@ -1325,46 +1324,21 @@
       };
     }
 
-    /* 浏览器端历史数据：腾讯月度K线 + 东财分红（含除权日），组装为图表期望的形态 */
-    function fetchChartData(stockCode, stockName) {
-      return Promise.all([
-        DataSources.fetchMonthlyPrices(stockCode, 120),
-        DataSources.fetchDividendRecords(stockCode),
-      ]).then(function (results) {
-        var monthlyPrices = results[0];
-        var dividendRecords = results[1].filter(function (r) {
-          return r.EX_DIVIDEND_DATE && r.PRETAX_BONUS_RMB > 0;
-        }).map(function (r) {
-          var y = r.REPORT_DATE ? r.REPORT_DATE.slice(0, 4) : '';
-          var m = r.REPORT_DATE ? r.REPORT_DATE.slice(5, 7) : '';
-          var isAnnual = (m === '12'); /* 对齐 calculator.js：仅 12 月报告期为年报，6/9/3 月为中期分配 */
-          return {
-            ex_dividend_date: r.EX_DIVIDEND_DATE.slice(0, 10),
-            dividend_per_10: r.PRETAX_BONUS_RMB,
-            report_time: y + (isAnnual ? '年报' : '中期分配'),
-            /* 预案公告日：财年股息生效起点（走势图按此归因，非除权日）；无则空串回退除权日 */
-            plan_notice_date: r.PLAN_NOTICE_DATE ? r.PLAN_NOTICE_DATE.slice(0, 10) : '',
-          };
-        });
-        return {
-          stock_code: stockCode,
-          stock_name: stockName,
-          monthly_prices: monthlyPrices,
-          dividend_records: dividendRecords,
-          data_date: new Date().toISOString().slice(0, 10),
-        };
-      });
-    }
-
-    function fetchAndRenderChart(stockCode, stockName) {
+    function fetchAndRenderChart(stockCode) {
       if (chartInstance) { chartInstance.dispose(); chartInstance = null; }
       if (chartResizeHandler) { window.removeEventListener('resize', chartResizeHandler); chartResizeHandler = null; }
 
       var card = document.getElementById('chart-card');
       var note = document.getElementById('chart-note');
 
-      fetchChartData(stockCode, stockName)
-        .then(function(apiData) {
+      fetch('/api/historical-data?stock=' + encodeURIComponent(stockCode))
+        .then(function(resp) { return resp.json(); })
+        .then(function(payload) {
+          if (!payload.success || !payload.data) {
+            card.classList.add('hidden');
+            return;
+          }
+          var apiData = payload.data;
           if (!apiData.monthly_prices || !apiData.monthly_prices.length) {
             card.classList.add('hidden');
             return;
@@ -1394,18 +1368,46 @@
         });
     }
 
-    function fmtNum(v, digits) {
-      return v == null ? '无' : Number(v).toFixed(digits);
+    // 算式牌徽章五档：高股息按可持续性 verdict（可持续/偏弱/不可持续），低股息/无分红为中性档
+    function renderEqBadge(sus) {
+      const badge = document.getElementById('eq-real-badge');
+      if (!badge) return;
+      const data = _eqDividendData || {};
+      const yieldV = data.dividend_yield_before_tax;
+
+      let text = '';
+      let cls = '';
+      if (sus && sus.triggered && sus.verdict === '可持续') {
+        text = '✓ 可持续';
+        cls = 'real-badge--sustainable';
+      } else if (sus && sus.triggered && sus.verdict === '偏弱') {
+        text = '~ 偏弱';
+        cls = 'real-badge--weak';
+      } else if (sus && sus.triggered && sus.verdict === '不可持续') {
+        text = '✕ 不可持续';
+        cls = 'real-badge--unsustainable';
+      } else if (data.has_dividend && yieldV != null && yieldV > 0 && yieldV <= 4) {
+        text = '• 低股息';
+        cls = 'real-badge--neutral';
+      } else if (data.has_dividend === false || (yieldV != null && yieldV <= 0)) {
+        text = '— 无分红';
+        cls = 'real-badge--neutral';
+      } else {
+        badge.classList.add('hidden');
+        return;
+      }
+      badge.textContent = text;
+      badge.className = 'real-badge ' + cls;
+      badge.classList.remove('hidden');
     }
 
     // 估值信号：着色 + V2 实证提示语（②），事实陈述 + 行动导向
-    function renderValuationSignal(d) {
-      const zone = d.valuation_zone || '';
+    function renderValuationSignal(zone) {
       const el = document.getElementById('pr-valuation');
       const noteEl = document.getElementById('pr-valuation-note');
       if (!el) return;
       // 估值大数字本身就是标签，直接着色（低估/合理偏低=绿、合理=灰、高估=红）
-      el.textContent = zone;
+      el.textContent = zone || '';
       el.className = 'value value--xl';
       const colorCls = {
         '低估': 'color-green',
@@ -1414,7 +1416,6 @@
         '高估': 'color-red',
       }[zone];
       if (colorCls) el.className = 'value value--xl ' + colorCls;
-      // ② 提示语（事实陈述 + 行动导向，V2 结论）
       let note = '';
       if (zone === '低估' || zone === '合理偏低') {
         note = 'PR≤1：历史回测 9 年超额 +4%~+4.4%（行业中性化后仍成立），估值偏低，可重点关注。';
@@ -1426,7 +1427,6 @@
         note = '无法判定估值区间（数据不足）。';
       }
       if (noteEl) noteEl.textContent = note;
-      // ③ 综合信号条：估值徽章（三信号条独立视觉，用 badge 类）
       const sigV = document.getElementById('signal-valuation');
       if (sigV) {
         const sigCls = {
@@ -1441,12 +1441,12 @@
     }
 
     // 综合信号条：股息率 + 可持续性徽章（③），配合估值徽章形成「三信号」速览
-    function renderSignalRow(data) {
+    function renderSignalRow(data, sus) {
       const sigYield = document.getElementById('signal-yield');
       const sigSus = document.getElementById('signal-sustainability');
       if (sigYield) {
-        const yieldV = data.dividend && data.dividend.dividend_yield_before_tax;
-        const hasDiv = data.dividend && data.dividend.has_dividend;
+        const yieldV = data && data.dividend_yield_before_tax;
+        const hasDiv = data && data.has_dividend;
         if (hasDiv && yieldV != null && yieldV > 0 && yieldV <= 4) {
           sigYield.textContent = '股息率 ' + Number(yieldV).toFixed(2) + '%';
           sigYield.className = 'badge badge--gray';
@@ -1459,16 +1459,16 @@
         }
       }
       if (sigSus) {
-        const sus = data.sustainability;
-        if (sus && sus.triggered && sus.verdict === '可持续') {
+        const s = sus;
+        if (s && s.triggered && s.verdict === '可持续') {
           sigSus.textContent = '可持续';
           sigSus.className = 'badge badge--green';
           sigSus.classList.remove('hidden');
-        } else if (sus && sus.triggered && sus.verdict === '偏弱') {
+        } else if (s && s.triggered && s.verdict === '偏弱') {
           sigSus.textContent = '可持续偏弱';
           sigSus.className = 'badge badge--orange';
           sigSus.classList.remove('hidden');
-        } else if (sus && sus.triggered && sus.verdict === '不可持续') {
+        } else if (s && s.triggered && s.verdict === '不可持续') {
           sigSus.textContent = '不可持续';
           sigSus.className = 'badge badge--red';
           sigSus.classList.remove('hidden');
@@ -1480,193 +1480,43 @@
       }
     }
 
-    function renderPR(d) {
-      const prCard = document.getElementById('pr-card');
-      document.getElementById('pr-basic').textContent = fmtNum(d.pr_basic, 3);
-      document.getElementById('pr-corrected').textContent = fmtNum(d.pr_corrected, 3);
-      document.getElementById('pr-pb').textContent = fmtNum(d.pr_pb, 3);
-      renderValuationSignal(d);
-      document.getElementById('pr-pe-pb').textContent = fmtNum(d.pe_ttm, 2) + ' / ' + fmtNum(d.pb, 2);
-      document.getElementById('pr-roe').textContent = fmtNum(d.roe_latest, 2) + '% / ' + fmtNum(d.roe_5y_median, 2) + '%' + (d.roe_period ? '（' + d.roe_period + '）' : '');
-      document.getElementById('pr-profit-ttm').textContent = formatRmbYi(d.net_profit_latest_period);
-      document.getElementById('pr-profit-annual').textContent = formatRmbYi(d.net_profit_annual);
-      document.getElementById('pr-dividend-total').textContent = formatRmbYi(d.dividend_total);
-      document.getElementById('pr-payout').textContent = d.payout_ratio == null ? '无' : formatPercent(d.payout_ratio * 100);
-      document.getElementById('pr-nfactor').textContent = fmtNum(d.n_factor, 4);
-      document.getElementById('pr-sources').textContent = '数据源: 腾讯行情 + 东财财报';
-
-      // 行业信息并入股票卡，避免与说明重复
-      const indEl = document.getElementById('stock-industry');
-      if (indEl) {
-        indEl.textContent = (d.industry && d.industry !== '未知行业') ? '| ' + d.industry : '';
-      }
-
-      // 构建计算说明（卡片化：核心公式 + 估值/口径，参考回测提示与适用性卡风格）
-      var explainEl = document.getElementById('pr-explanation');
-      var h = '';
-      h += '<div class="tip tip--applicability">';
-      h += '<div class="tip__title">市赚率计算 · 核心公式</div>';
-      h += '<div class="formula-line">修正市赚率 = <b>PE_TTM × N因子 / ROE</b>（PE、ROE 均取百分数值直接相除）</div>';
-      h += '<div class="formula-line">基本版: <b>' + fmtNum(d.pe_ttm, 2) + ' / ' + fmtNum(d.roe_latest, 2) + '% = ' + fmtNum(d.pr_basic, 3) + '</b></div>';
-      h += '<div class="formula-line">修正版: <b>' + fmtNum(d.pr_corrected, 3) + '</b>（对亏损股/周期股/N倍增长股进行修正）</div>';
-      h += '<div class="formula-line">PB版 = <b>PB / ROE² × 100</b>: <b>' + fmtNum(d.pr_pb, 3) + '</b>（周期股用 5 年 ROE 中位数）</div>';
-      h += '</div>';
-      h += '<div class="tip tip--backtest">';
-      h += '<div class="tip__title">估值与口径</div>';
-      h += '<div class="formula-line">估值区间: <b>' + (d.valuation_zone || '无') + '</b>（市赚率≤0.5低估，0.5-1.0合理偏低，1.0-3.0合理，&gt;3.0高估）</div>';
-      h += '<div class="formula-line">口径: PE 为 TTM（含最新季报），ROE 为最新年报（' + (d.roe_period || '未知报告期') + '）——ROE 仅定期披露无实时值，与 PE 组合是市赚率公式的定义口径</div>';
-      h += '</div>';
-      if (d.is_loss_stock) h += '<div class="tip tip--backtest">⚠️ 该公司处于亏损状态，市赚率参考价值有限</div>';
-      explainEl.innerHTML = h;
-
-      // 适用性卡：点亮当前股票所属情况（优先级：周期 > 科技 > 成长；无则默认价值股）
-      const activeKind = d.is_cyclical ? 'cyclical' : (d.is_tech ? 'tech' : (d.is_growth ? 'growth' : 'value'));
-      const applItems = document.querySelectorAll('.appl-item');
-      applItems.forEach(function(item) {
-        item.classList.toggle('appl-item--active', item.dataset.kind === activeKind);
-      });
-
-      // 行业适用性已并入适用性卡；底部警示条仅保留亏损股强警示
-      const prWarning = document.getElementById('pr-warning');
-      if (d.is_loss_stock) {
-        prWarning.textContent = '该公司处于亏损状态，市赚率参考价值有限';
-        prWarning.classList.remove('hidden');
-      } else {
-        prWarning.classList.add('hidden');
-      }
-
-      if (prCard) prCard.classList.remove('hidden');
-    }
-
-    var SUS_VERDICT_COLOR = { '可持续': '#0d7a4e', '偏弱': '#a85a12', '不可持续': '#be2a2a', '未评估': '#6e7683' };
-    var SUS_DIM_LABEL = {
-      cf_coverage: '经营现金流覆盖', payout: '股利支付率', profitability: '盈利稳定性',
-      balance_sheet: '资产负债表', dividend_history: '分红历史', industry: '行业属性',
-      capital_adequacy: '资本充足率', net_interest_margin: '净息差', npl: '不良贷款率', provision: '拨贷比',
-    };
-
-    function renderSustainability(s) {
-      const card = document.getElementById('sustainability-card');
-      if (!s || !s.triggered) { card.classList.add('hidden'); return; }
-
-      const verdictEl = document.getElementById('sus-verdict');
-      verdictEl.textContent = s.verdict;
-      verdictEl.style.color = SUS_VERDICT_COLOR[s.verdict] || '#6e7683';
-
-      document.getElementById('sus-score').textContent = s.score == null ? '评分不足' : (s.score.toFixed(2) + ' / 2.0');
-      document.getElementById('sus-score-100').textContent = s.score_100 == null ? '' : ('评分 ' + Number(s.score_100).toFixed(1) + ' / 100');
-      const branchMap = { finance: '银行/保险专项', 'general-fallback': '通用（银行专项缺失）', general: '通用六维' };
-      document.getElementById('sus-branch').textContent = branchMap[s.branch] || s.branch;
-
-      // 结论说明（白话）
-      document.getElementById('sus-explanation').textContent = (s.explanation || []).join('\n');
-
-      const m = s.metrics || {};
-      document.getElementById('sus-payout').textContent = m.payout_ratio == null ? '无' : (m.payout_ratio * 100).toFixed(1) + '%';
-      document.getElementById('sus-cf-cov').textContent = m.cf_coverage == null ? '无' : m.cf_coverage.toFixed(2) + 'x';
-      document.getElementById('sus-fcf-cov').textContent = m.fcf_coverage == null ? '无' : m.fcf_coverage.toFixed(2) + 'x';
-      document.getElementById('sus-debt').textContent = m.debt_ratio == null ? '无' : (Number(m.debt_ratio) * 100).toFixed(1) + '%';
-      document.getElementById('sus-roe').textContent = m.roe_latest == null ? '无' : m.roe_latest.toFixed(2) + '%';
-      document.getElementById('sus-np-yoy').textContent = m.net_profit_yoy == null ? '无' : m.net_profit_yoy.toFixed(1) + '%';
-      document.getElementById('sus-consecutive').textContent = m.consecutive_dividend_years == null ? '无' : parseInt(m.consecutive_dividend_years) + ' 年';
-
-      // 各维度评分
-      var dims = [];
-      for (var k in (s.dimension_scores || {})) {
-        dims.push((SUS_DIM_LABEL[k] || k) + ':' + s.dimension_scores[k]);
-      }
-      document.getElementById('sus-dims').textContent = dims.join('  ');
-
-      // 致命红旗
-      const fatalEl = document.getElementById('sus-fatal');
-      if (s.fatal_flags && s.fatal_flags.length) {
-        fatalEl.textContent = '致命红旗：\n' + s.fatal_flags.map(function (f) { return '  • ' + f; }).join('\n');
-        fatalEl.classList.remove('hidden');
-      } else {
-        fatalEl.classList.add('hidden');
-      }
-      // 情境警示
-      const warnEl = document.getElementById('sus-warnings');
-      if (s.warning_flags && s.warning_flags.length) {
-        warnEl.textContent = '情境警示：\n' + s.warning_flags.map(function (w) { return '  • ' + w; }).join('\n');
-        warnEl.classList.remove('hidden');
-      } else {
-        warnEl.textContent = '';
-        warnEl.classList.add('hidden');
-      }
-      // 缺失说明
-      document.getElementById('sus-notes').textContent = (s.notes && s.notes.length) ? '注：' + s.notes.join('；') : '';
-
-      card.classList.remove('hidden');
-    }
-
-    // 算式牌徽章五档：高股息按可持续性 verdict（可持续/偏弱/不可持续），低股息/无分红为中性档
-    function renderEqBadge(data) {
-      const badge = document.getElementById('eq-real-badge');
-      if (!badge) return;
-      const sus = data.sustainability;
-      const yieldV = data.dividend && data.dividend.dividend_yield_before_tax;
-      const hasDiv = data.dividend && data.dividend.has_dividend;
-
-      let text = '';
-      let cls = '';
-      if (sus && sus.verdict === '可持续') {
-        text = '✓ 可持续';
-        cls = 'real-badge--sustainable';
-      } else if (sus && sus.verdict === '偏弱') {
-        text = '~ 偏弱';
-        cls = 'real-badge--weak';
-      } else if (sus && sus.verdict === '不可持续') {
-        text = '✕ 不可持续';
-        cls = 'real-badge--unsustainable';
-      } else if (hasDiv && yieldV != null && yieldV > 0 && yieldV <= 4) {
-        text = '• 低股息';
-        cls = 'real-badge--neutral';
-      } else if (hasDiv === false || (yieldV != null && yieldV <= 0)) {
-        text = '— 无分红';
-        cls = 'real-badge--neutral';
-      } else {
-        badge.classList.add('hidden');
-        return;
-      }
-      badge.textContent = text;
-      badge.className = 'real-badge ' + cls;
-      badge.classList.remove('hidden');
-    }
-
     function renderResult(data) {
-      const si = data.stock_info;
-      const di = data.dividend;
-      const title = si.stock_name ? `${si.stock_name} (${si.stock_code})` : si.stock_code;
+      _eqDividendData = {
+        has_dividend: data.has_dividend,
+        dividend_yield_before_tax: data.dividend_yield_before_tax,
+      };
+      const title = data.stock_name ? `${data.stock_name} (${data.stock_code})` : data.stock_code;
       document.getElementById('stock-title').textContent = title;
-      document.getElementById('yield-before-tax').textContent = formatPercent(di.dividend_yield_before_tax);
-      document.getElementById('yield-after-tax').textContent = formatPercent(di.dividend_yield_after_tax_10);
-      document.getElementById('yield-after-tax-20').textContent = formatPercent(di.dividend_yield_after_tax_20);
-      document.getElementById('latest-year').textContent = di.dividend_year || '无';
-      document.getElementById('current-price').textContent = `${Number(si.current_price || 0).toFixed(2)} 元`;
-      document.getElementById('total-shares').textContent = formatSharesYi(si.total_shares);
-      document.getElementById('market-cap').textContent = formatRmbYi(di.total_market_cap);
-      document.getElementById('total-dividend').textContent = formatRmbYi(di.total_dividend);
-      document.getElementById('dividend-source').textContent = di.dividend_source || '未知';
+      document.getElementById('yield-before-tax').textContent = formatPercent(data.dividend_yield_before_tax);
+      document.getElementById('yield-after-tax').textContent = formatPercent(data.dividend_yield_after_tax);
+      document.getElementById('yield-after-tax-20').textContent = formatPercent(data.dividend_yield_after_tax_20);
+      document.getElementById('latest-year').textContent = data.latest_year || '无';
+      document.getElementById('current-price').textContent = `${Number(data.current_price || 0).toFixed(2)} 元`;
+      document.getElementById('total-shares').textContent = formatSharesYi(data.total_shares);
+      document.getElementById('market-cap').textContent = formatRmbYi(data.total_market_cap);
+      document.getElementById('total-dividend').textContent = formatRmbYi(data.total_dividend);
+      document.getElementById('dividend-source').textContent = data.dividend_source || '未知';
 
       // 活公式算式牌：接入真实数据（数据铁律：有数据才填，无数据保留占位）
       const eqDividend = document.getElementById('eq-dividend');
-      if (eqDividend) eqDividend.textContent = di.total_dividend != null ? (Number(di.total_dividend) / 1e8).toFixed(1) : '—';
+      if (eqDividend) eqDividend.textContent = data.total_dividend != null ? (Number(data.total_dividend) / 1e8).toFixed(1) : '—';
       const eqMcap = document.getElementById('eq-marketcap');
-      if (eqMcap) eqMcap.textContent = di.total_market_cap != null ? (Number(di.total_market_cap) / 1e8).toFixed(1) : '—';
+      if (eqMcap) eqMcap.textContent = data.total_market_cap != null ? (Number(data.total_market_cap) / 1e8).toFixed(1) : '—';
       const eqYield = document.getElementById('eq-yield');
-      if (eqYield) eqYield.textContent = di.dividend_yield_before_tax != null ? Number(di.dividend_yield_before_tax).toFixed(2) : '—';
-      renderEqBadge(data);
+      if (eqYield) eqYield.textContent = data.dividend_yield_before_tax != null ? Number(data.dividend_yield_before_tax).toFixed(2) : '—';
+      renderEqBadge(null);
 
-      /* TTM 股息率（#19）：近12个月实际派发 */
-      var ttmCard = document.getElementById('ttm-card');
-      if (di.dividend_yield_ttm_before_tax != null) {
-        document.getElementById('ttm-yield').textContent = formatPercent(di.dividend_yield_ttm_before_tax);
-        document.getElementById('ttm-period').textContent = '期间 ' + (di.ttm_period || '') + ' | 来源 ' + (di.ttm_source || '');
-        /* TTM 与主口径差异说明（动态） */
-        var mainY = Number(di.dividend_yield_before_tax || 0);
-        var ttmY = Number(di.dividend_yield_ttm_before_tax || 0);
-        var ttmNote = document.getElementById('ttm-note');
+      // TTM 股息率（#19）：近12个月实际派发
+      const ttmCard = document.getElementById('ttm-card');
+      const ttmYieldEl = document.getElementById('ttm-yield');
+      const ttmPeriodEl = document.getElementById('ttm-period');
+      if (data.dividend_yield_ttm_before_tax != null) {
+        ttmYieldEl.textContent = formatPercent(data.dividend_yield_ttm_before_tax);
+        ttmPeriodEl.textContent = '期间 ' + (data.ttm_period || '') + ' | 来源 ' + (data.ttm_source || '');
+        // TTM 与主口径差异说明（动态）
+        const mainY = Number(data.dividend_yield_before_tax || 0);
+        const ttmY = Number(data.dividend_yield_ttm_before_tax || 0);
+        const ttmNote = document.getElementById('ttm-note');
         if (Math.abs(ttmY - mainY) < 0.005) {
           ttmNote.textContent = '与主口径相同：A 股分红节奏下，近12个月派发的恰好是最近完整财年的分红。';
         } else if (ttmY > mainY) {
@@ -1680,23 +1530,23 @@
       }
       // 计算说明（tip 卡片化）：标题 + 说明文本
       var explEl = document.getElementById('explanation');
-      if (di.explanation) {
+      if (data.explanation) {
         explEl.innerHTML = '<div class="tip__title">股息率计算 · 明细</div><div class="explanation-text">' +
-          String(di.explanation).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\n/g, '<br>') +
+          String(data.explanation).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\n/g, '<br>') +
           '</div>';
       } else {
         explEl.innerHTML = '';
       }
-      document.getElementById('no-dividend-warning').classList.toggle('hidden', di.has_dividend);
+      document.getElementById('no-dividend-warning').classList.toggle('hidden', data.has_dividend);
 
       const detailBody = document.getElementById('dividend-details');
       detailBody.innerHTML = '';
-      if (di.dividend_details.length === 0) {
+      if (data.dividend_details.length === 0) {
         const row = document.createElement('tr');
         row.innerHTML = '<td colspan="2">无分红明细</td>';
         detailBody.appendChild(row);
       } else {
-        for (const detail of di.dividend_details) {
+        for (const detail of data.dividend_details) {
           const row = document.createElement('tr');
           const reportCell = document.createElement('td');
           const amountCell = document.createElement('td');
@@ -1710,33 +1560,154 @@
 
       resultSection.classList.remove('hidden');
 
-      renderSignalRow(data);
-      fetchAndRenderChart(si.stock_code, si.stock_name);
-      if (data.pr) {
-        renderPR(Object.assign({}, data.pr, {
-          stock_name: si.stock_name,
-          stock_code: si.stock_code,
-          dividend_total: di.total_dividend,
-        }));
+      renderSignalRow(_eqDividendData, null);
+      fetchAndRenderChart(data.stock_code);
+      fetchAndRenderPR(data.stock_code);
+    }
+
+    async function fetchAndRenderPR(stockCode) {
+      const prCard = document.getElementById('pr-card');
+      const prWarning = document.getElementById('pr-warning');
+      try {
+        const response = await fetch('/api/pr?stock=' + encodeURIComponent(stockCode));
+        const payload = await response.json();
+        if (!response.ok || !payload.success) {
+          if (prCard) prCard.classList.add('hidden');
+          return;
+        }
+        var d = payload.data;
+        document.getElementById('pr-basic').textContent = d.pr_basic == null ? '无' : Number(d.pr_basic).toFixed(3);
+        document.getElementById('pr-corrected').textContent = d.pr_corrected == null ? '无' : Number(d.pr_corrected).toFixed(3);
+        document.getElementById('pr-pb').textContent = d.pr_pb == null ? '无' : Number(d.pr_pb).toFixed(3);
+        renderValuationSignal(d.valuation_zone);
+        document.getElementById('pr-pe-pb').textContent = Number(d.pe_ttm || 0).toFixed(2) + ' / ' + Number(d.pb || 0).toFixed(2);
+        document.getElementById('pr-roe').textContent = Number(d.roe_latest || 0).toFixed(2) + '% / ' + Number(d.roe_5y_median || 0).toFixed(2) + '%' + (d.roe_period ? '（' + d.roe_period + '）' : '');
+        document.getElementById('pr-profit-ttm').textContent = formatRmbYi(d.net_profit_latest_period);
+        document.getElementById('pr-profit-annual').textContent = formatRmbYi(d.net_profit_annual);
+        document.getElementById('pr-dividend-total').textContent = formatRmbYi(d.dividend_total);
+        document.getElementById('pr-payout').textContent = formatPercent(d.payout_ratio * 100);
+        document.getElementById('pr-nfactor').textContent = Number(d.n_factor || 0).toFixed(4);
+        document.getElementById('pr-sources').textContent = 'PE/PB: ' + (d.pe_pb_source || '') + ' | 财报: ' + (d.finance_source || '');
+
+        // 行业信息并入股票卡，避免与说明重复
+        const indEl = document.getElementById('stock-industry');
+        if (indEl) {
+          indEl.textContent = (d.industry && d.industry !== '未知行业') ? '| ' + d.industry : '';
+        }
+
+        // 构建计算说明（卡片化：核心公式 + 估值/口径，参考回测提示与适用性卡风格）
+        var explainEl = document.getElementById('pr-explanation');
+        var h = '';
+        h += '<div class="tip tip--applicability">';
+        h += '<div class="tip__title">市赚率计算 · 核心公式</div>';
+        h += '<div class="formula-line">修正市赚率 = <b>PE_TTM × N因子 / ROE</b>（PE、ROE 均取百分数值直接相除）</div>';
+        h += '<div class="formula-line">基本版: <b>' + Number(d.pe_ttm || 0).toFixed(2) + ' / ' + Number(d.roe_latest || 0).toFixed(2) + '% = ' + Number(d.pr_basic || 0).toFixed(3) + '</b></div>';
+        h += '<div class="formula-line">修正版: <b>' + Number(d.pr_corrected || 0).toFixed(3) + '</b>（对亏损股/周期股/N倍增长股进行修正）</div>';
+        h += '<div class="formula-line">PB版 = <b>PB / ROE² × 100</b>: <b>' + Number(d.pr_pb || 0).toFixed(3) + '</b>（周期股用 5 年 ROE 中位数）</div>';
+        h += '</div>';
+        h += '<div class="tip tip--backtest">';
+        h += '<div class="tip__title">估值与口径</div>';
+        h += '<div class="formula-line">估值区间: <b>' + (d.valuation_zone || '无') + '</b>（市赚率≤0.5低估，0.5-1.0合理偏低，1.0-3.0合理，&gt;3.0高估）</div>';
+        h += '<div class="formula-line">口径: PE 为 TTM（含最新季报），ROE 为最新年报（' + (d.roe_period || '未知报告期') + '）——ROE 仅定期披露无实时值，与 PE 组合是市赚率公式的定义口径</div>';
+        h += '</div>';
+        if (d.is_loss_stock) h += '<div class="tip tip--backtest">⚠️ 该公司处于亏损状态，市赚率参考价值有限</div>';
+        explainEl.innerHTML = h;
+
+        // 适用性卡：点亮当前股票所属情况（优先级：周期 > 科技 > 成长；无则默认价值股）
+        const activeKind = d.is_cyclical ? 'cyclical' : (d.is_tech ? 'tech' : (d.is_growth ? 'growth' : 'value'));
+        const applItems = document.querySelectorAll('.appl-item');
+        applItems.forEach(function(item) {
+          item.classList.toggle('appl-item--active', item.dataset.kind === activeKind);
+        });
+
+        // 行业适用性已并入适用性卡；底部警示条仅保留亏损股强警示
+        if (d.is_loss_stock) {
+          prWarning.textContent = '该公司处于亏损状态，市赚率参考价值有限';
+          prWarning.classList.remove('hidden');
+        } else {
+          prWarning.classList.add('hidden');
+        }
+
+        if (prCard) prCard.classList.remove('hidden');
+        renderSustainability(d.sustainability);
+        renderEqBadge(d.sustainability);
+        renderSignalRow(_eqDividendData, d.sustainability);
+      } catch (err) {
+        console.warn('市赚率数据获取失败:', err);
+        if (prCard) prCard.classList.add('hidden');
+        const susCard = document.getElementById('sustainability-card');
+        if (susCard) susCard.classList.add('hidden');
       }
-      if (data.sustainability) renderSustainability(data.sustainability);
+    }
+
+    var SUS_VERDICT_COLOR = { '可持续': '#0d7a4e', '偏弱': '#a85a12', '不可持续': '#be2a2a', '未评估': '#6e7683' };
+    var SUS_DIM_LABEL = {
+      cf_coverage: '经营现金流覆盖', payout: '股利支付率', profitability: '盈利稳定性',
+      balance_sheet: '资产负债表', dividend_history: '分红历史', industry: '行业属性',
+      capital_adequacy: '资本充足率', net_interest_margin: '净息差', npl: '不良贷款率', provision: '拨贷比',
+    };
+
+    function renderSustainability(s) {
+      const card = document.getElementById('sustainability-card');
+      if (!s || !s.triggered) { if (card) card.classList.add('hidden'); return; }
+
+      const verdictEl = document.getElementById('sus-verdict');
+      verdictEl.textContent = s.verdict;
+      verdictEl.style.color = SUS_VERDICT_COLOR[s.verdict] || '#6e7683';
+      document.getElementById('sus-score').textContent = s.score == null ? '评分不足' : (Number(s.score).toFixed(2) + ' / 2.0');
+      document.getElementById('sus-score-100').textContent = s.score_100 == null ? '' : ('评分 ' + Number(s.score_100).toFixed(1) + ' / 100');
+      const branchMap = { finance: '银行/保险专项', 'general-fallback': '通用（银行专项缺失）', general: '通用六维' };
+      document.getElementById('sus-branch').textContent = branchMap[s.branch] || s.branch;
+      document.getElementById('sus-explanation').textContent = (s.explanation || []).join('\n');
+
+      const m = s.metrics || {};
+      document.getElementById('sus-payout').textContent = m.payout_ratio == null ? '无' : (Number(m.payout_ratio * 100).toFixed(1) + '%');
+      document.getElementById('sus-cf-cov').textContent = m.cf_coverage == null ? '无' : (Number(m.cf_coverage).toFixed(2) + 'x');
+      document.getElementById('sus-fcf-cov').textContent = m.fcf_coverage == null ? '无' : (Number(m.fcf_coverage).toFixed(2) + 'x');
+      document.getElementById('sus-debt').textContent = m.debt_ratio == null ? '无' : (Number(m.debt_ratio) * 100).toFixed(1) + '%';
+      document.getElementById('sus-roe').textContent = m.roe_latest == null ? '无' : (Number(m.roe_latest).toFixed(2) + '%');
+      document.getElementById('sus-np-yoy').textContent = m.net_profit_yoy == null ? '无' : (Number(m.net_profit_yoy).toFixed(1) + '%');
+      document.getElementById('sus-consecutive').textContent = m.consecutive_dividend_years == null ? '无' : (parseInt(m.consecutive_dividend_years) + ' 年');
+
+      var dims = [];
+      for (var k in (s.dimension_scores || {})) {
+        dims.push((SUS_DIM_LABEL[k] || k) + ':' + s.dimension_scores[k]);
+      }
+      document.getElementById('sus-dims').textContent = dims.join('  ');
+
+      const fatalEl = document.getElementById('sus-fatal');
+      if (s.fatal_flags && s.fatal_flags.length) {
+        fatalEl.textContent = '致命红旗：\n' + s.fatal_flags.map(function (f) { return '  • ' + f; }).join('\n');
+        fatalEl.classList.remove('hidden');
+      } else {
+        fatalEl.classList.add('hidden');
+      }
+      const warnEl = document.getElementById('sus-warnings');
+      if (s.warning_flags && s.warning_flags.length) {
+        warnEl.textContent = '情境警示：\n' + s.warning_flags.map(function (w) { return '  • ' + w; }).join('\n');
+        warnEl.classList.remove('hidden');
+      } else {
+        warnEl.textContent = '';
+        warnEl.classList.add('hidden');
+      }
+      document.getElementById('sus-notes').textContent = (s.notes && s.notes.length) ? '注：' + s.notes.join('；') : '';
+
+      card.classList.remove('hidden');
     }
 
     async function calculate(stock) {
       clearState();
       setLoading(true);
       try {
-        // 支持代码或名称：非 6 位数字先做名称→代码解析
-        let code = stock;
-        if (!/^\d{6}$/.test(stock.trim())) {
-          const hit = await DataSources.lookupStockCodeByName(stock.trim());
-          if (hit && hit.code) code = hit.code;
-          else { showError('未找到匹配的股票: ' + stock); return; }
+        const response = await fetch(`/api/calculate?stock=${encodeURIComponent(stock)}`);
+        const payload = await response.json();
+        if (!response.ok || !payload.success) {
+          showError(payload.error || '计算失败，请稍后重试');
+          return;
         }
-        const result = await DividendApp.analyzeStock(code);
-        renderResult(result);
+        renderResult(payload.data);
       } catch (error) {
-        showError('请求失败: ' + (error.message || error) + '。请确认网络可访问腾讯/东财数据源。');
+        showError('请求失败，请确认本地服务正在运行');
       } finally {
         setLoading(false);
       }
