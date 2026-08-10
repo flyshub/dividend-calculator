@@ -32,7 +32,7 @@ def _result(code="600900", real=6.0, ttm=6.5, year="2025", period="2025-07~2026-
         dividend_yield_before_tax=real, dividend_yield_after_tax=real * 0.9,
         dividend_yield_after_tax_20=real * 0.8, latest_year=year,
         dividend_details=[], explanation="", dividend_source="mootdx",
-        dividend_yield_ttm_before_tax=ttm, ttm_period=period, ttm_source="mootdx xdxr",
+        dividend_yield_ttm_before_tax=ttm, ttm_period=period, ttm_source="东财",
     )
 
 

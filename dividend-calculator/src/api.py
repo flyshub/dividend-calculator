@@ -2,7 +2,6 @@
 API层 — 薄 facade，委托给 DataSourceManager 和 mootdx 适配器
 
 get_stock_info: 委托给 DataSourceManager（自动降级）
-get_dividend_history: mootdx xdxr（尚未提取到 adapter）
 get_historical_data: 月度价格 + 分红记录聚合（尚未提取到 adapter）
 """
 import logging
@@ -10,7 +9,6 @@ import math
 from typing import Optional
 
 import requests
-import pandas as pd
 
 from .datasource.base import StockInfo, MonthlyPrice, DividendRecord, HistoricalData
 from .datasource import get_data_source_manager
@@ -49,24 +47,6 @@ def get_stock_info(stock_input: str) -> Optional[StockInfo]:
 
     logger.error("所有数据源均无法获取 %s 的完整信息", stock_code)
     return None
-
-
-# ────────────────────────────────────────────────────────────────
-# 分红数据获取（mootdx xdxr，尚未提取到 adapter）
-# ────────────────────────────────────────────────────────────────
-
-def get_dividend_history(stock_code: str):
-    """获取分红历史（通过 mootdx xdxr 获取除权除息记录）"""
-    try:
-        from .datasource.mootdx_source import get_quotes_client
-        client = get_quotes_client()
-        df = client.xdxr(symbol=stock_code)
-        if df is not None and not df.empty:
-            return df[df['category'] == 1].copy()
-        return pd.DataFrame()
-    except Exception as e:
-        logger.warning("获取分红历史失败 %s: %s", stock_code, e)
-        return pd.DataFrame()
 
 
 # ────────────────────────────────────────────────────────────────
@@ -163,13 +143,28 @@ def _get_monthly_prices(stock_code: str) -> list:
 def _get_all_dividend_records(stock_code: str) -> list:
     """获取全部分红记录（含除权除息日），按除权日升序。
 
-    主：mootdx xdxr；mootdx 不可用或无数据时降级东财分红明细
-    （RPT_SHAREBONUS_DET），保证走势图股息率在 mootdx 失效时仍有数据。
+    主：东财分红明细（RPT_SHAREBONUS_DET，报告期口径，与 site/js datasources.js 同源，
+    财年按报告期判定 month==12）；mootdx xdxr 兜底（仅含已除权记录，fenhong 浮点 round(4)）。
+    issue #77：TTM 主源切换后东财升主。
 
-    注意：此降级服务于走势图数据链路（historical-data），复用 sustainability 模块的
+    注意：此链路服务于走势图数据链路（historical-data）与 TTM 股息率，复用 sustainability 模块的
     东财取数能力，本身不属于股息可持续性功能的 spec 范围，属独立的健壮性增强。
     """
-    # 主：mootdx xdxr
+    # 主：东财分红明细（与 site/js datasources.js 同源，浏览器可直连）
+    try:
+        from .eastmoney_fetcher import fetch_dividend_rows
+        from .sustainability import parse_dividend_rows
+        rows = fetch_dividend_rows(stock_code)
+        if not rows:
+            return []
+        records, _ = parse_dividend_rows(rows)
+        records.sort(key=lambda r: r.ex_dividend_date or "")
+        logger.debug("通过东财获取分红记录 %s: %d 条", stock_code, len(records))
+        return records
+    except Exception as e:
+        logger.warning("东财获取分红记录失败 %s: %s", stock_code, e)
+
+    # 兜底：mootdx xdxr（通达信协议，仅含已除权记录）
     try:
         from .datasource.mootdx_source import get_quotes_client
         client = get_quotes_client()
@@ -200,23 +195,12 @@ def _get_all_dividend_records(stock_code: str) -> list:
 
                 if results:
                     results.sort(key=lambda r: r.ex_dividend_date)
-                    logger.debug("通过 mootdx xdxr 获取分红记录 %s: %d 条", stock_code, len(results))
+                    logger.debug("mootdx 兜底获取分红记录 %s: %d 条", stock_code, len(results))
                     return results
     except Exception as e:
         logger.warning("mootdx 获取分红记录失败 %s: %s", stock_code, e)
 
-    # 降级：东财分红明细（与 site/js datasources.js 同源）
-    try:
-        from .eastmoney_fetcher import fetch_dividend_rows
-        from .sustainability import parse_dividend_rows
-        rows = fetch_dividend_rows(stock_code)
-        records, _ = parse_dividend_rows(rows)
-        records.sort(key=lambda r: r.ex_dividend_date or "")
-        logger.debug("东财降级获取分红记录 %s: %d 条", stock_code, len(records))
-        return records
-    except Exception as e:
-        logger.warning("东财分红记录降级失败 %s: %s", stock_code, e)
-        return []
+    return []
 
 
 # ────────────────────────────────────────────────────────────────

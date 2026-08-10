@@ -38,7 +38,7 @@ class DividendResult:
     ttm_dividend: Optional[float] = None            # TTM 现金分红总额（元）
     dividend_yield_ttm_before_tax: Optional[float] = None  # TTM 税前股息率（%）
     ttm_period: Optional[str] = None                # TTM 期间 "起-止"（YYYY-MM-DD）
-    ttm_source: str = ""                            # TTM 数据来源（mootdx xdxr / 东财）
+    ttm_source: str = ""                            # TTM 数据来源（东财 / mootdx xdxr 兜底）
 
 
 def calculate_dividend_yield(
@@ -124,7 +124,7 @@ def get_ttm_dividend(
 ) -> Tuple[Optional[float], Optional[str], Optional[str], str]:
     """TTM 股息率口径（#19）：近 12 个月实际派发现金分红总额。
 
-    复用 api._get_all_dividend_records（mootdx xdxr → 东财 RPT_SHAREBONUS_DET，
+    复用 api._get_all_dividend_records（东财 RPT_SHAREBONUS_DET 主 → mootdx xdxr 兜底，
     含除权除息日）。失败返回 (None, None, None, '无')，绝不抛出。
 
     Returns:
@@ -139,7 +139,7 @@ def get_ttm_dividend(
         if ttm_total is None:
             return None, None, None, "无"
         period = f"{start}~{end}" if start and end else None
-        return ttm_total, period, f"{count}次派息", "mootdx xdxr"
+        return ttm_total, period, f"{count}次派息", "东财"
     except Exception as e:
         logger.debug("TTM 分红获取失败 %s: %s", stock_code, e)
         return None, None, None, "无"

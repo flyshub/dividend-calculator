@@ -34,13 +34,13 @@
 |------|---------|--------|
 | 实时价格 + 股本 | 腾讯行情 | 新浪(价) → mootdx finance |
 | PE_TTM / PB | 腾讯行情 | 东方财富 push2 |
-| 除权除息 / 分红 | mootdx xdxr | akshare fhps_detail_em → akshare cninfo |
+| 除权除息 / 分红 | akshare fhps_detail_em（东财 datacenter，按报告期判财年） | akshare cninfo → mootdx xdxr |
 | ROE / 净利润 | mootdx F10 | akshare 同花顺 |
 | 行业分类 | mootdx F10 | 东方财富 datacenter |
 | 可持续性全部字段 | 东方财富 datacenter（与 JS 静态版刻意同源） | — |
 
 **两条管线**：
-- **Python 主链路**（股息率/市赚率）：mootdx 优先，腾讯/东财/akshare 降级。
+- **Python 主链路**（股息率/市赚率）：按数据类型分源——实时价格/股本/PE/PB 走腾讯，分红（含 TTM，issue #77 后统一）走东财 fhps_detail_em，ROE 走 mootdx F10，行业走 mootdx F10；各字段均带降级链。
 - **可持续性 + JS 静态版**：完全走东财 datacenter，与 JS 端同源、字段映射对齐，`verify_js_vs_python.py` 双端校验。
 
 ---
