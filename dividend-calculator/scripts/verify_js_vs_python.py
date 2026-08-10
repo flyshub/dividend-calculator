@@ -84,7 +84,7 @@ def fetch_tencent_quote(code: str) -> dict:
         "stock_code": code,
         "name": f[1] or None,
         "price": _sf(f, 3),
-        "pe_ttm": _sf(f, 33),
+        "pe_ttm": _sf(f, 39),
         "pb": _sf(f, 46),
         "a_shares": _sf(f, 72),
         "total_shares": _sf(f, 73),
