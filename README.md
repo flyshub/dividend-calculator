@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/badge/Python-3.9%2B-blue)](https://www.python.org/)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPLv3-blue.svg)](#-许可证)
 [![GitHub Pages](https://img.shields.io/badge/GitHub%20Pages-online-brightgreen)](https://flyshub.github.io/dividend-calculator/)
-[![Tests](https://img.shields.io/badge/Tests-398%20Python%20%2B%2083%20JS-green)](dividend-calculator/tests/)
+[![Tests](https://img.shields.io/badge/Tests-409%20Python%20%2B%2083%20JS-green)](dividend-calculator/tests/)
 
 > 📈 **在线体验**（纯前端，无需安装）：<https://flyshub.github.io/dividend-calculator/>
 >
@@ -84,7 +84,7 @@ print(f"市赚率: {result.pr_basic:.3f}")
 ### 运行测试
 
 ```bash
-python -m pytest tests/ -q      # Python 398 个测试
+python -m pytest tests/ -q      # Python 409 个测试
 node --test "site/js/*.test.js" # JS 83 个测试
 python scripts/verify_js_vs_python.py   # 双端一致性验证
 ```
@@ -195,7 +195,7 @@ dividend-calculator/
 
 ## ✅ 质量保证
 
-- **398 Python 单元测试 + 83 JS 单元测试**：财年推断、市赚率公式、可持续性评分、数据源注入、双端对齐、选股器
+- **409 Python 单元测试 + 83 JS 单元测试**：财年推断、市赚率公式、可持续性评分、数据源注入、双端对齐、选股器
 - **跨语言一致性验证**：`scripts/verify_js_vs_python.py` 让 JS 与 Python 消费**相同原始数据**逐字段对比，含可持续性全部字段
 - **CI 自动运行**：GitHub Actions 每次提交跑全部测试（见 `.github/workflows/ci.yml`）
 

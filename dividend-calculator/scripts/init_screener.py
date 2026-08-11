@@ -57,9 +57,7 @@ def load_codes_from_backtest() -> list:
 
 def _existing_codes(cache: ScreenerCache) -> set:
     """screener.db 已有股票代码。"""
-    with cache._conn() as conn:
-        rows = conn.execute("SELECT code FROM stock_list").fetchall()
-    return {r[0] for r in rows}
+    return set(cache.get_stock_codes())
 
 
 def _import_finance_from_backtest(cache) -> int:
@@ -130,10 +128,10 @@ def main():
         print(f"✓ finance_snapshot: {n_fin} 只（backtest.db 导入 ROE）")
 
     # 4. 统计
-    with cache._conn() as conn:
-        n_list = conn.execute("SELECT COUNT(*) FROM stock_list").fetchone()[0]
-        n_quote = conn.execute("SELECT COUNT(*) FROM quote_snapshot").fetchone()[0]
-        n_fin = conn.execute("SELECT COUNT(*) FROM finance_snapshot").fetchone()[0]
+    counts = cache.stats()
+    n_list = counts["stock_list"]
+    n_quote = counts["quote_snapshot"]
+    n_fin = counts["finance_snapshot"]
     print(f"\n补全完成:")
     print(f"  stock_list: {n_list} 只")
     print(f"  quote_snapshot: {n_quote} 只")

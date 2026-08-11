@@ -147,6 +147,39 @@ class ScreenerCache:
                 [(i.code, i.name, i.market, i.updated_at) for i in items],
             )
 
+    def get_stock_codes(self) -> List[str]:
+        """全 A 股票代码（升序）。"""
+        with self._conn() as conn:
+            rows = conn.execute("SELECT code FROM stock_list ORDER BY code").fetchall()
+        return [r[0] for r in rows]
+
+    def get_dividend_codes(
+        self,
+        *,
+        require_real_yield: bool = False,
+        real_yield_min: Optional[float] = None,
+        ttm_yield_min: Optional[float] = None,
+    ) -> List[str]:
+        """有股息快照的股票代码（升序），可按下限过滤（严格 >，NULL 自然排除）。
+
+        require_real_yield: 仅保留 real_yield IS NOT NULL 的行（如预拉全量场景）。
+        """
+        conds: List[str] = []
+        params: List[float] = []
+        if require_real_yield:
+            conds.append("real_yield IS NOT NULL")
+        if real_yield_min is not None:
+            conds.append("real_yield > ?")
+            params.append(real_yield_min)
+        if ttm_yield_min is not None:
+            conds.append("ttm_yield > ?")
+            params.append(ttm_yield_min)
+        where = f" WHERE {' AND '.join(conds)}" if conds else ""
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT code FROM dividend_snapshot{where} ORDER BY code", params).fetchall()
+        return [r[0] for r in rows]
+
     # ---- quote_snapshot ----
 
     def upsert_quote(self, q: QuoteSnapshot):
@@ -317,3 +350,10 @@ class ScreenerCache:
                 total += cur.rowcount
             conn.commit()
         return total
+
+    def stats(self) -> dict:
+        """各快照表行数（供初始化/运维脚本统计）。"""
+        tables = ("stock_list", "quote_snapshot", "dividend_snapshot",
+                  "finance_snapshot", "sustainability_snapshot")
+        with self._conn() as conn:
+            return {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in tables}

@@ -20,6 +20,11 @@ from datetime import date, timedelta
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+# 11 列契约单点化（ADR-0001）：与 src.screening.FIELDS 同源，防止选股器输出列漂移
+from src.screening import FIELDS  # noqa: E402
+
 CSV_DIR = PROJECT_ROOT / "data" / "screener"
 SITE_DIR = PROJECT_ROOT / "site" / "screener"
 STATIC_SITE_DIR = PROJECT_ROOT / "src" / "static" / "screener"
@@ -28,10 +33,8 @@ STATIC_SITE_DIR = PROJECT_ROOT / "src" / "static" / "screener"
 # 90 天覆盖一个完整财报季；git 历史可回滚更早数据。--retention-days 可覆盖。
 RETENTION_DAYS = 90
 
-# CSV 11 列 → JSON 字段（数字列转 float）。两处均与 site/screener.html 的列定义同步
+# CSV 11 列 → JSON 字段（数字列转 float）。列定义来自 src.screening.FIELDS，
 # （screener_daily.yml 每日跑本脚本时，export 会校验 CSV 表头与 FIELDS 一致，防漂移）。
-FIELDS = ["代码", "名称", "TTM股息率%", "真实股息率%", "估值区间", "市赚率PR",
-          "行业", "可持续性", "ROE%", "总市值(亿)", "数据来源"]
 NUMERIC = {"TTM股息率%", "真实股息率%", "市赚率PR", "ROE%", "总市值(亿)"}
 
 

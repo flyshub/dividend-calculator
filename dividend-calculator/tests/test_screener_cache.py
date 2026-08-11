@@ -18,6 +18,7 @@ from src.screener_cache import (
     QuoteSnapshot,
     DividendSnapshot,
     FinanceSnapshot,
+    StockListItem,
     SustainabilitySnapshot,
 )
 
@@ -39,6 +40,67 @@ class TestSchema:
         # 缓存独立于 backtest.db（data/screener.db 路径可配）
         c = ScreenerCache(tmp_path / "custom.db")
         assert c.db_path.name == "custom.db"
+
+
+class TestStockList:
+    def test_get_stock_codes_ordered(self, cache):
+        cache.upsert_stock_list([
+            StockListItem(code="600987", name="航民股份", market="sh"),
+            StockListItem(code="600900", name="长江电力", market="sh"),
+        ])
+        assert cache.get_stock_codes() == ["600900", "600987"]
+
+    def test_get_stock_codes_empty(self, cache):
+        assert cache.get_stock_codes() == []
+
+
+class TestDividendCodes:
+    def _seed(self, cache):
+        rows = [
+            ("600900", 6.0, 6.5),
+            ("600987", 7.0, 7.5),
+            ("600919", 4.0, 4.5),
+            ("600887", None, 6.0),   # real_yield NULL
+            ("600036", 0.0, 0.0),    # real_yield 0（不 >0）
+        ]
+        for code, real, ttm in rows:
+            cache.upsert_dividend(DividendSnapshot(
+                code=code, real_yield=real, ttm_yield=ttm,
+                real_yield_year="2025", ttm_period="p", dividend_source="m"))
+
+    def test_all_codes_ordered(self, cache):
+        self._seed(cache)
+        assert cache.get_dividend_codes() == ["600036", "600887", "600900", "600919", "600987"]
+
+    def test_require_real_yield(self, cache):
+        self._seed(cache)
+        codes = cache.get_dividend_codes(require_real_yield=True)
+        assert "600887" not in codes  # real_yield NULL 排除
+        assert "600036" in codes      # real_yield 0 保留（仅 IS NOT NULL）
+
+    def test_real_yield_min_strict(self, cache):
+        self._seed(cache)
+        codes = cache.get_dividend_codes(real_yield_min=5.0, ttm_yield_min=5.0)
+        assert codes == ["600900", "600987"]  # 严格 >，600919 卡在 4.x，600036 为 0
+
+    def test_real_yield_min_zero_excludes_null_and_zero(self, cache):
+        self._seed(cache)
+        codes = cache.get_dividend_codes(real_yield_min=0.0)
+        assert codes == ["600900", "600919", "600987"]  # >0：排除 NULL 与 0
+
+
+class TestStats:
+    def test_counts_after_upserts(self, cache):
+        cache.upsert_stock_list([StockListItem(code="600900", name="长江电力", market="sh")])
+        cache.upsert_quote(QuoteSnapshot(code="600900", price=10, pe_ttm=8.0, pb=1.0,
+                                         total_shares=1e9, market_cap=1e10,
+                                         quote_time="", source="腾讯"))
+        stats = cache.stats()
+        assert stats["stock_list"] == 1
+        assert stats["quote_snapshot"] == 1
+        assert stats["dividend_snapshot"] == 0
+        assert stats["finance_snapshot"] == 0
+        assert stats["sustainability_snapshot"] == 0
 
 
 class TestQuoteUpsert:
