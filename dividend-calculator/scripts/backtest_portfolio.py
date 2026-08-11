@@ -20,6 +20,7 @@ from datetime import date, timedelta
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from backtest_engine import BacktestLookup, run_backtest
+from src.backtest_factors import ttm_dividend_yield
 
 DB_PATH = "data/backtest.db"
 
@@ -78,13 +79,16 @@ def after_tax_dividend_contrib(
 def portfolio_total_return(
     lookup, codes: Sequence[str], build_day: date, settle_day: date,
     cost: float = COST, tax_override: Optional[float] = None,
+    weights: Optional[Sequence[float]] = None,
 ) -> Optional[float]:
-    """等权组合区间总收益（价格收益 + 税后分红复投 - 双边成本）。
+    """组合区间总收益（价格收益 + 税后分红复投 - 双边成本）。
 
     tax_override: 非 None 时所有分红按此税率计算（hfq 无税对照用 0.0）。
+    weights: 个股权重序列（与 codes 等长，归一化后应用）；None = 等权。
     """
     rets = []
-    for code in codes:
+    wts = []
+    for i, code in enumerate(codes):
         pb = lookup.price(code, build_day)
         ps = lookup.price(code, settle_day)
         if not pb or not ps:
@@ -93,9 +97,12 @@ def portfolio_total_return(
         div_contrib = after_tax_dividend_contrib(
             lookup, code, build_day, settle_day, tax_override=tax_override)
         rets.append((1.0 + price_ret) * (1.0 + div_contrib) - 1.0)
+        wts.append(weights[i] if weights is not None else 1.0)
     if not rets:
         return None
-    return sum(rets) / len(rets) - 2.0 * cost
+    s = sum(wts)
+    wts = [w / s for w in wts] if s > 0 else [1.0 / len(wts)] * len(wts)
+    return sum(r * w for r, w in zip(rets, wts)) - 2.0 * cost
 
 
 def top_n_codes(lookup, codes: Sequence[str], T: date, n: int) -> List[str]:
@@ -130,13 +137,34 @@ def top_n_codes(lookup, codes: Sequence[str], T: date, n: int) -> List[str]:
     return [c for _, c in scored[:n]]
 
 
+def _compute_weights(lookup, codes: Sequence[str], T: date,
+                     weighting: str) -> Optional[List[float]]:
+    """按加权方式计算个股权重序列。
+
+    weighting: "equal" = None（让 portfolio_total_return 走等权分支）
+               "cap" = 当日价格 × 总股本（total_shares=1.0 时退化为等价价格加权）
+               "yield" = ttm 股息率（高分红股权重高）
+    """
+    if weighting == "equal":
+        return None
+    if weighting == "cap":
+        return [(lookup.price(c, T) or 0.0) * (lookup.total_shares(c, T) or 0.0)
+                for c in codes]
+    if weighting == "yield":
+        return [ttm_dividend_yield(c, T, lookup) or 0.0 for c in codes]
+    return None
+
+
 def run_portfolio(
     lookup, engine_result: dict, top_n: Optional[int] = None,
     cost: float = COST, tax_override: Optional[float] = None,
+    weighting: str = "equal",
 ) -> dict:
-    """对每档每季度：等权（或 TopN）总收益 + 换手率。
+    """对每档每季度：等权（或 TopN/加权）总收益 + 换手率。
 
     tax_override: 非 None 时所有分红按此税率计算（hfq 无税上界对照用 0.0）。
+    weighting: "equal"|"cap"|"yield"（市值加权需真实 total_shares，
+        当前 1.0 近似下退化为价格加权，会在报告标注近似）。
     """
     rebalance = engine_result["rebalance_dates"]
     pools = engine_result["pools"]
@@ -161,8 +189,9 @@ def run_portfolio(
         for k in layers:
             codes = pools[k][i]
             sel = top_n_codes(lookup, codes, T, top_n) if top_n and codes else codes
+            wts = _compute_weights(lookup, sel, T, weighting) if sel else None
             r = portfolio_total_return(lookup, sel, bd, settle, cost,
-                                       tax_override=tax_override)
+                                       tax_override=tax_override, weights=wts)
             quarterly[k].append(r)
             cur = set(sel)
             if prev_pool[k]:
@@ -246,6 +275,55 @@ def win_rate(rets: Sequence[Optional[float]]) -> Optional[float]:
     return sum(1 for r in vs if r > 0) / len(vs)
 
 
+def downside_risk(rets: Sequence[Optional[float]], rf: float = 0.02) -> Optional[float]:
+    """下行风险（仅对负偏离求标准差，年化）。"""
+    vs = [r for r in rets if r is not None]
+    if not vs:
+        return None
+    target = rf / 4.0
+    downside = [(v - target) for v in vs if v < target]
+    if not downside:
+        return 0.0
+    var = sum(d * d for d in downside) / len(vs)
+    return math.sqrt(var) * math.sqrt(4.0)
+
+
+def profit_loss_ratio(rets: Sequence[Optional[float]]) -> Optional[float]:
+    """盈亏比 = 平均盈利期收益 / 平均亏损期损失（绝对值）。"""
+    vs = [r for r in rets if r is not None]
+    gains = [r for r in vs if r > 0]
+    losses = [-r for r in vs if r < 0]  # 取正
+    if not gains or not losses:
+        return None
+    avg_gain = sum(gains) / len(gains)
+    avg_loss = sum(losses) / len(losses)
+    return avg_gain / avg_loss if avg_loss > 0 else None
+
+
+def positive_years(rets: Sequence[Optional[float]],
+                   rebalance_dates: Sequence[date]) -> int:
+    """年度正收益年数（按日历年聚合季度收益，年收益 >0 即记）。"""
+    by_year: Dict[int, float] = {}
+    for r, d in zip(rets, rebalance_dates):
+        if r is None:
+            continue
+        by_year.setdefault(d.year, 1.0)
+        by_year[d.year] *= (1.0 + r)
+    return sum(1 for v in by_year.values() if v > 1.0)
+
+
+def avg_pool_size(pools: Dict[str, List[List[str]]], layer: str) -> float:
+    """季均入选只数（layer 层）。"""
+    sizes = [len(codes) for codes in pools.get(layer, []) if codes is not None]
+    return sum(sizes) / len(sizes) if sizes else 0.0
+
+
+def avg_turnover(turnover_series: Sequence[Optional[float]]) -> Optional[float]:
+    """平均换手率（跳过首期 None）。"""
+    vs = [t for t in turnover_series if t is not None]
+    return sum(vs) / len(vs) if vs else None
+
+
 def performance_metrics(quarterly: Dict[str, List[Optional[float]]]) -> dict:
     out = {}
     for k, rets in quarterly.items():
@@ -263,6 +341,8 @@ def performance_metrics(quarterly: Dict[str, List[Optional[float]]]) -> dict:
             "sortino": sortino(rets),
             "calmar": calmar(rets),
             "win_rate": win_rate(rets),
+            "downside_risk": downside_risk(rets),
+            "profit_loss_ratio": profit_loss_ratio(rets),
         }
     return out
 

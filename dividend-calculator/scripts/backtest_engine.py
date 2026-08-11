@@ -210,19 +210,32 @@ class BacktestLookup:
 # 调仓日历与收益区间
 # ---------------------------------------------------------------------------
 
-def quarterly_rebalance_dates(trading_days: List[date],
-                              start: date, end: date) -> List[date]:
-    """季度末交易日序列：每年 3/6/9/12 月的最后交易日。"""
+def rebalance_dates(trading_days: List[date], start: date, end: date,
+                    freq: str = "quarterly") -> List[date]:
+    """调仓日序列：按频率取每月/季末/半年末的最后交易日。
+
+    freq: "monthly" | "quarterly" | "semiannual"。
+    """
+    months = {
+        "monthly": (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12),
+        "quarterly": (3, 6, 9, 12),
+        "semiannual": (6, 12),
+    }[freq]
     out: List[date] = []
-    y0, y1 = start.year, end.year
-    for y in range(y0, y1 + 1):
-        for m in (3, 6, 9, 12):
+    for y in range(start.year, end.year + 1):
+        for m in months:
             if (y, m) < (start.year, start.month) or (y, m) > (end.year, end.month):
                 continue
             month_days = [d for d in trading_days if d.year == y and d.month == m]
             if month_days:
                 out.append(month_days[-1])
     return out
+
+
+def quarterly_rebalance_dates(trading_days: List[date],
+                              start: date, end: date) -> List[date]:
+    """季度末交易日序列（向后兼容）。"""
+    return rebalance_dates(trading_days, start, end, freq="quarterly")
 
 
 def build_day_after(trading_days: List[date], t: date,
@@ -251,19 +264,25 @@ def compute_all_factors(code: str, T: date, lookup) -> dict:
     }
 
 
-def funnel_layer(factors: dict) -> int:
+def funnel_layer(factors: dict,
+                 yield_thr: float = TTM_YIELD_THRESHOLD,
+                 real_yield_thr: float = REAL_YIELD_THRESHOLD,
+                 pr_thr: float = PR_THRESHOLD) -> int:
     """四层漏斗逐层判定，返回通过层数 0-4。
 
-    L2: TTM > 5 且 真实 > 5；L3: 基础 PR ≤ 1；L4: verdict ∈ {可持续, 偏弱}。
+    L2: TTM > yield_thr 且 真实 > real_yield_thr；
+    L3: 基础 PR ≤ pr_thr；L4: verdict ∈ {可持续, 偏弱}。
     任一层不通过即短路（对齐现网筛选）。
+
+    阈值参数化（T6 参数敏感性扫描用），默认 = 模块常量（向后兼容）。
     """
     if factors["real_yield"] is None or factors["ttm_yield"] is None:
         return 0
-    if not (factors["ttm_yield"] > TTM_YIELD_THRESHOLD
-            and factors["real_yield"] > REAL_YIELD_THRESHOLD):
+    if not (factors["ttm_yield"] > yield_thr
+            and factors["real_yield"] > real_yield_thr):
         return 1  # 过 L1 未过 L2
     prf = factors["pr"]
-    if prf.pr is None or prf.pr > PR_THRESHOLD:
+    if prf.pr is None or prf.pr > pr_thr:
         return 2
     sus = factors["sustainability"]
     if sus.verdict not in SUSTAINABLE_VERDICTS:
@@ -300,16 +319,23 @@ def run_backtest(lookup,
                  start: date = date(2013, 1, 1),
                  end: date = date(2026, 8, 10),
                  build_offset: int = 1,
-                 filter_fn=None) -> dict:
+                 filter_fn=None,
+                 freq: str = "quarterly",
+                 yield_thr: float = TTM_YIELD_THRESHOLD,
+                 real_yield_thr: float = REAL_YIELD_THRESHOLD,
+                 pr_thr: float = PR_THRESHOLD) -> dict:
     """分层回测主流程。返回五档组合的季度收益与逐层增量超额。
 
     build_offset: 调仓日 T 之后第 N 个交易日建仓（默认 1 = T+1；稳健性检验用 T+5）。
     filter_fn: Optional[(codes, T) -> codes] 按每个调仓日 T 逐期过滤候选池
         （base/l2/l3/l4/full 每层均过滤），在 portfolio_return 之前应用，使过滤
         真正进入收益链路（T6 稳健性变体用）。默认 None 不过滤。
+    freq: 调仓频率 "monthly"|"quarterly"|"semiannual"（T6 参数敏感性扫描用，
+        默认 quarterly 向后兼容）。
+    yield_thr/real_yield_thr/pr_thr: 漏斗阈值（T6 参数敏感性扫描用）。
     """
     days = lookup.trading_days
-    rebalance = quarterly_rebalance_dates(days, start, end)
+    rebalance = rebalance_dates(days, start, end, freq=freq)
     all_codes = sorted(lookup.prices.keys())
 
     # 每季度入选池：layer_key -> [codes]，layer_key: base/l2/l3/l4/full
@@ -329,7 +355,7 @@ def run_backtest(lookup,
 
         for code in all_codes:
             factors = compute_all_factors(code, T, lookup)
-            layer = funnel_layer(factors)
+            layer = funnel_layer(factors, yield_thr, real_yield_thr, pr_thr)
             layer_buckets["base"].append(code)
             if layer >= 2:
                 layer_buckets["l2"].append(code)

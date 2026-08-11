@@ -35,6 +35,7 @@ if str(_ROOT) not in sys.path:
 # 同目录模块
 from backtest_engine import BacktestLookup, run_backtest  # noqa: E402
 from backtest_portfolio import (  # noqa: E402
+    avg_turnover,
     load_benchmark,
     performance_metrics,
     run_portfolio,
@@ -146,16 +147,21 @@ def section_portfolio_perf(eng: dict, lookup: BacktestLookup, conn) -> str:
         m = performance_metrics({key: rets})[key]
         rows.append([label, _pct(m["cumulative"]), _pct(m["annualized"]),
                      f"{_num(m['volatility'])}%", _num(m['sharpe']),
-                     _pct(m["max_drawdown"]), _pct(m["win_rate"])])
+                     _pct(m["max_drawdown"]), _pct(m["win_rate"]),
+                     _num(m.get("downside_risk")), _num(m.get("profit_loss_ratio")),
+                     _num(avg_turnover(port["turnover"].get(key, [])))])
 
     for name, rets, label in [("中证红利全收益", bench_hz, "bench_csi_div"),
                               ("沪深300全收益", bench_hs, "bench_csi300")]:
         m = performance_metrics({label: rets})[label]
         rows.append([name, _pct(m["cumulative"]), _pct(m["annualized"]),
                      f"{_num(m['volatility'])}%", _num(m['sharpe']),
-                     _pct(m["max_drawdown"]), _pct(m["win_rate"])])
+                     _pct(m["max_drawdown"]), _pct(m["win_rate"]),
+                     _num(m.get("downside_risk")), _num(m.get("profit_loss_ratio")),
+                     "—"])
 
-    return _table(["组合", "累计收益", "年化", "年波动", "夏普", "最大回撤", "胜率"], rows) + "\n\n"
+    return _table(["组合", "累计", "年化", "波动", "夏普", "回撤",
+                   "胜率", "下行风险", "盈亏比", "换手率"], rows) + "\n\n"
 
 
 def section_hfq_comparison(eng: dict, lookup: BacktestLookup) -> str:
@@ -221,6 +227,33 @@ def section_robustness(lookup: BacktestLookup, conn) -> str:
     return body
 
 
+def section_sensitivity(lookup: BacktestLookup, eng: dict) -> str:
+    """§3.2 参数敏感性扫描（每维 3 档单变）。"""
+    from backtest_sensitivity import (
+        scan_freq, scan_holdings, scan_pr_threshold, scan_weighting,
+        scan_yield_threshold, _table,
+    )
+    out = ["参数敏感性扫描（其他维度固定为 baseline）：\n\n"]
+    out.append(_table(["股息率阈值", "累计", "年化", "夏普", "回撤", "期数"],
+                      scan_yield_threshold(lookup)))
+    out.append("\n")
+    out.append(_table(["PR 阈值", "累计", "年化", "夏普", "回撤", "期数"],
+                      scan_pr_threshold(lookup)))
+    out.append("\n")
+    out.append(_table(["调仓频率", "累计", "年化", "夏普", "回撤", "期数"],
+                      scan_freq(lookup)))
+    out.append("\n")
+    out.append(_table(["持仓", "累计", "年化", "夏普", "回撤", "期数"],
+                      scan_holdings(lookup, eng)))
+    out.append("\n")
+    out.append(_table(["加权", "累计", "年化", "夏普", "回撤", "期数"],
+                      scan_weighting(lookup, eng)))
+    out.append("\n")
+    out.append("> 备注：full 层样本小（每季度 5-7 只），Top10/Top20 退化为全池；")
+    out.append("市值加权在 total_shares=1.0 近似下退化为价格加权。\n")
+    return "".join(out)
+
+
 def section_conclusion(eng: dict) -> str:
     """§ 结论与限制（诚实标注）。"""
     inc = eng["incremental_excess"]
@@ -283,6 +316,9 @@ def generate_report(db_path: str, out_path: str) -> None:
 
         "## §3.1 hfq 无税上界对照\n\n",
         section_hfq_comparison(eng, lookup),
+
+        "## §3.2 参数敏感性扫描\n\n",
+        section_sensitivity(lookup, eng),
 
         "## §4 稳健性检验\n\n",
         section_robustness(lookup, conn),
