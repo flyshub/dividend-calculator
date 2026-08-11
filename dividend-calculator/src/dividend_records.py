@@ -127,7 +127,7 @@ def _date_str(value) -> str:
 def _fhps_report_date(value) -> Optional[str]:
     """fhps 报告期 → "YYYY-MM-DD"（parse_dividend_rows 只取年月，日补 01）；无法解析 → None。
 
-    兼容 datetime.date/datetime/Timestamp 与 "YYYY-MM-DD" 字符串（_parse_fhps_detail 同语义）。
+    兼容 datetime.date/datetime/Timestamp 与 "YYYY-MM-DD" 字符串（akshare 报告期两种形态）。
     """
     if value is None:
         return None
@@ -149,15 +149,15 @@ def summarize_fhps_df(fhps_df=None, source: str = "akshare fhps_detail_em",
                       as_of_date=None) -> DividendSummary:
     """akshare stock_fhps_detail_em DataFrame → DividendSummary。
 
-    过滤语义与旧 dividend._parse_fhps_detail 完全一致：现金分红比例 notna 且 > 0、
-    方案进度含「实施」且不含「未实施/停止/否决/预披露」；报告期取年月后统一交给
+    过滤语义与 JS parseDividendRecords T5 规则一致（现金分红比例 notna 且 > 0、
+    方案进度含「实施」且不含「未实施/停止/否决/预披露」）；报告期取年月后统一交给
     parse_dividend_rows 判定财年（classify_fiscal_report 单一实现，month==12 → 年报）。
     记录含除权除息日/预案公告日（可空串），供 TTM 与走势图使用。
     """
     if fhps_df is None or fhps_df.empty:
         return _summarize([], None, source, as_of_date)
 
-    # 过滤语义与 dividend._parse_fhps_detail 逐条一致（排除一切未落地预案）
+    # 过滤：排除一切未落地预案（与 JS parseDividendRecords T5 规则逐条一致）
     valid = fhps_df[
         fhps_df['现金分红-现金分红比例'].notna()
         & (fhps_df['现金分红-现金分红比例'] > 0)
@@ -192,7 +192,7 @@ def _cninfo_report_date(text) -> Optional[str]:
 
     实测格式（600036/600900 实地验证）："2024年报" / "2025半年报" / "2025三季报"；
     兼容日期格式（"2025-06-30"）。文本映射月份：年报 → 12，半年报/中报/季报/
-    无法判定 → 6（非 12 → 中期分配，与旧 utils.is_annual_report 语义一致）。
+    无法判定 → 6（非 12 → 中期分配）。
     无年份 → None（跳过）。
     """
     if text is None:
@@ -221,10 +221,9 @@ def summarize_cninfo_df(dividend_df=None, source: str = "akshare cninfo",
                         as_of_date=None) -> DividendSummary:
     """akshare stock_dividend_cninfo DataFrame → DividendSummary。
 
-    语义与旧 utils.parse_dividend_df（report_col="报告时间"、scheme_col=
-    "实施方案分红说明"、payout_col="派息比例"）一致：派息比例 > 0 才计入现金分红；
+    语义：派息比例 > 0 才计入现金分红（对应 cninfo 列"派息比例"，文本报告时间取年份）；
     报告时间取年份 + 月份判定统一走 parse_dividend_rows 单一实现（文本"年报"字样
-    → 12 月，与旧 is_annual_report 语义对齐；"半年报/中报/三季报" → 中期分配）。
+    → 12 月；"半年报/中报/三季报" → 中期分配）。
     记录含除权日（除权日列，可空串），供 TTM 使用。
     """
     if dividend_df is None or dividend_df.empty:
@@ -238,7 +237,7 @@ def summarize_cninfo_df(dividend_df=None, source: str = "akshare cninfo",
         try:
             dp10 = float(row.get("派息比例"))
         except (TypeError, ValueError):
-            dp10 = float("nan")  # 与旧 parse_dividend_df 的 to_numeric(errors="coerce") 同语义
+            dp10 = float("nan")  # 非数值（含缺失）→ NaN，由下方 >0 过滤排除
         if dp10 != dp10 or dp10 <= 0:  # NaN 防护（股改分红等无派息记录）
             continue
         rows.append({

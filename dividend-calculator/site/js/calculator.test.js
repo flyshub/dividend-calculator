@@ -103,20 +103,6 @@ test('classifyIndustry 优先级科技>成长', () => {
   assert.ok(!r.warning.includes('成长行业'));
 });
 
-// ---- inferFiscalYear（对齐 tests/test_fiscal_year.py）----
-test('inferFiscalYear 3-8月除权→上年度年报', () => {
-  assert.deepEqual(Calc.inferFiscalYear(2024, 3), { year: 2023, isAnnual: true });
-  assert.deepEqual(Calc.inferFiscalYear(2024, 8), { year: 2023, isAnnual: true });
-});
-test('inferFiscalYear 9-12月除权→当年度中报', () => {
-  assert.deepEqual(Calc.inferFiscalYear(2024, 9), { year: 2024, isAnnual: false });
-  assert.deepEqual(Calc.inferFiscalYear(2024, 12), { year: 2024, isAnnual: false });
-});
-test('inferFiscalYear 1-2月除权→上年度中报', () => {
-  assert.deepEqual(Calc.inferFiscalYear(2024, 1), { year: 2023, isAnnual: false });
-  assert.deepEqual(Calc.inferFiscalYear(2024, 2), { year: 2023, isAnnual: false });
-});
-
 // ---- calculateDividendYield ----
 test('calculateDividendYield 三档税率', () => {
   const [a, b, c] = Calc.calculateDividendYield(100, 1000);

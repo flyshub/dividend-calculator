@@ -171,7 +171,7 @@ def compute_python(raw: dict) -> dict:
 
     # 1. 分红（#99）：对账对象 = dividend_records 模块——东财行 → summarize_dividend_rows
     #    （财年判定单一实现 classify_fiscal_report，month==12=年报）→ _summary_to_dividend
-    #    换算 total_div/year/details/explanation。旧 _parse_fhps_detail 已退役，不再引用。
+    #    换算 total_div/year/details/explanation（旧 _parse_fhps_detail 已删除，#100）。
     summary = summarize_dividend_rows(raw["dividend_rows"], source="东财")
     if summary.latest_year and summary.fiscal_total_per_10 > 0:
         total_div, year, details, expl = _summary_to_dividend(summary, stock_info)

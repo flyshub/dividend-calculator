@@ -191,7 +191,7 @@ def _fhps_df():
          "除权除息日": "2025-07-01", "预案公告日": "2025-04-30"},
         {"报告期": "2025-06-30", "方案进度": "实施分配", "现金分红-现金分红比例": 2.0,
          "除权除息日": "2025-12-01", "预案公告日": "2025-08-30"},
-        # 预披露 / 未实施预案 → 应过滤（对齐 _parse_fhps_detail）
+        # 预披露 / 未实施预案 → 应过滤（排除未落地预案，对齐 JS T5）
         {"报告期": "2025-12-31", "方案进度": "预披露", "现金分红-现金分红比例": 7.33,
          "除权除息日": "2026-07-15", "预案公告日": "2026-04-30"},
         {"报告期": "2025-12-31", "方案进度": "股东大会决议通过", "现金分红-现金分红比例": 8.0,
@@ -200,7 +200,7 @@ def _fhps_df():
 
 
 def test_summarize_fhps_df():
-    """fhps adapter：过滤预披露/未实施，财年/标签/除权日映射与 _parse_fhps_detail 一致。"""
+    """fhps adapter：过滤预披露/未实施，财年/标签/除权日映射正确。"""
     from src.dividend_records import summarize_fhps_df
     s = summarize_fhps_df(_fhps_df(), as_of_date=date(2026, 7, 31))
     assert {r.report_time for r in s.records} == {"2024年报", "2025中期分配"}
@@ -211,23 +211,6 @@ def test_summarize_fhps_df():
     assert by_time["2024年报"].plan_notice_date == "2025-04-30"
     assert s.ttm_total_per_10 == pytest.approx(2.0)  # 窗口内仅 2025-12-01（2025-07-01 在窗口外）
     assert s.source == "akshare fhps_detail_em"
-
-
-def test_summarize_fhps_df_matches_old_parse():
-    """迁移后主口径与 _parse_fhps_detail 的 year/总额一致（#97 回归锚）。"""
-    import pandas as pd
-    from src.dividend import _parse_fhps_detail
-    from src.datasource.base import StockInfo
-    from src.dividend_records import summarize_fhps_df
-    info = StockInfo(stock_code="600036", current_price=38.80, total_shares=2.522e10)
-    total, year, details, _ = _parse_fhps_detail(_fhps_df(), info)
-    s = summarize_fhps_df(_fhps_df())
-    assert year == s.latest_year == "2024"
-    assert total == pytest.approx(s.fiscal_total_per_10 / 10 * info.total_shares)
-    # 旧 details 仅含目标财年记录；新模块按 latest_year 过滤后应一致
-    year_records = [r for r in s.records if r.report_time.startswith(s.latest_year)]
-    assert {d.report_time for d in details} == {r.report_time for r in year_records}
-    assert {d.dividend_per_10 for d in details} == {r.dividend_per_10 for r in year_records}
 
 
 def test_summarize_fhps_df_only_interim():
@@ -244,6 +227,25 @@ def test_summarize_fhps_df_only_interim():
     assert s.latest_year is None
     assert s.fiscal_total_per_10 == 0.0
     assert s.ttm_total_per_10 == pytest.approx(2.0)
+
+
+def test_summarize_fhps_df_combined_keywords_filtered():
+    """组合关键词「实施分配（未实施）」→ 过滤（T5 规则：含"实施"且不含"未实施"，
+    双端同构；该组合是唯一能同时命中正反两词、易被简单 contains('实施') 误收的场景）。"""
+    import pandas as pd
+    from src.dividend_records import summarize_fhps_df
+    df = pd.DataFrame([
+        # 同时含"实施"与"未实施" → 必须过滤
+        {"报告期": "2025-12-31", "方案进度": "实施分配（未实施）", "现金分红-现金分红比例": 5.0,
+         "除权除息日": "2026-07-15", "预案公告日": "2026-04-30"},
+        # 正常实施 → 保留（对照组，防过滤逻辑过宽）
+        {"报告期": "2024-12-31", "方案进度": "实施分配", "现金分红-现金分红比例": 5.0,
+         "除权除息日": "2025-07-01", "预案公告日": "2025-04-30"},
+    ])
+    s = summarize_fhps_df(df, as_of_date=date(2026, 7, 31))
+    assert {r.report_time for r in s.records} == {"2024年报"}
+    assert s.latest_year == "2024"
+    assert s.fiscal_total_per_10 == pytest.approx(5.0)
 
 
 def _cninfo_df():
@@ -277,21 +279,6 @@ def test_summarize_cninfo_df():
     assert by_time["2025年报"].ex_dividend_date == "2026-07-10"
     assert s.ttm_total_per_10 == pytest.approx(10.13 + 10.03)  # 窗口内 2026-01-16 + 2026-07-10
     assert s.source == "akshare cninfo"
-
-
-def test_summarize_cninfo_df_matches_old_parse():
-    """迁移后与旧 utils.parse_dividend_df 的 year/总额一致（#97 回归锚）。"""
-    from src.utils import parse_dividend_df
-    from src.datasource.base import StockInfo
-    from src.dividend_records import summarize_cninfo_df
-    info = StockInfo(stock_code="600036", current_price=38.80, total_shares=2.522e10)
-    total, year, details, _ = parse_dividend_df(
-        _cninfo_df(), info, report_col="报告时间", scheme_col="实施方案分红说明",
-        payout_col="派息比例",
-    )
-    s = summarize_cninfo_df(_cninfo_df())
-    assert year == s.latest_year == "2025"
-    assert total == pytest.approx(s.fiscal_total_per_10 / 10 * info.total_shares)
 
 
 def test_cninfo_quarterly_labeled_interim():

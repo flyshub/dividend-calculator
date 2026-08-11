@@ -113,7 +113,7 @@ N 因子 = 50% / 股利支付率，区间 [1.0, 2.0]（支付率 ≥50% → N=1.
 
 ### 财年判断
 
-**仅 12 月报告期 = 完整财年年报**（Python `_parse_fhps_detail` 与 JS `parseDividendRecords` 双端一致，见 #37 M4）：其余月份报告期（3/4 月 Q1、6/9 月半年报）均为**中期分配**，不构成完整财年。季度分红监管扩散下，防御性收紧为 `month == 12`。
+**仅 12 月报告期 = 完整财年年报**（单一实现 `sustainability.classify_fiscal_report`，Python 全链路经 `dividend_records.summarize_dividend_rows`，JS `parseDividendRecords` 同规则，双端一致，见 #37 M4）：其余月份报告期（3/4 月 Q1、6/9 月半年报）均为**中期分配**，不构成完整财年。季度分红监管扩散下，防御性收紧为 `month == 12`。
 
 ## 数据源架构（mootdx + 腾讯双引擎）
 
