@@ -132,7 +132,13 @@ class BacktestLookup:
         self._maybe_load_aux()
 
     def _maybe_load_aux(self) -> None:
-        """补拉 total_shares（腾讯 Index 73）与 industry（东财），存 DB 复用。"""
+        """从 DB 读 total_shares 与 industry（若表存在）。
+
+        注意：**不补拉**——仅在 DB 已建相应表时加载。当前 DB 无 total_shares/
+        industry 表（详见 #165/#166），故 shares/industry 为空，total_shares()
+        回退 1.0（每股口径近似，详见 total_shares docstring）。真补拉是 #165/#166
+        的数据工程任务。
+        """
         c = self.conn
         has_shares = c.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='total_shares'"
@@ -166,11 +172,15 @@ class BacktestLookup:
         return self._latest(self.pes.get(code, []), asof)
 
     def total_shares(self, code: str, asof: date) -> Optional[float]:
-        """总股本。DB 无 total_shares 表时返回 1.0（每股口径近似）。
+        """总股本（虚构占位，待真实值入库，详见 #165）。
 
-        数学等价性：真实股息率 = 分红总额/总市值 ≡ 每股分红/股价
-        （分子分母同乘 shares 约分），所以股息率计算不受影响。
-        仅 sustainability 支付率维度受影响（标注近似，详见 #165）。
+        当前 DB 无 total_shares 表，self.shares 为空 → 返回 1.0。
+        1.0 是**虚构占位值**，违反数据铁律 #2「数据必须有真实来源」——已知限制，
+        待 #165 全量拉取腾讯 Index 73 真实值入库后修复。
+
+        股息率计算数学等价（每股法 ≡ 总额法，分子分母同乘 shares 约分），故
+        real/ttm yield 不受影响；sustainability 支付率（dps×1.0 / net_profit）
+        会失真——已在报告 §1 如实标注。
         """
         return self.shares.get(code, 1.0)
 

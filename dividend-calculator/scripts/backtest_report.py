@@ -35,9 +35,11 @@ if str(_ROOT) not in sys.path:
 # 同目录模块
 from backtest_engine import BacktestLookup, run_backtest  # noqa: E402
 from backtest_portfolio import (  # noqa: E402
+    avg_pool_size,
     avg_turnover,
     load_benchmark,
     performance_metrics,
+    positive_years,
     run_portfolio,
 )
 from backtest_robustness import (  # noqa: E402
@@ -103,9 +105,10 @@ def section_data_scope(conn, lookup: BacktestLookup) -> str:
 
 
 def section_layered_incremental(eng: dict) -> str:
-    """§ 分层增量超额（核心交付）。"""
+    """§ 分层增量超额（核心交付，#87 要求年化+累计两层）。"""
     inc = eng["incremental_excess"]
     cum_ret = eng["cumulative_returns"]
+    n_q = eng.get("n_quarters") or len(eng.get("rebalance_dates", []))
     rows = []
     labels = [
         ("基线 全A 等权", "base"),
@@ -114,20 +117,29 @@ def section_layered_incremental(eng: dict) -> str:
         ("+L4 可持续性", "l4"),
         ("全漏斗", "full"),
     ]
+
+    def _ann(cum):
+        """累计 → 年化（按季度数复利）。None → None。"""
+        if cum is None or n_q <= 0:
+            return None
+        return (1.0 + cum) ** (4.0 / n_q) - 1.0
+
     for label, key in labels:
         cr = cum_ret.get(key)
-        rows.append([label, _pct(cr)])
-    out = _table(["组合", "累计收益"], rows) + "\n\n"
+        rows.append([label, _pct(cr), _pct(_ann(cr))])
+    out = _table(["组合", "累计收益", "年化"], rows) + "\n\n"
 
     inc_labels = [
         ("+L2 vs 基线", "l2_over_base"),
         ("+L3 vs +L2", "l3_over_l2"),
         ("+L4 vs +L3", "l4_over_l3"),
         ("全漏斗 vs +L4", "full_over_l4"),
+        ("全漏斗 vs 基线", "full_over_base"),
     ]
-    inc_rows = [[label, _pct(inc.get(k))] for label, k in inc_labels]
-    out += "**逐层增量超额（累计）：**\n\n"
-    out += _table(["增量", "累计超额"], inc_rows) + "\n\n"
+    inc_rows = [[label, _pct(inc.get(k)), _pct(_ann(inc.get(k)) if inc.get(k) is not None else None)]
+                for label, k in inc_labels]
+    out += "**逐层增量超额：**\n\n"
+    out += _table(["增量", "累计超额", "年化超额"], inc_rows) + "\n\n"
     return out
 
 
@@ -149,7 +161,9 @@ def section_portfolio_perf(eng: dict, lookup: BacktestLookup, conn) -> str:
                      f"{_num(m['volatility'])}%", _num(m['sharpe']),
                      _pct(m["max_drawdown"]), _pct(m["win_rate"]),
                      _num(m.get("downside_risk")), _num(m.get("profit_loss_ratio")),
-                     _num(avg_turnover(port["turnover"].get(key, [])))])
+                     _num(avg_turnover(port["turnover"].get(key, []))),
+                     str(positive_years(rets, rebalance)),
+                     f"{avg_pool_size(eng['pools'], key):.1f}"])
 
     for name, rets, label in [("中证红利全收益", bench_hz, "bench_csi_div"),
                               ("沪深300全收益", bench_hs, "bench_csi300")]:
@@ -158,10 +172,10 @@ def section_portfolio_perf(eng: dict, lookup: BacktestLookup, conn) -> str:
                      f"{_num(m['volatility'])}%", _num(m['sharpe']),
                      _pct(m["max_drawdown"]), _pct(m["win_rate"]),
                      _num(m.get("downside_risk")), _num(m.get("profit_loss_ratio")),
-                     "—"])
+                     "—", str(positive_years(rets, rebalance)), "—"])
 
     return _table(["组合", "累计", "年化", "波动", "夏普", "回撤",
-                   "胜率", "下行风险", "盈亏比", "换手率"], rows) + "\n\n"
+                   "胜率", "下行风险", "盈亏比", "换手率", "正收益年", "季均只数"], rows) + "\n\n"
 
 
 def section_hfq_comparison(eng: dict, lookup: BacktestLookup) -> str:
@@ -192,7 +206,7 @@ def section_hfq_comparison(eng: dict, lookup: BacktestLookup) -> str:
 
 
 def section_robustness(lookup: BacktestLookup, conn) -> str:
-    """§ 稳健性检验（四变体）。
+    """§ 稳健性检验（四变体，#89 要求年化/回撤/夏普/超额对比表）。
 
     注：剔微盘变体依赖真实总股本算市值，DB 无股本表用 1.0 近似时
     全部股票市值 < 50亿会被全剔（结果 0.00%）。该变体需 total_shares 真实值入库
@@ -209,16 +223,28 @@ def section_robustness(lookup: BacktestLookup, conn) -> str:
                              filter_fn=lambda cs, T: filter_financial(cs, names))),
         ("延迟 T+5 调仓", lambda: run_variant(lookup, "延迟T+5", build_offset=5)),
     ]
+
+    # 主回测基线（用于算超额）
+    base_res = run_variant(lookup, "主回测 T+1")
+    base_cum = base_res.get("cumulative_returns", {}).get("full")
+    base_rets = base_res.get("quarterly_returns", {}).get("full", [])
+
     rows = []
     for name, fn in variants:
         try:
             res = fn()
+            rets = res.get("quarterly_returns", {}).get("full", [])
+            m = performance_metrics({"v": rets})["v"] if rets else {}
             cum = res.get("cumulative_returns", {}).get("full")
-            rows.append([name, _pct(cum), str(res.get("n_quarters", "N/A"))])
+            excess = (cum - base_cum) if (cum is not None and base_cum is not None
+                                          and name != "主回测 T+1") else None
+            rows.append([name, _pct(cum), _pct(m.get("annualized")),
+                         _pct(m.get("max_drawdown")), _num(m.get("sharpe")),
+                         _pct(excess), str(res.get("n_quarters", "N/A"))])
         except Exception as e:
-            rows.append([name, "运行失败", str(e)[:40]])
+            rows.append([name, "运行失败", "—", "—", "—", "—", str(e)[:40]])
 
-    body = _table(["变体", "全漏斗累计收益", "季度数"], rows) + "\n"
+    body = _table(["变体", "累计", "年化", "回撤", "夏普", "超额(vs主)", "季度数"], rows) + "\n"
     body += (
         "\n*剔微盘变体依赖真实总股本算市值；当前 total_shares 用 1.0 近似时"
         "全部股票市值 < 50亿被全剔（结果 0.00%）。需 total_shares 真实值入库"

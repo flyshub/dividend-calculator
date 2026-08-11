@@ -93,6 +93,7 @@ def run_variant(lookup, name: str, build_offset: int = 1,
         "name": name,
         "incremental_excess": res["incremental_excess"],
         "cumulative_returns": res["cumulative_returns"],
+        "quarterly_returns": res["quarterly_returns"],
         "n_quarters": len(res["rebalance_dates"]),
     }
 
