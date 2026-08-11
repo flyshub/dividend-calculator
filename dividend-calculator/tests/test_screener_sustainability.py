@@ -130,6 +130,98 @@ class TestEvaluateSustainability:
         assert SUS_VERDICT_KEEP == ("可持续", "偏弱")
 
 
+class TestPrefetchAndCache:
+    """sustainability.prefetch_and_cache：预取 + 限流 + S2 完整性检查 + 写缓存。"""
+
+    def _patch_fetchers(self, monkeypatch, **overrides):
+        import src.sustainability as sus
+        defaults = {
+            "fetch_financial_rows": lambda c: [{"REPORT_DATE": "2025-12-31"}],
+            "fetch_cashflow_rows": lambda c: [{"REPORT_DATE": "2025-12-31"}],
+            "fetch_dividend_rows": lambda c: [{"ASSIGN_PROGRESS": "实施"}],
+            "fetch_industry": lambda c: "电力",
+            "fetch_price_change_1y": lambda c: 0.1,
+            "fetch_top10_holding": lambda c: 0.2,
+        }
+        defaults.update(overrides)
+        for name, fn in defaults.items():
+            monkeypatch.setattr(sus, name, fn)
+        monkeypatch.setattr(sus, "batch_wait", lambda: None)  # 不 sleep
+        return sus
+
+    def test_prefetch_writes_snapshot(self, tmp_path, monkeypatch):
+        """预取 6 类数据 → 写缓存，source=东财预拉；行数据以 JSON 字符串存列。"""
+        import json
+        sus = self._patch_fetchers(monkeypatch)
+        cache = ScreenerCache(tmp_path / "s.db")
+        snap = sus.prefetch_and_cache(cache, "600900")
+        assert snap is not None and snap.source == "东财预拉"
+        assert snap.industry == "电力"
+        got = cache.get_sustainability("600900")
+        assert got is not None
+        # 序列化契约：列存 JSON 字符串（prefetch 侧 _dict_to_snapshot 序列化）
+        assert json.loads(got.financial_rows)[0]["REPORT_DATE"] == "2025-12-31"
+        assert json.loads(got.dividend_rows)[0]["ASSIGN_PROGRESS"] == "实施"
+
+    def test_s2_failure_not_cached(self, tmp_path, monkeypatch):
+        """S2：financial/cashflow 同时为空 → 判为拉取失败，返回 None 且不写缓存。"""
+        sus = self._patch_fetchers(monkeypatch, fetch_financial_rows=lambda c: [],
+                                   fetch_cashflow_rows=lambda c: [])
+        cache = ScreenerCache(tmp_path / "s.db")
+        assert sus.prefetch_and_cache(cache, "600900") is None
+        assert cache.get_sustainability("600900") is None
+
+    def test_fetch_failure_none_not_flagged(self, tmp_path, monkeypatch):
+        """取数失败（None）≠ 空数组：financial/cashflow 为 None 不触发 S2（与既有语义一致）。"""
+        sus = self._patch_fetchers(monkeypatch, fetch_financial_rows=lambda c: None,
+                                   fetch_cashflow_rows=lambda c: None,
+                                   fetch_dividend_rows=lambda c: None,
+                                   fetch_industry=lambda c: None)
+        cache = ScreenerCache(tmp_path / "s.db")
+        snap = sus.prefetch_and_cache(cache, "600900")
+        assert snap is not None
+        assert cache.get_sustainability("600900").financial_rows is None  # 取数失败不序列化
+
+
+class TestAssessFromCache:
+    """sustainability.assess_from_cache：读缓存 → 内部反序列化 → 评估。"""
+
+    def test_cache_hit_injects_deserialized_rows(self, tmp_path):
+        """命中缓存 → 内部反序列化注入 assess_with_auto_fetch（调用方不接触 JSON）。"""
+        import src.sustainability as sus
+        cache = ScreenerCache(tmp_path / "s.db")
+        cache.upsert_sustainability(SustainabilitySnapshot(
+            code="600900", financial_rows='[{"a":1}]', cashflow_rows='[]',
+            dividend_rows='[]', industry="电力", price_change_1y=0.1,
+            top10_holding=0.2, source="东财预拉"))
+        with patch("src.sustainability.assess_with_auto_fetch") as mock_assess:
+            mock_assess.return_value = _FakeResult("可持续")
+            r = sus.assess_from_cache(cache, "600900", total_shares=1e9,
+                                      dividend_total=None, dividend_yield_before_tax=6.0,
+                                      latest_dividend_year="2025", industry="其他")
+            assert r.verdict == "可持续"
+            kw = mock_assess.call_args.kwargs
+            assert kw["industry"] == "电力"             # 快照行业优先
+            assert kw["financial_rows"] == [{"a": 1}]   # 反序列化为列表
+            assert kw["price_change_1y"] == 0.1
+            assert kw["dividend_fetch_failed"] is False
+
+    def test_cache_miss_auto_fetch(self, tmp_path):
+        """未命中缓存 → 按需取数（不注入快照数据，限流由调用方处理）。"""
+        import src.sustainability as sus
+        cache = ScreenerCache(tmp_path / "s.db")
+        with patch("src.sustainability.assess_with_auto_fetch") as mock_assess:
+            mock_assess.return_value = _FakeResult("可持续")
+            r = sus.assess_from_cache(cache, "600900", total_shares=1e9,
+                                      dividend_total=None, dividend_yield_before_tax=6.0,
+                                      latest_dividend_year="2025", industry="电力")
+            assert r.verdict == "可持续"
+            kw = mock_assess.call_args.kwargs
+            assert kw.get("financial_rows") is None     # 未注入，走现场取数
+            assert kw["industry"] == "电力"
+            assert kw.get("dividend_fetch_failed") is False
+
+
 class TestMakeEvaluator:
     def test_returns_verdict_via_assessor(self):
         ev = make_sustainability_evaluator(None, assessor=lambda c: _FakeResult("可持续"))
