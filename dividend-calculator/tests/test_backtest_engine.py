@@ -111,7 +111,8 @@ def test_portfolio_return_t_plus_1_to_settle():
                          (date(2023, 4, 3), 10.2),    # T+1 建仓价
                          (date(2023, 6, 30), 11.22)]} # 下季末结算价
     lk = MockLookup(prices=prices)
-    ret = portfolio_return(["600036"], date(2023, 4, 3), date(2023, 6, 30), lk)
+    ret = portfolio_return(["600036"], date(2023, 4, 3), date(2023, 6, 30), lk,
+                           cost=0.0)
     assert ret == pytest.approx(11.22 / 10.2 - 1.0)
 
 
@@ -121,8 +122,23 @@ def test_portfolio_return_equal_weight():
         "b": [(date(2023, 1, 2), 20.0), (date(2023, 6, 30), 21.0)],
     }
     lk = MockLookup(prices=prices)
-    ret = portfolio_return(["a", "b"], date(2023, 1, 2), date(2023, 6, 30), lk)
+    ret = portfolio_return(["a", "b"], date(2023, 1, 2), date(2023, 6, 30), lk,
+                           cost=0.0)
     assert ret == pytest.approx(((11 / 10 - 1) + (21 / 20 - 1)) / 2)
+
+
+def test_portfolio_return_trading_cost():
+    """双边交易成本：季度全换手，进出各 0.3% 从收益扣除。"""
+    prices = {"a": [(date(2023, 1, 2), 10.0), (date(2023, 6, 30), 11.0)]}
+    lk = MockLookup(prices=prices)
+    gross = 11 / 10 - 1.0
+    ret = portfolio_return(["a"], date(2023, 1, 2), date(2023, 6, 30), lk,
+                           cost=0.003)
+    assert ret == pytest.approx(gross - 0.006)
+    # 零成本（对照）保持原收益
+    ret0 = portfolio_return(["a"], date(2023, 1, 2), date(2023, 6, 30), lk,
+                            cost=0.0)
+    assert ret0 == pytest.approx(gross)
 
 
 def test_portfolio_return_delisted_excluded():
@@ -132,8 +148,8 @@ def test_portfolio_return_delisted_excluded():
         "b": [],  # 无价格记录（退市）
     }
     lk = MockLookup(prices=prices)
-    assert portfolio_return(["a", "b"], date(2023, 1, 2), date(2023, 6, 30), lk) \
-        == pytest.approx(11 / 10 - 1.0)
+    assert portfolio_return(["a", "b"], date(2023, 1, 2), date(2023, 6, 30), lk,
+                            cost=0.0) == pytest.approx(11 / 10 - 1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -262,8 +278,10 @@ def test_incremental_excess_monotone():
     assert funnel_layer(f_mid) == 4     # 全漏斗
     assert funnel_layer(f_hi) == 4      # 全漏斗
     # 组合收益单调性
-    ret_lo = portfolio_return(["lo"], date(2023, 4, 3), date(2023, 6, 30), lookup)
-    ret_hi = portfolio_return(["hi"], date(2023, 4, 3), date(2023, 6, 30), lookup)
+    ret_lo = portfolio_return(["lo"], date(2023, 4, 3), date(2023, 6, 30), lookup,
+                              cost=0.0)
+    ret_hi = portfolio_return(["hi"], date(2023, 4, 3), date(2023, 6, 30), lookup,
+                              cost=0.0)
     assert ret_lo == pytest.approx(0.0)
     assert ret_hi == pytest.approx(12.1 / 10.0 - 1.0)
     assert ret_hi > ret_lo

@@ -257,8 +257,11 @@ def funnel_layer(factors: dict) -> int:
 
 
 def portfolio_return(codes: List[str], build_day: date, settle_day: date,
-                     lookup) -> Optional[float]:
+                     lookup, cost: float = 0.003) -> Optional[float]:
     """等权组合收益（小数）。持有期 = [build_day, settle_day]，T+1 建仓价 → 结算价。
+
+    双边交易成本：每期全换手，买入 0.3% + 卖出 0.3% 从收益中扣除
+    （季度调仓下换手 ≈ 100%，成本 = cost×2 计入单期）。
 
     无价格（停牌/退市）个股剔除；全部无价格 → None。
     """
@@ -267,7 +270,8 @@ def portfolio_return(codes: List[str], build_day: date, settle_day: date,
         pb = lookup.price(code, build_day)
         ps = lookup.price(code, settle_day)
         if pb and ps:
-            rets.append(ps / pb - 1.0)
+            gross = ps / pb - 1.0
+            rets.append(gross - 2.0 * cost)
     if not rets:
         return None
     return sum(rets) / len(rets)
@@ -292,6 +296,12 @@ def run_backtest(lookup,
     for i, T in enumerate(rebalance):
         build = build_day_after(days, T)
         settle = rebalance[i + 1] if i + 1 < len(rebalance) else days[-1]
+        if build is None:  # 无下一交易日（末季）：该期无收益，跳过
+            for k in per_quarter:
+                per_quarter[k].append(None)
+                pools[k].append([])
+            continue
+        assert build is not None
         layer_buckets = {"base": [], "l2": [], "l3": [], "l4": [], "full": []}
 
         for code in all_codes:
