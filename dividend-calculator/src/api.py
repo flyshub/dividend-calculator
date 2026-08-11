@@ -8,8 +8,6 @@ import logging
 import math
 from typing import Optional, Tuple
 
-import requests
-
 from .datasource.base import StockInfo, MonthlyPrice, DividendRecord, HistoricalData
 from .datasource import get_data_source_manager
 from .datasource.validation import check_stock_info
@@ -84,26 +82,8 @@ def _get_monthly_prices_mootdx(stock_code: str) -> list:
 def _get_monthly_prices_tencent(stock_code: str) -> list:
     """通过腾讯 K 线接口获取月度收盘价（前复权），不依赖东方财富，全球可用"""
     try:
-        prefix = "sh" if stock_code.startswith("6") else "sz"
-        url = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
-        params = {"param": f"{prefix}{stock_code},month,,,120,qfq"}
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-            "Referer": "https://gu.qq.com/",
-        }
-        resp = requests.get(url, params=params, headers=headers, timeout=10)
-        if resp.status_code != 200:
-            logger.warning("腾讯K线接口返回非200: %s", resp.status_code)
-            return []
-
-        data = resp.json()
-        if data.get("code") != 0:
-            logger.warning("腾讯K线接口返回错误: %s", data.get("msg", ""))
-            return []
-
-        key = f"{prefix}{stock_code}"
-        stock_data = data.get("data", {}).get(key, {})
-        rows = stock_data.get("qfqmonth", [])
+        from .tencent_quote import fetch_kline_rows
+        rows = fetch_kline_rows(stock_code, period="month", count=120)
         if not rows:
             logger.warning("腾讯K线接口无 qfqmonth 数据: %s", stock_code)
             return []

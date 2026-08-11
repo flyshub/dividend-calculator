@@ -438,6 +438,7 @@ class _FakeResp:
 def test_fetch_price_change_1y_window_calculation(monkeypatch):
     """#40：用 rows[0]（窗口起点，约 1 年前）与 rows[-1]（最新）算 1 年变化率。"""
     import src.eastmoney_fetcher as emf
+    import src.tencent_quote as tq
 
     rows = [
         ["2025-08-07", "42.5", "42.424"],   # 窗口起点收盘 42.424
@@ -450,7 +451,7 @@ def test_fetch_price_change_1y_window_calculation(monkeypatch):
         assert "sh600036" in url
         return _FakeResp(payload)
 
-    monkeypatch.setattr(emf.requests, "get", fake_get)
+    monkeypatch.setattr(tq._SESSION, "get", fake_get)
     result = emf.fetch_price_change_1y("600036")
     assert result == pytest.approx((38.80 - 42.424) / 42.424)
 
@@ -458,15 +459,17 @@ def test_fetch_price_change_1y_window_calculation(monkeypatch):
 def test_fetch_price_change_1y_too_few_rows(monkeypatch):
     """K 线不足 2 根 → None（无窗口可算）。"""
     import src.eastmoney_fetcher as emf
+    import src.tencent_quote as tq
 
     payload = {"data": {"sh600036": {"qfqday": [["2026-08-07", "10", "10"]]}}}
-    monkeypatch.setattr(emf.requests, "get", lambda *a, **k: _FakeResp(payload))
+    monkeypatch.setattr(tq._SESSION, "get", lambda *a, **k: _FakeResp(payload))
     assert emf.fetch_price_change_1y("600036") is None
 
 
 def test_fetch_price_change_1y_bj_prefix(monkeypatch):
     """北交所代码 → bj 前缀（#40 复审：6→sh，8/4/92→bj，其余→sz）。"""
     import src.eastmoney_fetcher as emf
+    import src.tencent_quote as tq
 
     seen = {}
 
@@ -475,7 +478,7 @@ def test_fetch_price_change_1y_bj_prefix(monkeypatch):
         payload = {"data": {seen["key"]: {"qfqday": [["a", "10", "10"], ["b", "20", "20"]]}}}
         return _FakeResp(payload)
 
-    monkeypatch.setattr(emf.requests, "get", fake_get)
+    monkeypatch.setattr(tq._SESSION, "get", fake_get)
     assert emf.fetch_price_change_1y("830799") == pytest.approx(1.0)
     assert seen["key"] == "bj830799"
 

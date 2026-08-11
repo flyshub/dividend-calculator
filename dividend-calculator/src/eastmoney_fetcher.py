@@ -62,10 +62,6 @@ _TOP10_URL = (
     "&sortTypes=-1&sortColumns=END_DATE"
 )
 
-# 腾讯前复权日K接口（近1年涨跌幅，#40 B1）
-_TENCENT_KLINE_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
-
-
 def _fetch_eastmoney_rows(url: str, stock_code: str, label: str) -> List[dict]:
     """东财 datacenter GET 统一封装：请求 → 取 result.data → 失败 warning 返空。"""
     try:
@@ -153,15 +149,9 @@ def fetch_price_change_1y(stock_code: str) -> Optional[float]:
     失败或 K 线不足返回 None（#40 B1）。
     """
     try:
-        prefix = "sh" if stock_code.startswith("6") else (
-            "bj" if stock_code.startswith(("8", "4", "92")) else "sz")
-        url = f"{_TENCENT_KLINE_URL}?param={prefix}{stock_code},day,,,250,qfq"
-        resp = requests.get(url, headers=_UA, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
-        key = f"{prefix}{stock_code}"
-        rows = (data.get("data") or {}).get(key, {}).get("qfqday") or []
-        if len(rows) < 2:
+        from .tencent_quote import fetch_kline_rows
+        rows = fetch_kline_rows(stock_code, period="day", count=250)
+        if not rows or len(rows) < 2:
             return None  # K 线不足，无窗口
         past_close = float(rows[0][2])   # 窗口起点（约 1 年前）收盘价
         last_close = float(rows[-1][2])  # 最新收盘价
