@@ -315,6 +315,7 @@ def build_daily_price(conn: sqlite3.Connection, codes: list) -> None:
         if _is_done(conn, "daily_price", code):
             continue
         rows = []
+        failed = False
         for start, end in _KLINE_SEGMENTS:
             if end is None:
                 end = date.today().isoformat()
@@ -323,8 +324,12 @@ def build_daily_price(conn: sqlite3.Connection, codes: list) -> None:
                 rows += parse_kline(code, _get(url).json())
             except Exception as e:
                 print(f"  [warn] {code} 日K拉取失败: {e}")
-                break  # 该段失败则不写该 code（下一段也无需继续）
+                failed = True
+                break
             _pace()
+        if failed:
+            # 拉取异常不标记完成，下次重试（断点续传不跳过失败项）
+            continue
         if rows:
             conn.executemany(
                 "INSERT OR REPLACE INTO daily_price (code, date, close) VALUES (?, ?, ?)",

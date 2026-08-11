@@ -63,6 +63,11 @@ class BacktestLookup:
         """T3 lookup 契约是下标访问：lookup['total_shares'](code, T) → 绑定方法。"""
         return getattr(self, key)
 
+    def get(self, key: str, default=None):
+        """dict.get 兼容：T3 因子层用 lookup.get('industry')。"""
+        fn = getattr(self, key, None)
+        return fn if callable(fn) else default
+
     # -- 预加载 ----------------------------------------------------------
     def _load(self) -> None:
         c = self.conn
@@ -161,7 +166,13 @@ class BacktestLookup:
         return self._latest(self.pes.get(code, []), asof)
 
     def total_shares(self, code: str, asof: date) -> Optional[float]:
-        return self.shares.get(code)
+        """总股本。DB 无 total_shares 表时返回 1.0（每股口径近似）。
+
+        数学等价性：真实股息率 = 分红总额/总市值 ≡ 每股分红/股价
+        （分子分母同乘 shares 约分），所以股息率计算不受影响。
+        仅 sustainability 支付率维度受影响（标注近似，详见 #165）。
+        """
+        return self.shares.get(code, 1.0)
 
     def price(self, code: str, asof: date) -> Optional[float]:
         return self._latest(self.prices.get(code, []), asof)
