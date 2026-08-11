@@ -18,6 +18,7 @@ from src.screener_cache import (
     QuoteSnapshot,
     DividendSnapshot,
     FinanceSnapshot,
+    StockListItem,
     SustainabilitySnapshot,
 )
 
@@ -39,6 +40,18 @@ class TestSchema:
         # 缓存独立于 backtest.db（data/screener.db 路径可配）
         c = ScreenerCache(tmp_path / "custom.db")
         assert c.db_path.name == "custom.db"
+
+
+class TestStockList:
+    def test_get_stock_codes_ordered(self, cache):
+        cache.upsert_stock_list([
+            StockListItem(code="600987", name="航民股份", market="sh"),
+            StockListItem(code="600900", name="长江电力", market="sh"),
+        ])
+        assert cache.get_stock_codes() == ["600900", "600987"]
+
+    def test_get_stock_codes_empty(self, cache):
+        assert cache.get_stock_codes() == []
 
 
 class TestQuoteUpsert:

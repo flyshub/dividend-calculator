@@ -13,9 +13,10 @@ from pathlib import Path
 
 import pytest
 
+from src.screening import FIELDS
+
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
-CSV_HEADER = ["代码", "名称", "TTM股息率%", "真实股息率%", "估值区间", "市赚率PR",
-              "行业", "可持续性", "ROE%", "总市值(亿)", "数据来源"]
+CSV_HEADER = FIELDS  # 11 列契约单点化（ADR-0001）：与 src.screening 同源
 
 
 def _load_module():

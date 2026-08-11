@@ -147,6 +147,12 @@ class ScreenerCache:
                 [(i.code, i.name, i.market, i.updated_at) for i in items],
             )
 
+    def get_stock_codes(self) -> List[str]:
+        """全 A 股票代码（升序）。"""
+        with self._conn() as conn:
+            rows = conn.execute("SELECT code FROM stock_list ORDER BY code").fetchall()
+        return [r[0] for r in rows]
+
     # ---- quote_snapshot ----
 
     def upsert_quote(self, q: QuoteSnapshot):

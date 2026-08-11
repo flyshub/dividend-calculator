@@ -1,13 +1,10 @@
-"""选股器真实股息率（spec #67，工单 #71）。
+"""选股器真实股息率数据获取（spec #67，工单 #71）。
 
-四级漏斗的第二层：对通过漏斗①的候选池逐股计算真实股息率 + TTM 股息率，
-写 dividend_snapshot，漏斗② 筛 真实股息率 > 阈值。
-
+对候选池逐股计算真实股息率 + TTM 股息率并写 dividend_snapshot（缓存层）。
 复用 calculate_true_dividend_yield（完整财年口径，支持注入 provider 便于测试）。
-TTM 股息率（近12个月）并存快照，供漏斗① 完整判定（TTM >5%）。
+漏斗② 的判定与降级回退已收进 src.screening（ADR-0001），本模块只负责取数与缓存。
 """
-from typing import Callable, Dict, List, Optional
-import sys
+from typing import Callable, List, Optional
 
 from src.dividend import DividendResult, calculate_true_dividend_yield
 from src.screener_cache import DividendSnapshot, ScreenerCache
@@ -76,57 +73,3 @@ def compute_dividends_for_candidates(
         cache.upsert_dividend(snap)
         snapshots.append(snap)
     return snapshots
-
-
-def compute_real_yield(total_dividend: Optional[float], market_cap: Optional[float]) -> Optional[float]:
-    """真实股息率 = 分红总额 / 当前总市值 × 100（实时，随市值每日变化）。"""
-    if total_dividend is None or market_cap is None or market_cap <= 0:
-        return None
-    return (total_dividend / market_cap) * 100
-
-
-def screen_real_yield(
-    snapshots: List[DividendSnapshot],
-    market_caps: Optional[Dict[str, float]] = None,
-    min_real: float = 5.0,
-    min_ttm: float = 5.0,
-) -> List[DividendSnapshot]:
-    """漏斗②：真实股息率 > min_real 且 TTM > min_ttm（两级都过）。
-
-    market_caps: {code: 当日市值}。提供时实时重算股息率（分红总额/当日市值），
-    否则用存储的 real_yield（月频拉取时的旧值）。
-
-    降级策略：当 market_caps 有值但该股 total_dividend 缺失（NULL，如旧 DB 迁移
-    ALTER TABLE 补列后未回填）时，回退到存储的 real_yield/ttm_yield 旧值继续筛选，
-    而非静默判不过——避免「数据缺失」伪装成「市场无股可筛」（#81）。
-
-    诊断：结束时打印降级统计（回退触发的股票数 / 其中最终入选数），
-    便于确认降级是否实际影响入选集合（生产可观测，见 total_dividend 缺失调研）。
-    """
-    result = []
-    fallback_count = 0
-    fallback_passed = 0
-    for s in snapshots:
-        used_fallback = False
-        if market_caps and s.code in market_caps:
-            real = compute_real_yield(s.total_dividend, market_caps[s.code])
-            ttm = compute_real_yield(s.ttm_dividend, market_caps[s.code])
-            if real is None or ttm is None:
-                # total_dividend/ttm_dividend 缺失 → 降级到存储旧值（仅缺失时，非 0）
-                used_fallback = True
-                real, ttm = s.real_yield, s.ttm_yield
-        else:
-            # 无 market_caps（缓存路径）或该股不在当日市值 → 用存储旧值，非降级，不计入
-            real, ttm = s.real_yield, s.ttm_yield
-        if real is not None and real > min_real and ttm is not None and ttm > min_ttm:
-            result.append(s)
-            if used_fallback:
-                fallback_passed += 1
-        if used_fallback:
-            fallback_count += 1
-    if fallback_count:
-        print(
-            f"漏斗② 降级: {fallback_count} 只缺 total/ttm_dividend 用存储旧值，"
-            f"其中 {fallback_passed} 只入选",
-            file=sys.stderr)
-    return result

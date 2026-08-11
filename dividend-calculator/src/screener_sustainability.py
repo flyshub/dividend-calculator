@@ -1,15 +1,15 @@
-"""选股器股息可持续性（spec #67，工单 #73）。
+"""选股器股息可持续性数据获取（spec #67，工单 #73）。
 
-四级漏斗的最后一层：对通过漏斗③的候选股评估股息可持续性，漏斗④ 筛 verdict ∈ {可持续, 偏弱}。
-
-复用 assess_with_auto_fetch（现有分层级联模型：行业路由→致命红旗→六维评分→情境警示）。
-verdict 存快照避免重复评估（选股器低频跑，但同股多次筛选不重拉）。
+漏斗④ 的判定已收进 src.screening（ADR-0001）；本模块保留评估与缓存
+（复用 assess_with_auto_fetch 分层级联模型），并向选股漏斗提供单股评估回调。
 
 参数可注入 assessor 便于测试（不碰真实 HTTP）。
 """
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 
+from src.screener_rate_limit import batch_wait
 from src.screener_cache import ScreenerCache, DividendSnapshot
+from src.screening import FunnelCandidate
 
 # 漏斗④ 保留的 verdict（可持续 + 偏弱）
 SUS_VERDICT_KEEP = ("可持续", "偏弱")
@@ -97,46 +97,39 @@ def _assess_and_cache(code, dividend, assessor, total_shares, dividend_total,
     return verdict
 
 
-def evaluate_sustainability_batch(
-    stocks: List[dict],
+def make_sustainability_evaluator(
     cache: ScreenerCache,
     *,
     assessor: Optional[Callable[[str], object]] = None,
-    sus_verdict: tuple = SUS_VERDICT_KEEP,
-) -> List[dict]:
-    """对候选池批量评估可持续性，返回 {code, verdict, pass_sus} 列表。
+) -> Callable[[FunnelCandidate], str]:
+    """构造漏斗④ 的可持续性评估回调（数据获取层）：限流 + 缓存复用 + 评估。
 
-    sus_verdict 控制保留的 verdict（默认 可持续/偏弱）。
+    返回单股 verdict 字符串。缓存命中（未过期）时跳过限流等待（零网络）；
+    未命中且未注入 assessor 时按数据源限流等待（与既有批量评估一致）。
+    同时把快照行业补进候选（纯缓存路径无行业，供输出行使用）。
     """
-    from src.screener_rate_limit import batch_wait
-    results = []
-    for s in stocks:
-        code = s["code"]
-        dividend = s.get("dividend")
+
+    def evaluate(candidate: FunnelCandidate) -> str:
+        code = candidate.code
+        dividend = candidate.dividend
         if dividend is None:
-            continue
-        # 缓存命中则跳过限流等待（零网络）；否则等待
+            return "未评估"
         snap = cache.get_sustainability(code) if cache else None
+        if snap is not None and snap.industry and not candidate.industry:
+            candidate.industry = snap.industry
         cached_ok = snap is not None and not cache.is_sustainability_stale(code)
         if not cached_ok and assessor is None:
-            batch_wait()  # 仅真实拉取时限流
-        r = evaluate_sustainability(
+            batch_wait()
+        result = evaluate_sustainability(
             code, dividend, assessor=assessor,
-            total_shares=s.get("total_shares", 1.0),
-            dividend_total=s.get("dividend_total"),
-            industry=s.get("industry"),
+            total_shares=candidate.quote.total_shares if candidate.quote else 1.0,
+            dividend_total=dividend.total_dividend,
+            industry=candidate.industry,
             cache=cache,
         )
-        # 应用 sus_verdict 过滤（覆盖 SUS_VERDICT_KEEP 默认）
-        r["pass_sus"] = r["verdict"] in sus_verdict
-        # 保留原 ev 全部字段（pr/valuation_zone/industry 等）+ 可持续性结果
-        results.append({**s, **r})
-    return results
+        return result["verdict"]
 
-
-def screen_sustainability(evaluations: List[dict]) -> List[dict]:
-    """漏斗④：保留 verdict ∈ {可持续, 偏弱} 的候选。"""
-    return [e for e in evaluations if e["pass_sus"]]
+    return evaluate
 
 
 def reset_sus_cache():

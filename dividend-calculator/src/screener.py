@@ -18,18 +18,15 @@ import sys
 from pathlib import Path
 from typing import List
 
-from src.screener_cache import (
-    DividendSnapshot,
-    FinanceSnapshot,
-    QuoteSnapshot,
-    ScreenerCache,
+from src.screening import (
+    FIELDS,
+    FunnelCandidate,
+    FunnelConfig,
+    FunnelResult,
+    build_output_rows,
+    run_funnel,
 )
-from src.screener_dividend import compute_real_yield, screen_real_yield
-from src.screener_pr import evaluate_pr_batch, screen_pr
-from src.screener_sustainability import (
-    evaluate_sustainability_batch,
-    screen_sustainability,
-)
+from src.screener_cache import ScreenerCache
 
 
 def _load_stock_list(cache: ScreenerCache) -> List[str]:
@@ -38,10 +35,9 @@ def _load_stock_list(cache: ScreenerCache) -> List[str]:
     优先读 screener.db 的 stock_list 表（已初始化），mootdx 仅作后备。
     """
     # 1. 优先：screener.db stock_list（初始化脚本已写入）
-    with cache._conn() as conn:
-        rows = conn.execute("SELECT code FROM stock_list ORDER BY code").fetchall()
-    if rows:
-        return [r[0] for r in rows]
+    codes = cache.get_stock_codes()
+    if codes:
+        return codes
     # 2. 后备：mootdx 全列表
     try:
         from src.utils import get_stock_list_cache
@@ -67,102 +63,55 @@ def run_screener(
     sus_verdict: List[str] = ("可持续", "偏弱"),
     refresh_quotes: bool = True,
     limit: int = 0,
-) -> List[dict]:
-    """四级漏斗主流程。返回通过全部层的股票 dict 列表。
+) -> FunnelResult:
+    """四级漏斗主流程（编排 + 数据获取），判定语义集中在 src.screening.run_funnel。
 
-    各层数据源可被测试注入（通过模块级替换），此处为生产编排。
+    数据获取：股票列表 → 行情快照（腾讯批量）→ 缓存股息/财务快照；
+    判定、降级回退、输出整形由选股漏斗 module 完成（ADR-0001）。
     """
     codes = _load_stock_list(cache)
     if limit:
         codes = codes[:limit]
 
-    # 批量读缓存（性能优化：一次读全表，替代逐股查询）
+    # 批量读缓存（一次读全表，替代逐股查询）
     all_quotes = cache.get_all_quotes()
     all_dividends = cache.get_all_dividends()
+    all_finance = cache.get_all_finance()
 
-    # 漏斗① 行情快照（腾讯批量；refresh_quotes=False 时读缓存）
-    from src.screener_quotes import build_candidate_pool, fetch_all_quotes
+    # 行情快照（腾讯批量；refresh_quotes=False 时读缓存）
+    from src.screener_quotes import fetch_all_quotes
     if refresh_quotes:
         quotes = fetch_all_quotes(codes, cache=cache)
     else:
         quotes = [all_quotes[c] for c in codes if c in all_quotes]
-    base_pool = build_candidate_pool(quotes)
-    print(f"漏斗① 行情可用: {len(base_pool)} 只", file=sys.stderr)
 
-    # 漏斗② 真实股息率（仅候选池，从批量缓存读；结合当日市值实时重算）
-    base_codes = [q.code for q in base_pool]
-    div_snaps = [all_dividends[c] for c in base_codes if c in all_dividends]
-    market_caps = {q.code: q.market_cap for q in base_pool if q.market_cap}
-    real_pool = screen_real_yield(div_snaps, market_caps=market_caps, min_real=min_real, min_ttm=min_ttm)
-    print(f"漏斗② 真实股息率>{min_real}%: {len(real_pool)} 只", file=sys.stderr)
+    universe = [
+        FunnelCandidate(code=q.code, quote=q,
+                        dividend=all_dividends.get(q.code),
+                        finance=all_finance.get(q.code))
+        for q in quotes
+    ]
 
-    # 漏斗③ PR 估值（纯缓存，仅候选池；性能优化：不调网络）
-    pr_eval = evaluate_pr_batch(real_pool_codes(real_pool), cache, pr_zone=pr_zone)
-    # 附加 dividend / industry / total_shares / dividend_total 供漏斗④
-    by_div = {s.code: s for s in div_snaps}
-    for ev in pr_eval:
-        ev["dividend"] = by_div.get(ev["code"])
-        quote = all_quotes.get(ev["code"])
-        if quote is not None:
-            ev["total_shares"] = quote.total_shares
-        # dividend_total = 最近完整财年分红总额（月频不变，可持续性评估核心输入）
-        div = by_div.get(ev["code"])
-        if div is not None and div.total_dividend is not None:
-            ev["dividend_total"] = div.total_dividend
-    pr_pool = screen_pr(pr_eval)
-    print(f"漏斗③ PR {pr_zone}: {len(pr_pool)} 只", file=sys.stderr)
+    # 漏斗④ 可持续性评估（数据获取层注入：限流 + 缓存复用）
+    from src.screener_sustainability import make_sustainability_evaluator
+    sus_evaluator = make_sustainability_evaluator(cache)
 
-    # 漏斗④ 可持续性（仅候选池）
-    sus_eval = evaluate_sustainability_batch(pr_pool, cache, sus_verdict=sus_verdict)
-    final = screen_sustainability(sus_eval)
-    print(f"漏斗④ 可持续性 {sus_verdict}: {len(final)} 只", file=sys.stderr)
+    result = run_funnel(
+        universe,
+        FunnelConfig(min_ttm=min_ttm, min_real=min_real,
+                     pr_zone=tuple(pr_zone), sus_verdict=tuple(sus_verdict)),
+        evaluate_sustainability=sus_evaluator,
+    )
 
-    return final
-
-
-def real_pool_codes(real_pool: List) -> List[str]:
-    """从漏斗② 结果取代码列表。"""
-    return [s.code for s in real_pool]
-
-
-def _build_output_rows(cache: ScreenerCache, final: List[dict]) -> List[dict]:
-    """汇总最终结果行（代码/名称/三指标/估值/可持续性/行业/辅助字段）。
-
-    复用漏斗③ 已算的 ev（pr/valuation_zone）+ 批量读缓存补辅助字段；
-    行业从 sustainability_snapshot 取（纯缓存路径无行业，用预拉数据补）。
-    """
-    all_quotes = cache.get_all_quotes()
-    all_dividends = cache.get_all_dividends()
-    all_finance = cache.get_all_finance()
-    all_sus = cache.get_all_sustainability()
-    rows = []
-    for ev in final:
-        code = ev["code"]
-        quote = all_quotes.get(code)
-        dividend = all_dividends.get(code)
-        finance = all_finance.get(code)
-        sus = all_sus.get(code)
-        industry = ev.get("industry") or (sus.industry if sus else "") or ""
-        # 实时股息率 = 分红总额 / 当日市值（每日随市值变化，非月频旧值）
-        market_cap = quote.market_cap if quote else None
-        real_yield_now = compute_real_yield(dividend.total_dividend if dividend else None, market_cap)
-        ttm_yield_now = compute_real_yield(dividend.ttm_dividend if dividend else None, market_cap)
-        rows.append({
-            "代码": code,
-            "名称": quote.name if quote else "",
-            "TTM股息率%": round(ttm_yield_now, 2) if ttm_yield_now else "",
-            "真实股息率%": round(real_yield_now, 2) if real_yield_now else "",
-            "估值区间": ev.get("valuation_zone", ""),
-            "市赚率PR": ev.get("pr", ""),
-            "行业": industry,
-            "可持续性": ev.get("verdict", ""),
-            "ROE%": finance.roe_latest if finance else "",
-            "总市值(亿)": round(market_cap / 1e8, 2) if market_cap else "",
-            "数据来源": (dividend.dividend_source if dividend else "") + " / " + (quote.source if quote else "腾讯"),
-        })
-    # 按真实股息率降序
-    rows.sort(key=lambda r: r["真实股息率%"] if isinstance(r["真实股息率%"], float) else -1, reverse=True)
-    return rows
+    n1, n2, n3, n4 = result.stage_counts
+    print(f"漏斗① 行情可用: {n1} 只", file=sys.stderr)
+    print(f"漏斗② 真实股息率>{min_real}%: {n2} 只", file=sys.stderr)
+    print(f"漏斗③ PR {pr_zone}: {n3} 只", file=sys.stderr)
+    print(f"漏斗④ 可持续性 {sus_verdict}: {n4} 只", file=sys.stderr)
+    if result.fallback_count:
+        print(f"漏斗② 降级: {result.fallback_count} 只缺 total/ttm_dividend 用存储旧值，"
+              f"其中 {result.fallback_passed} 只入选", file=sys.stderr)
+    return result
 
 
 # 默认 CSV 导出目录（data/screener/，自动创建）
@@ -186,11 +135,9 @@ def write_csv(rows: List[dict], output: str):
     if not rows:
         print("无符合条件的股票", file=sys.stderr)
         if output != "-":
-            # 空结果也写完整表头（11 列，含「行业」，与 _build_output_rows 列序一致，
+            # 空结果也写完整表头（11 列，含「行业」，与 FIELDS 契约一致，
             # 否则 export_screener_json.py 的表头校验会拦截）
-            Path(output).write_text(
-                "代码,名称,TTM股息率%,真实股息率%,估值区间,市赚率PR,行业,可持续性,ROE%,总市值(亿),数据来源\n",
-                encoding="utf-8")
+            Path(output).write_text(",".join(FIELDS) + "\n", encoding="utf-8")
         return
     fieldnames = list(rows[0].keys())
     if output != "-":
@@ -220,7 +167,7 @@ def main():
     args = parser.parse_args()
 
     cache = ScreenerCache()
-    final = run_screener(
+    result = run_screener(
         cache,
         min_ttm=args.min_ttm_yield,
         min_real=args.min_real_yield,
@@ -229,7 +176,7 @@ def main():
         refresh_quotes=args.refresh in ("quotes", "all"),
         limit=args.limit,
     )
-    rows = _build_output_rows(cache, final)
+    rows = build_output_rows(result)
     write_csv(rows, args.output)
 
     # 数据保留策略：清理超 90 天未刷新的快照行（幂等，无 stale 行则 0 删除）
