@@ -50,9 +50,11 @@
     return [before, before * 0.9, before * 0.8];
   }
 
-  /* ── 分红解析（对齐 _parse_fhps_detail，输入为东财 RPT_SHAREBONUS_DET 行）──
-   * 行字段: REPORT_DATE (YYYY-MM-DD ...), PRETAX_BONUS_RMB (每10股派息)
-   * 返回: { totalDividend, year, details:[{report_time, dividend_per_10}], explanation }
+  /* ── 分红解析（对齐 Python dividend_records.summarize_dividend_rows，输入为东财
+   * RPT_SHAREBONUS_DET 行）──
+   * 行字段: REPORT_DATE (YYYY-MM-DD ...), PRETAX_BONUS_RMB (每10股派息), EX_DIVIDEND_DATE
+   * 财年判定单一实现（Python sustainability.classify_fiscal_report）：仅12月=年报。
+   * 返回: { totalDividend, year, details:[{report_time, dividend_per_10, ex_dividend_date}], explanation }
    */
   function parseDividendRecords(rows, totalShares) {
     var yearly = {};
@@ -69,24 +71,38 @@
       if (!m) continue;
       var y = parseInt(m[1], 10);
       var month = parseInt(m[2], 10);
-      /* 与 Python 一致: 仅12月为年报（完整财年），3/6/9月为中期分配 */
+      /* 与 Python classify_fiscal_report 一致: 仅12月为年报（完整财年），3/6/9月为中期分配 */
       var isAnnual = (month === 12);
       var label = isAnnual ? (y + '年报') : (y + '中期分配');
 
       if (!yearly[y]) yearly[y] = { total: 0, hasAnnual: false, details: [] };
       yearly[y].total += dp10;
       yearly[y].hasAnnual = yearly[y].hasAnnual || isAnnual;
-      yearly[y].details.push({ report_time: label, dividend_per_10: dp10 });
+      yearly[y].details.push({
+        report_time: label, dividend_per_10: dp10,
+        ex_dividend_date: String(row.EX_DIVIDEND_DATE || '').slice(0, 10),
+      });
     }
 
     var years = Object.keys(yearly).map(Number).sort(function (a, b) { return b - a; });
-    if (!years.length) return { totalDividend: 0, year: null, details: [], explanation: '无有效分红数据' };
+    if (!years.length) {
+      return { totalDividend: 0, year: null, details: [], explanation: '无有效分红数据', sustainabilityHistory: null };
+    }
 
     var target = null;
     for (var j = 0; j < years.length; j++) {
       if (yearly[years[j]].hasAnnual) { target = yearly[years[j]]; target.year = years[j]; break; }
     }
-    if (!target) { target = yearly[years[0]]; target.year = years[0]; }
+    /* 无年报（无完整财年）→ year=null、总额0，不退回最新有数据年份（对齐 Python
+     * dividend_records：latest_year=None → fiscal_total=0） */
+    if (!target) {
+      return { totalDividend: 0, year: null, details: [], explanation: '无有效分红数据', sustainabilityHistory: null };
+    }
+
+    /* 明细按除权日升序（空串在前），与 Python summary.records 排序一致（#99） */
+    target.details.sort(function (a, b) {
+      return (a.ex_dividend_date || '').localeCompare(b.ex_dividend_date || '');
+    });
 
     var totalPer10 = target.total;
     var dps = totalPer10 / 10.0;
