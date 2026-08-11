@@ -57,33 +57,28 @@ def evaluate_sustainability(
 
 def _assess_and_cache(code, dividend, assessor, total_shares, dividend_total,
                       industry, cache):
-    """评估单股可持续性，写回缓存（S1 按需补拉）。返回 verdict。"""
-    # 缓存命中：注入预拉数据，避免重拉网络
-    prefetched = None
-    if cache is not None:
-        snap = cache.get_sustainability(code)
-        if snap is not None and not cache.is_sustainability_stale(code):
-            prefetched = snap
-    if prefetched is not None:
-        import json
-        from src.sustainability import assess_with_auto_fetch
-        result = assess_with_auto_fetch(
-            stock_code=code,
+    """评估单股可持续性，写回缓存（S1 按需补拉）。返回 verdict。
+
+    缓存命中时走 sustainability.assess_from_cache（内部反序列化并注入预拉数据，
+    调用方不接触快照 JSON 列，见 sustainability.py #95 序列化契约）；
+    未命中且注入 assessor 时用 assessor（测试钩子），否则按需补拉。
+    """
+    from src.sustainability import assess_from_cache, assess_with_auto_fetch
+    cached_ok = (cache is not None
+                 and cache.get_sustainability(code) is not None
+                 and not cache.is_sustainability_stale(code))
+    if cached_ok:
+        result = assess_from_cache(
+            cache, code,
             total_shares=total_shares,
             dividend_total=dividend_total,
             dividend_yield_before_tax=dividend.real_yield,
             latest_dividend_year=dividend.real_yield_year,
-            industry=prefetched.industry or industry,
-            financial_rows=json.loads(prefetched.financial_rows) if prefetched.financial_rows else None,
-            cashflow_rows=json.loads(prefetched.cashflow_rows) if prefetched.cashflow_rows else None,
-            dividend_rows=json.loads(prefetched.dividend_rows) if prefetched.dividend_rows else None,
-            price_change_1y=prefetched.price_change_1y,
-            top10_holding=prefetched.top10_holding,
+            industry=industry,
         )
     elif assessor:
         result = assessor(code)
     else:
-        from src.sustainability import assess_with_auto_fetch
         result = assess_with_auto_fetch(
             stock_code=code,
             total_shares=total_shares,

@@ -5,13 +5,15 @@
 financial_rows / cashflow_rows / dividend_rows / industry / price_change_1y / top10_holding。
 评估时命中缓存则零网络（秒级），未命中按需补拉。
 
+预取 + 限流 + 写缓存已收进 src.sustainability.prefetch_and_cache（#95）：
+本脚本只负责候选清单与 CLI，不接触快照 JSON 列。
+
 用法:
     python scripts/prefetch_sustainability.py               # 预拉 172 只高股息候选
     python scripts/prefetch_sustainability.py --limit 20    # 调试
     python scripts/prefetch_sustainability.py --all-a       # 拉全部有股息数据的
 """
 import argparse
-import json
 import sys
 import time
 from pathlib import Path
@@ -19,16 +21,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.eastmoney_fetcher import (  # noqa: E402
-    fetch_cashflow_rows,
-    fetch_dividend_rows,
-    fetch_financial_rows,
-    fetch_industry,
-    fetch_price_change_1y,
-    fetch_top10_holding,
-)
-from src.screener_cache import ScreenerCache, SustainabilitySnapshot  # noqa: E402
-from src.screener_rate_limit import batch_wait  # noqa: E402
+from src.screener_cache import ScreenerCache  # noqa: E402
+from src.sustainability import prefetch_and_cache  # noqa: E402
 
 
 def load_candidates(cache: ScreenerCache, all_a: bool = False) -> list:
@@ -40,33 +34,13 @@ def load_candidates(cache: ScreenerCache, all_a: bool = False) -> list:
     return codes
 
 
-def prefetch_one(code: str) -> SustainabilitySnapshot:
-    """预拉单只 6 类数据。
+def prefetch_one(code: str, cache: ScreenerCache):
+    """预拉单只 6 类数据并写缓存。
 
-    数据完整性检查：financial/cashflow 为空数组视为拉取失败（正常公司必有财报），
-    不写缓存（S2 修复：避免空数据投毒导致假阴性 verdict）。
+    内部走 sustainability.prefetch_and_cache（限流 + S2 完整性检查：financial/
+    cashflow 同时为空视为拉取失败，标记 source=东财预拉(失败) 不写缓存，返回 None）。
     """
-    batch_wait()  # 限流
-    financial = fetch_financial_rows(code)
-    cashflow = fetch_cashflow_rows(code)
-    dividend = fetch_dividend_rows(code)
-    industry = fetch_industry(code)
-    price_change = fetch_price_change_1y(code)
-    top10 = fetch_top10_holding(code)
-    # S2：财务/现金流同时为空 → 拉取失败（正常公司必有财报），标记不缓存
-    if (financial is not None and len(financial) == 0
-            and cashflow is not None and len(cashflow) == 0):
-        return SustainabilitySnapshot(code=code, source="东财预拉(失败)")
-    return SustainabilitySnapshot(
-        code=code,
-        financial_rows=json.dumps(financial, ensure_ascii=False) if financial is not None else None,
-        cashflow_rows=json.dumps(cashflow, ensure_ascii=False) if cashflow is not None else None,
-        dividend_rows=json.dumps(dividend, ensure_ascii=False) if dividend is not None else None,
-        industry=industry,
-        price_change_1y=price_change,
-        top10_holding=top10,
-        source="东财预拉",
-    )
+    return prefetch_and_cache(cache, code)
 
 
 def main():
@@ -84,9 +58,7 @@ def main():
 
     t0 = time.time()
     for i, code in enumerate(codes, 1):
-        snap = prefetch_one(code)
-        if snap.source != "东财预拉(失败)":
-            cache.upsert_sustainability(snap)
+        prefetch_one(code, cache)
         if i % 10 == 0 or i == total:
             elapsed = time.time() - t0
             rate = i / elapsed if elapsed > 0 else 0
