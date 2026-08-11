@@ -130,12 +130,10 @@ jobs:
               --jq '.assets[].name' 2>/dev/null | grep -qx "screener.db" || { echo "警告: 无当前版可备份"; exit 0; }
             gh release download screener-seed --repo ${{ github.repository }} \
               --pattern "screener.db" --dir /tmp --clobber || { echo "警告: 备份下载失败，跳过备份"; exit 0; }
+            # 备份一律按「下载日期」命名（非旧 DB 数据日期）：无论运行空档多久，
+            # 刚建的备份日期=今天，不会被下方 cutoff 立即剪掉（防"空档即剪"）。
+            # 也无需读取旧 DB 内容，顺带消除 sqlite3 隐式依赖。
             BK_DATE=$(date -u +%Y%m%d)
-            # 旧 DB 损坏（MAX(updated_at) 为 NULL）时用下载日期兜底，仍保留一份备份。
-            # 注意：命令替换在 set -e 下会因 sqlite3 非零退出码中止，须 || true 兜底
-            PREV_DATE=$(sqlite3 /tmp/screener.db \
-              "SELECT REPLACE(MAX(updated_at), '-', '') FROM quote_snapshot" 2>/dev/null) || PREV_DATE=""
-            [ -n "$PREV_DATE" ] && BK_DATE="$PREV_DATE"
             mv /tmp/screener.db "/tmp/screener_${BK_DATE}.db"
             gh release upload screener-seed --repo ${{ github.repository }} \
               "/tmp/screener_${BK_DATE}.db" --clobber || { echo "警告: 备份上传失败"; exit 0; }
