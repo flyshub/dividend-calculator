@@ -214,11 +214,15 @@ def quarterly_rebalance_dates(trading_days: List[date],
     return out
 
 
-def build_day_after(trading_days: List[date], t: date) -> Optional[date]:
-    """T 之后（不含）第一个交易日 —— T+1 建仓日。"""
+def build_day_after(trading_days: List[date], t: date,
+                    offset: int = 1) -> Optional[date]:
+    """T 之后（不含）第 offset 个交易日 —— 建仓日。默认 offset=1 即 T+1。"""
+    cnt = 0
     for d in trading_days:
         if d > t:
-            return d
+            cnt += 1
+            if cnt >= offset:
+                return d
     return None
 
 
@@ -283,8 +287,12 @@ def portfolio_return(codes: List[str], build_day: date, settle_day: date,
 
 def run_backtest(lookup,
                  start: date = date(2013, 1, 1),
-                 end: date = date(2026, 8, 10)) -> dict:
-    """分层回测主流程。返回五档组合的季度收益与逐层增量超额。"""
+                 end: date = date(2026, 8, 10),
+                 build_offset: int = 1) -> dict:
+    """分层回测主流程。返回五档组合的季度收益与逐层增量超额。
+
+    build_offset: 调仓日 T 之后第 N 个交易日建仓（默认 1 = T+1；稳健性检验用 T+5）。
+    """
     days = lookup.trading_days
     rebalance = quarterly_rebalance_dates(days, start, end)
     all_codes = sorted(lookup.prices.keys())
@@ -294,7 +302,7 @@ def run_backtest(lookup,
     per_quarter: Dict[str, List[Optional[float]]] = {k: [] for k in pools}
 
     for i, T in enumerate(rebalance):
-        build = build_day_after(days, T)
+        build = build_day_after(days, T, offset=build_offset)
         settle = rebalance[i + 1] if i + 1 < len(rebalance) else days[-1]
         if build is None:  # 无下一交易日（末季）：该期无收益，跳过
             for k in per_quarter:
