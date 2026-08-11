@@ -179,6 +179,23 @@ class TestFetchQuoteBatch:
         mock_get.return_value.raise_for_status.side_effect = Exception("500")
         assert fetch_tencent_quote_batch(["600900"]) == {}
 
+    @patch("src.tencent_quote._SESSION.get")
+    def test_multi_batch_splits_at_800(self, mock_get):
+        # 900+ 只 → 按 ≤800 拆 2 批，逐批独立请求
+        codes = [f"{600000 + i}" for i in range(1000)]
+        mock_get.return_value.status_code = 200
+        mock_get.return_value.encoding = "GBK"
+        mock_get.return_value.text = ""
+        assert fetch_tencent_quote_batch(codes) == {}
+        urls = [call.args[0] for call in mock_get.call_args_list]
+        assert len(urls) == 2
+        assert len(urls[0].split(",")) == 800
+        assert len(urls[1].split(",")) == 200
+        assert "sh600000" in urls[0]
+        assert "sh600799" in urls[0]
+        assert "sh600800" in urls[1]
+        assert "sh600999" in urls[1]
+
     def test_empty_input(self):
         assert fetch_tencent_quote_batch([]) == {}
 

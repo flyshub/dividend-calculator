@@ -27,6 +27,7 @@ _FIELD_TOTAL_SHARES = 73 # 总股本（含A+H等全部股份）
 _QUOTE_URL = "https://qt.gtimg.cn/q="
 _KLINE_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
 _BATCH_SIZE = 800        # 研究 #63：900 上限，800 安全裕量
+_KLINE_FQ = "qfq"        # 前复权（当前所有 K 线调用均使用）
 _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 _SESSION = requests.Session()
@@ -117,24 +118,21 @@ def fetch_tencent_quote(stock_code: str, timeout: int = 10) -> Optional[TencentQ
         return None
 
 
-def fetch_tencent_quote_batch(
-    codes: List[str],
-    batch_size: int = _BATCH_SIZE,
-) -> Dict[str, TencentQuote]:
+def fetch_tencent_quote_batch(codes: List[str]) -> Dict[str, TencentQuote]:
     """腾讯批量行情（qt.gtimg.cn/q=），按 v_<code> 标签映射，返回 {code: TencentQuote}。
 
     语义与既有批量实现一致：
     - 指数代码（sh000xxx / sz399xxx）与无效/退市代码静默跳过
     - price 或 total_shares 无效（<=0/缺失）的条目剔除（停牌股）
-    - 单批最多 batch_size 只（接口上限 900，默认 800 安全裕量）
+    - 单批最多 _BATCH_SIZE（800）只（接口上限 900，安全裕量）
     单个批次请求失败返回空结果（不抛，不影响其他批次）。
     """
     valid = [c for c in codes if not _is_index_code(c, _market_prefix(c))]
     if not valid:
         return {}
     result: Dict[str, TencentQuote] = {}
-    for i in range(0, len(valid), batch_size):
-        batch = valid[i:i + batch_size]
+    for i in range(0, len(valid), _BATCH_SIZE):
+        batch = valid[i:i + _BATCH_SIZE]
         url = _QUOTE_URL + ",".join(f"{_market_prefix(c)}{c}" for c in batch)
         try:
             resp = _SESSION.get(url, timeout=(5, 30))
@@ -160,7 +158,6 @@ def fetch_kline_rows(
     stock_code: str,
     period: str = "month",
     count: int = 120,
-    fq: str = "qfq",
 ) -> Optional[List[list]]:
     """腾讯 fqkline 前复权 K 线原始行（每行 [date, open, close, ...]）。
 
@@ -169,7 +166,7 @@ def fetch_kline_rows(
     """
     try:
         prefix = _market_prefix(stock_code)
-        url = f"{_KLINE_URL}?param={prefix}{stock_code},{period},,,{count},{fq}"
+        url = f"{_KLINE_URL}?param={prefix}{stock_code},{period},,,{count},{_KLINE_FQ}"
         resp = _SESSION.get(url, timeout=15)
         resp.raise_for_status()
         data = resp.json()
