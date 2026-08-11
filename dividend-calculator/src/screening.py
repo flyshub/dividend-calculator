@@ -58,10 +58,6 @@ class FunnelCandidate:
     pass_pr: bool = False
     pass_sus: bool = False
 
-    @property
-    def passed(self) -> bool:
-        return self.pass_viability and self.pass_yield and self.pass_pr and self.pass_sus
-
 
 @dataclass
 class FunnelResult:
