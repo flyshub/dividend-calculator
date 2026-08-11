@@ -33,13 +33,10 @@ from src.screener_rate_limit import batch_wait  # noqa: E402
 
 def load_candidates(cache: ScreenerCache, all_a: bool = False) -> list:
     """待预拉的候选代码。默认高股息候选（real>5 且 ttm>5），all_a 则全部。"""
-    with cache._conn() as conn:
-        if all_a:
-            codes = [r[0] for r in conn.execute(
-                "SELECT code FROM dividend_snapshot WHERE real_yield IS NOT NULL ORDER BY code").fetchall()]
-        else:
-            codes = [r[0] for r in conn.execute(
-                "SELECT code FROM dividend_snapshot WHERE real_yield>5 AND ttm_yield>5 ORDER BY code").fetchall()]
+    if all_a:
+        codes = cache.get_dividend_codes(require_real_yield=True)
+    else:
+        codes = cache.get_dividend_codes(real_yield_min=5.0, ttm_yield_min=5.0)
     return codes
 
 

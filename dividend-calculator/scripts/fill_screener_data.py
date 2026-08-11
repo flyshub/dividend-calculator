@@ -33,9 +33,7 @@ def _report(done: int, total: int, t0: float, tag: str):
 def fill_dividends(cache: ScreenerCache, limit: int = 0):
     """全 A 逐股拉股息（带进度汇报）。"""
     from src.screener_dividend import compute_dividends_for_candidates
-    with cache._conn() as conn:
-        codes = [r[0] for r in conn.execute(
-            "SELECT code FROM stock_list ORDER BY code").fetchall()]
+    codes = cache.get_stock_codes()
     if limit:
         codes = codes[:limit]
     total = len(codes)
@@ -55,11 +53,8 @@ def fill_dividends(cache: ScreenerCache, limit: int = 0):
 def fill_finance(cache: ScreenerCache, limit: int = 0):
     """全 A 逐股拉财务/PR（带进度汇报）。"""
     from src.screener_pr import evaluate_pr_batch
-    with cache._conn() as conn:
-        # 只对股息>5% 的候选（漏斗② 之后）评估 PR——但此处补全财务，拉全有股息率的
-        codes = [r[0] for r in conn.execute(
-            "SELECT code FROM dividend_snapshot WHERE real_yield IS NOT NULL "
-            "AND real_yield>0 ORDER BY code").fetchall()]
+    # 只对股息>5% 的候选（漏斗② 之后）评估 PR——但此处补全财务，拉全有股息率的
+    codes = cache.get_dividend_codes(real_yield_min=0.0)
     if limit:
         codes = codes[:limit]
     total = len(codes)
