@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/badge/Python-3.9%2B-blue)](https://www.python.org/)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPLv3-blue.svg)](#-许可证)
 [![GitHub Pages](https://img.shields.io/badge/GitHub%20Pages-online-brightgreen)](https://flyshub.github.io/dividend-calculator/)
-[![Tests](https://img.shields.io/badge/Tests-415%20Python%20%2B%2083%20JS-green)](dividend-calculator/tests/)
+[![Tests](https://img.shields.io/badge/Tests-419%20Python%20%2B%2082%20JS-green)](dividend-calculator/tests/)
 
 > 📈 **在线体验**（纯前端，无需安装）：<https://flyshub.github.io/dividend-calculator/>
 >
@@ -84,8 +84,8 @@ print(f"市赚率: {result.pr_basic:.3f}")
 ### 运行测试
 
 ```bash
-python -m pytest tests/ -q      # Python 415 个测试
-node --test "site/js/*.test.js" # JS 83 个测试
+python -m pytest tests/ -q      # Python 419 个测试
+node --test "site/js/*.test.js" # JS 82 个测试
 python scripts/verify_js_vs_python.py   # 双端一致性验证
 ```
 
@@ -156,12 +156,16 @@ N 因子 = 50% / 股利支付率，区间 [1.0, 2.0]（支付率 ≥50% → N=1.
 dividend-calculator/
 ├── src/                  # Python 实现（CLI + 本地 Web）
 │   ├── main.py           # CLI 入口
-│   ├── web.py            # 本地 Web 服务
+│   ├── web.py            # 本地 Web 服务（服务 site/ 单一页面）
 │   ├── dividend.py       # 股息率计算
+│   ├── dividend_records.py # 分红明细单一解析模块（#93，各源 adapter + 财年判定）
 │   ├── pr.py             # 市赚率计算
-│   ├── sustainability.py # 分红可持续性评估
+│   ├── pr_calculator.py  # 市赚率纯计算器
+│   ├── sustainability.py # 分红可持续性数据获取 + 缓存（prefetch_and_cache/assess_from_cache）
+│   ├── sustainability_calculator.py # 可持续性纯评估器
 │   ├── screening.py      # 选股器四级漏斗口径
 │   ├── screener*.py      # 选股器采集/缓存/可持续性
+│   ├── tencent_quote.py  # 腾讯行情收敛（ADR-0002）
 │   └── datasource/       # 腾讯/新浪/mootdx 多数据源降级
 ├── site/                 # GitHub Pages 纯前端（browser 直连数据源）
 ├── scripts/              # 一致性验证 + 选股器初始化/导出
@@ -178,6 +182,7 @@ dividend-calculator/
 | PE_TTM / PB | 腾讯行情 | akshare 同花顺(EPS 推算) → 东方财富 push2 |
 | 总股本 | 腾讯 Index 73 | mootdx finance |
 | 除权除息 / 分红 | akshare fhps_detail_em（东财 datacenter，按报告期判财年） | akshare cninfo → mootdx xdxr |
+| 分红解析 | `dividend_records` 模块统一入口（各源 adapter + `classify_fiscal_report` 财年判定） | — |
 | ROE / 净利润 | mootdx F10 财务分析 | akshare 同花顺 |
 | 行业分类 | mootdx F10 行业分析 | 东方财富 datacenter |
 | 可持续性字段 | 东方财富 datacenter | — |
@@ -195,7 +200,7 @@ dividend-calculator/
 
 ## ✅ 质量保证
 
-- **415 Python 单元测试 + 83 JS 单元测试**：财年推断、市赚率公式、可持续性评分、数据源注入、双端对齐、选股器
+- **419 Python 单元测试 + 82 JS 单元测试**：财年推断、市赚率公式、可持续性评分、数据源注入、双端对齐、选股器
 - **跨语言一致性验证**：`scripts/verify_js_vs_python.py` 让 JS 与 Python 消费**相同原始数据**逐字段对比，含可持续性全部字段
 - **CI 自动运行**：GitHub Actions 每次提交跑全部测试（见 `.github/workflows/ci.yml`）
 

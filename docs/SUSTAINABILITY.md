@@ -174,7 +174,7 @@ N. 优势项：{强维度（≤2 条）} ← 偏弱/可持续时列出，带支�
 | 文件 | 职责 |
 |------|------|
 | `src/sustainability_calculator.py` | **纯评估器**（无 IO/网络）：`AnnualFinancial` / `DividendHistory` / `SustainabilityResult` dataclass + 衍生指标计算 + 致命红旗 + 维度评分 + 情境红旗 + `assess_sustainability` 主入口。所有阈值/权重常量在此。 |
-| `src/sustainability.py` | **数据获取层**：东财接口 fetch（财务/现金流量表/分红/行业）+ 解析纯函数（`parse_financial_rows` / `merge_capex` / `parse_dividend_rows` / `aggregate_dividend_history`）+ 编排入口（`assess_for_stock` / `assess_with_auto_fetch`）。 |
+| `src/sustainability.py` | **数据获取层**：东财接口 fetch（财务/现金流量表/分红/行业）+ 解析纯函数（`parse_financial_rows` / `merge_capex` / `parse_dividend_rows` / `aggregate_dividend_history`）+ 财年判定单一实现 `classify_fiscal_report`（month==12 → 年报，其余 → 中期分配）+ 编排入口（`assess_for_stock` / `assess_with_auto_fetch`）+ 高层缓存接口 `prefetch_and_cache` / `assess_from_cache`（快照 JSON 序列化收在模块内部）。 |
 | `src/analysis.py` | 主编排：`run_stock_analysis` 第 4 步，股息率 > 阈值时调 `assess_with_auto_fetch`，结果挂到 `StockAnalysisResult.sustainability`。 |
 | `src/web.py` | `/api/pr` 序列化 `sustainability` 字段。 |
 | `calc_pr.py` | CLI 打印可持续性结论段。 |
@@ -190,7 +190,7 @@ N. 优势项：{强维度（≤2 条）} ← 偏弱/可持续时列出，带支�
 
 ### 一致性校验
 
-`scripts/verify_js_vs_python.py`：取同一批东财 fixture，分别喂给 JS `computeFromRaw` 和 Python `assess_for_stock` 纯函数，逐字段对比（容差 1e-9）。可持续性字段：`sustainability_triggered`、`sustainability_verdict`、`sustainability_score`。
+`scripts/verify_js_vs_python.py`：取同一批东财 fixture，分别喂给 JS `computeFromRaw` 和 Python 侧，逐字段对比（容差 1e-9）。分红对账对象为 `dividend_records.summarize_dividend_rows`（#99 起），可持续性对账对象为 `assess_for_stock` 纯函数。可持续性字段：`sustainability_triggered`、`sustainability_verdict`、`sustainability_score`。
 
 ---
 
