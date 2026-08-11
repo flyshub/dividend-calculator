@@ -17,7 +17,8 @@ from src.sustainability_calculator import SustainabilityResult, explain_sustaina
 
 logger = logging.getLogger(__name__)
 
-STATIC_DIR = Path(__file__).resolve().parent / "static"
+# 页面来源与 GitHub Pages 统一为 site/（#94 双端收拢第一步）
+STATIC_DIR = project_root / "site"
 INDEX_FILE = STATIC_DIR / "index.html"
 SCREENER_FILE = STATIC_DIR / "screener.html"
 
@@ -63,13 +64,13 @@ class DividendRequestHandler(BaseHTTPRequestHandler):
             return
 
         if parsed_url.path.startswith("/screener/"):
-            # 选股结果 JSON（src/static/screener/，与 site/screener/ 双目录同源）
+            # 选股结果 JSON（site/screener/，与 GitHub Pages 同源）
             rel = Path(parsed_url.path).name
             self._send_file(STATIC_DIR / "screener" / rel, "application/json; charset=utf-8")
             return
 
         if parsed_url.path.startswith("/js/"):
-            # 页面引用的 JS（src/static/js/），如 screener_render.js
+            # 页面引用的 JS（site/js/），如 screener_render.js
             rel = Path(parsed_url.path).name
             self._send_file(STATIC_DIR / "js" / rel, "application/javascript; charset=utf-8")
             return
