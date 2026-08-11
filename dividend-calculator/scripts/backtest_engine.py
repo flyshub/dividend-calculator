@@ -172,15 +172,14 @@ class BacktestLookup:
         return self._latest(self.pes.get(code, []), asof)
 
     def total_shares(self, code: str, asof: date) -> Optional[float]:
-        """总股本（虚构占位，待真实值入库，详见 #165）。
+        """总股本（腾讯 Index 73 当前快照，#165 已入库）。
 
-        当前 DB 无 total_shares 表，self.shares 为空 → 返回 1.0。
-        1.0 是**虚构占位值**，违反数据铁律 #2「数据必须有真实来源」——已知限制，
-        待 #165 全量拉取腾讯 Index 73 真实值入库后修复。
+        DB 已建 total_shares 表（拉取脚本见 build_total_shares），表为空时
+        回退 1.0（虚构占位值，违反数据铁律 #2）——仅在表未填充时使用。
 
         股息率计算数学等价（每股法 ≡ 总额法，分子分母同乘 shares 约分），故
-        real/ttm yield 不受影响；sustainability 支付率（dps×1.0 / net_profit）
-        会失真——已在报告 §1 如实标注。
+        real/ttm yield 不受 shares 缺失影响；sustainability 支付率（dps×1.0 /
+        net_profit）会失真——已在报告 §1 如实标注。
         """
         return self.shares.get(code, 1.0)
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sqlite3
 import sys
 from collections import defaultdict
 from datetime import date
@@ -208,19 +209,23 @@ def section_hfq_comparison(eng: dict, lookup: BacktestLookup) -> str:
 def section_robustness(lookup: BacktestLookup, conn) -> str:
     """§ 稳健性检验（四变体，#89 要求年化/回撤/夏普/超额对比表）。
 
-    注：剔微盘变体依赖真实总股本算市值，DB 无股本表用 1.0 近似时
-    全部股票市值 < 50亿会被全剔（结果 0.00%）。该变体需 total_shares 真实值入库
-    后才能产出有意义结论——此处保留代码结构，结果如实呈现并标注。
+    注：剔微盘变体依赖真实总股本算市值，total_shares 表已入库（腾讯 Index 73
+    当前快照，全 A 99.9% 覆盖）。市值用 当日价格 × 当前总股本 近似（股本历史
+    不可得，分红/增发会改变股本，详见 §5 限制）。
     """
     names = load_names(conn)
+    try:
+        industries = dict(conn.execute("SELECT code, industry FROM industry").fetchall())
+    except sqlite3.OperationalError:
+        industries = {}
     variants = [
         ("主回测 T+1", lambda: run_variant(lookup, "主回测 T+1")),
         ("剔微盘（市值<50亿）",
          lambda: run_variant(lookup, "剔微盘",
                              filter_fn=lambda cs, T: filter_small_cap(lookup, cs, T))),
-        ("剔金融（名称近似）",
+        ("剔金融（行业分类）",
          lambda: run_variant(lookup, "剔金融",
-                             filter_fn=lambda cs, T: filter_financial(cs, names))),
+                             filter_fn=lambda cs, T: filter_financial(cs, names, industries))),
         ("延迟 T+5 调仓", lambda: run_variant(lookup, "延迟T+5", build_offset=5)),
     ]
 
@@ -246,9 +251,8 @@ def section_robustness(lookup: BacktestLookup, conn) -> str:
 
     body = _table(["变体", "累计", "年化", "回撤", "夏普", "超额(vs主)", "季度数"], rows) + "\n"
     body += (
-        "\n*剔微盘变体依赖真实总股本算市值；当前 total_shares 用 1.0 近似时"
-        "全部股票市值 < 50亿被全剔（结果 0.00%）。需 total_shares 真实值入库"
-        "（T2 数据管线待办）后才能产出有意义结论。*\n\n"
+        "\n*剔微盘变体用真实总股本（腾讯 Index 73 当前快照，全 A 99.9% 覆盖）"
+        "× 当日价格算市值；股本历史不可得，市值会因增发/分红后股本变动而失真。*\n\n"
     )
     return body
 
@@ -276,7 +280,7 @@ def section_sensitivity(lookup: BacktestLookup, eng: dict) -> str:
                       scan_weighting(lookup, eng)))
     out.append("\n")
     out.append("> 备注：full 层样本小（每季度 5-7 只），Top10/Top20 退化为全池；")
-    out.append("市值加权在 total_shares=1.0 近似下退化为价格加权。\n")
+    out.append("市值加权用真实总股本（腾讯 Index 73）× 当日价格。\n")
     return "".join(out)
 
 
@@ -297,9 +301,10 @@ def section_conclusion(eng: dict) -> str:
         "3. 稳健性四变体结论：剔微盘/剔金融/延迟 T+5/随机起点 的累计收益见上表，"
         "若与主回测方向一致则结论稳健。\n\n"
         "## 已知限制（不掩饰）\n\n"
-        "- **历史总股本不可得**：用每股口径近似（数学等价于总额法），"
-        "sustainability 支付率维度受影响。\n"
-        "- **行业取名称近似**（剔金融变体）：无法精确识别所有金融股。\n"
+        "- **股本为当前快照非历史**：total_shares 用腾讯 Index 73 当前值，"
+        "回测期内增发/分红送股会改变真实股本，市值加权与剔微盘会失真（sustainability "
+        "支付率仍按每股口径，不受影响）。\n"
+        "- **行业为当前快照**：行业用东财 EM2016 当前分类，回测期内行业变更（如银行转金控）未反映。\n"
         "- **top10_holding 缺失**：一股独大红旗不触发，可持续性判定可能高估。\n"
         "- **财务字段覆盖有限**：interest_coverage / net_interest_margin / npl_ratio "
         "等未入库，部分维度降级。\n"

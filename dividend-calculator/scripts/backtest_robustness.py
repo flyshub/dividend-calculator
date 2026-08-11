@@ -56,10 +56,22 @@ def filter_small_cap(lookup, codes: Sequence[str], T: date,
 
 
 def filter_financial(codes: Sequence[str],
-                     names: Dict[str, str]) -> List[str]:
-    """剔除名称含金融关键词的股票。"""
-    return [c for c in codes if not any(
-        k in names.get(c, "") for k in _FIN_KEYWORDS)]
+                     names: Dict[str, str],
+                     industries: Optional[Dict[str, str]] = None) -> List[str]:
+    """剔除金融股：优先用 industry 表真实分类，回退到名称近似。
+
+    industry 表（东财 F10）以"金融-..."开头 = 金融行业（银行/证券/保险/信托/其他非银）。
+    缺失时回退到名称包含 _FIN_KEYWORDS 的近似判定。
+    """
+    out = []
+    for c in codes:
+        ind = (industries or {}).get(c, "")
+        if ind.startswith("金融"):
+            continue
+        if not ind and any(k in names.get(c, "") for k in _FIN_KEYWORDS):
+            continue
+        out.append(c)
+    return out
 
 
 def random_start_offsets(n: int = 4, seed: int = 42) -> List[date]:

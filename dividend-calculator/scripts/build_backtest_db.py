@@ -41,18 +41,22 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+import re
+
 import requests
 import requests.adapters
 from urllib3.util.retry import Retry
 
 from src.eastmoney_fetcher import fetch_dividend_rows, fetch_financial_rows
 
+_FIELD_TOTAL_SHARES = 73  # 腾讯行情字段下标（总股本，含 A+H，A+H 必须用此）
+
 DB_PATH = PROJECT_ROOT / "data" / "backtest.db"
 
 SAMPLE_CODES = ["600036", "600900", "601398", "000001", "601988"]
 INDEX_CODES = ["H00922", "H00300"]
 
-_KLINE_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+_KLINE_URL = "https://ifzq.gtimg.cn/appstock/app/fqkline/get"
 # 腾讯日K单次最多约 2000 根（实测 3000/5000 被拒），2013-2026 分两段
 _KLINE_SEGMENTS = [("2013-01-01", "2018-12-31"), ("2019-01-01", None)]  # None=今天
 _RATE_LIMIT_SLEEP = 0.15  # 批量拉取限速友好（0.1-0.3s）
@@ -126,6 +130,18 @@ SCHEMA = {
             code       TEXT NOT NULL,
             built_at   TEXT NOT NULL DEFAULT (datetime('now')),
             PRIMARY KEY (table_name, code)
+        )""",
+    "total_shares": """
+        CREATE TABLE IF NOT EXISTS total_shares (
+            code         TEXT PRIMARY KEY,
+            total_shares REAL NOT NULL,
+            asof         TEXT NOT NULL DEFAULT (datetime('now'))  -- 拉取日期（当前快照，无历史）
+        )""",
+    "industry": """
+        CREATE TABLE IF NOT EXISTS industry (
+            code     TEXT PRIMARY KEY,
+            industry TEXT NOT NULL,   -- EM2016 优先 / INDUSTRYCSRC1 降级
+            asof     TEXT NOT NULL DEFAULT (datetime('now'))
         )""",
 }
 
@@ -463,12 +479,93 @@ def build_index_daily(conn: sqlite3.Connection, codes: list = None) -> None:
     print(f"index_daily: 已写入 {INDEX_CODES}")
 
 
+_BATCH_QUOTES_URL = "https://qt.gtimg.cn/q="
+
+
+def build_total_shares(conn: sqlite3.Connection, codes: list) -> None:
+    """总股本（腾讯 Index 73，含 A+H）—— 当前快照（无历史，单值）。
+
+    批量接口 50 只/批，单批 ~0.5s，5903 只约 60s（含限速）。失败批次中的 code
+    不标记完成，下次重试（断点续传不跳过失败项）。
+    """
+    pending = [c for c in codes if not _is_done(conn, "total_shares", c)]
+    print(f"total_shares: 待拉 {len(pending)}/{len(codes)}")
+    BATCH = 50
+    n_ok = 0
+    for i in range(0, len(pending), BATCH):
+        batch = pending[i:i + BATCH]
+        try:
+            qs = ",".join(f"{_tencent_prefix(c)}{c}" for c in batch)
+            text = _get(f"{_BATCH_QUOTES_URL}{qs}").text
+        except Exception as e:
+            print(f"  [warn] 批 {i//BATCH+1} 失败: {e}")
+            continue
+        rows = []
+        for c in batch:
+            prefix = _tencent_prefix(c)
+            # 实际响应：v_sh600036="...~"（每个 code 由 v_<prefix><code>="..." 标识）
+            m = re.search(rf'v_{prefix}{c}="([^"]+)"', text)
+            if not m or len(m.group(1).split("~")) <= _FIELD_TOTAL_SHARES:
+                continue
+            fields = m.group(1).split("~")
+            try:
+                ts = float(fields[_FIELD_TOTAL_SHARES])
+            except (ValueError, TypeError):
+                continue
+            if ts > 0:
+                rows.append((c, ts))
+                _mark_done(conn, "total_shares", c)
+        if rows:
+            conn.executemany(
+                "INSERT OR REPLACE INTO total_shares (code, total_shares) VALUES (?, ?)",
+                rows,
+            )
+            conn.commit()
+            n_ok += len(rows)
+        if (i // BATCH + 1) % 10 == 0:
+            print(f"  total_shares 批 {i//BATCH+1}/{(len(pending)+BATCH-1)//BATCH}, ok={n_ok}")
+        _pace()
+    print(f"total_shares: {n_ok} 只写入")
+
+
+def build_industry(conn: sqlite3.Connection, codes: list) -> None:
+    """行业（东财 EM2016 优先 / INDUSTRYCSRC1 降级）—— 当前快照（单值）。
+
+    单只串行 + _pace 限速（东节数据源限流）；5903 只约 25 分钟。
+    失败 code 不标记完成。
+    """
+    from src.eastmoney_fetcher import fetch_industry
+    n_ok = 0
+    pending = [c for c in codes if not _is_done(conn, "industry", c)]
+    print(f"industry: 待拉 {len(pending)}/{len(codes)}")
+    for i, code in enumerate(pending):
+        try:
+            ind = fetch_industry(code)
+        except Exception as e:
+            print(f"  [warn] {code} industry 拉取失败: {e}")
+            continue
+        if ind:
+            conn.execute(
+                "INSERT OR REPLACE INTO industry (code, industry) VALUES (?, ?)",
+                (code, ind),
+            )
+            conn.commit()
+            _mark_done(conn, "industry", code)
+            n_ok += 1
+        if (i + 1) % 100 == 0:
+            print(f"  industry 进度 {i+1}/{len(pending)}, ok={n_ok}")
+        _pace()
+    print(f"industry: {n_ok} 只写入")
+
+
 BUILDERS.update({
     "daily_price": build_daily_price,
     "daily_pe": build_daily_pe,
     "dividend_history": build_dividend,
     "finance_history": build_finance,
     "index_daily": build_index_daily,
+    "total_shares": build_total_shares,
+    "industry": build_industry,
 })
 
 
