@@ -158,8 +158,40 @@ def section_portfolio_perf(eng: dict, lookup: BacktestLookup, conn) -> str:
     return _table(["组合", "累计收益", "年化", "年波动", "夏普", "最大回撤", "胜率"], rows) + "\n\n"
 
 
+def section_hfq_comparison(eng: dict, lookup: BacktestLookup) -> str:
+    """§ hfq 无税上界对照（方案 V3 + #88 要求）。
+
+    hfq（后复权）收益隐含全额免税分红复投，是税后真实收益的上界。
+    本节用 tax_override=0.0（数学等价 hfq 全收益）做无税对照，与税后版对比。
+    DB 未入库 hfq 价格，故用「价格收益 + 全额分红复投」等价计算。
+    """
+    port_after = run_portfolio(lookup, eng, cost=0.003)
+    port_pretax = run_portfolio(lookup, eng, cost=0.003, tax_override=0.0)
+
+    rows = []
+    for key, label in [("base", "全A等权"), ("l2", "+L2"),
+                       ("l3", "+L3"), ("l4", "+L4"), ("full", "全漏斗")]:
+        after = port_after["quarterly_returns"].get(key, [])
+        pretax = port_pretax["quarterly_returns"].get(key, [])
+        m_a = performance_metrics({key: after})[key]
+        m_p = performance_metrics({key: pretax})[key]
+        rows.append([label, _pct(m_a["cumulative"]), _pct(m_p["cumulative"]),
+                     _pct(m_p["cumulative"] - m_a["cumulative"])])
+
+    return (
+        _table(["组合", "税后累计", "无税(hfq)累计", "红利税拖累"], rows)
+        + "\n*无税(hfq) = tax_override=0.0（数学等价 hfq 后复权全收益）。"
+        " 红利税拖累 = 无税 - 税后，反映三档红利税的累计影响。*\n\n"
+    )
+
+
 def section_robustness(lookup: BacktestLookup, conn) -> str:
-    """§ 稳健性检验（四变体）。"""
+    """§ 稳健性检验（四变体）。
+
+    注：剔微盘变体依赖真实总股本算市值，DB 无股本表用 1.0 近似时
+    全部股票市值 < 50亿会被全剔（结果 0.00%）。该变体需 total_shares 真实值入库
+    后才能产出有意义结论——此处保留代码结构，结果如实呈现并标注。
+    """
     names = load_names(conn)
     variants = [
         ("主回测 T+1", lambda: run_variant(lookup, "主回测 T+1")),
@@ -180,7 +212,13 @@ def section_robustness(lookup: BacktestLookup, conn) -> str:
         except Exception as e:
             rows.append([name, "运行失败", str(e)[:40]])
 
-    return _table(["变体", "全漏斗累计收益", "季度数"], rows) + "\n\n"
+    body = _table(["变体", "全漏斗累计收益", "季度数"], rows) + "\n"
+    body += (
+        "\n*剔微盘变体依赖真实总股本算市值；当前 total_shares 用 1.0 近似时"
+        "全部股票市值 < 50亿被全剔（结果 0.00%）。需 total_shares 真实值入库"
+        "（T2 数据管线待办）后才能产出有意义结论。*\n\n"
+    )
+    return body
 
 
 def section_conclusion(eng: dict) -> str:
@@ -242,6 +280,9 @@ def generate_report(db_path: str, out_path: str) -> None:
 
         "## §3 组合绩效 vs 双基准\n\n",
         section_portfolio_perf(eng, lookup, conn),
+
+        "## §3.1 hfq 无税上界对照\n\n",
+        section_hfq_comparison(eng, lookup),
 
         "## §4 稳健性检验\n\n",
         section_robustness(lookup, conn),

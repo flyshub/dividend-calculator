@@ -19,7 +19,7 @@
 import json
 import random
 import sqlite3
-from datetime import date, timedelta
+from datetime import date
 from typing import Dict, List, Optional, Sequence
 
 from backtest_engine import BacktestLookup, run_backtest, quarterly_rebalance_dates
@@ -63,24 +63,32 @@ def filter_financial(codes: Sequence[str],
 
 
 def random_start_offsets(n: int = 4, seed: int = 42) -> List[date]:
-    """固定种子生成 n 个随机起始日（2013 年起随机偏移 0-270 天）。"""
+    """固定种子生成 n 个随机起始季（2013Q1 起偏移 0-3 季度）。
+
+    spec：起始季平移——天数偏移不改变 (y,m) 季度末过滤后的调仓序列，
+    必须按季度偏移才能真正改变起点。固定种子保证可复现。
+    """
     rng = random.Random(seed)
     base = date(2013, 1, 1)
-    return [base + timedelta(days=rng.randint(0, 270)) for _ in range(n)]
+    out: List[date] = []
+    for _ in range(n):
+        q_offset = rng.randint(0, 3)  # 0-3 季度偏移
+        year = base.year + (base.month - 1 + q_offset * 3) // 12
+        month = (base.month - 1 + q_offset * 3) % 12 + 1
+        out.append(date(year, month, 1))
+    return out
 
 
 def run_variant(lookup, name: str, build_offset: int = 1,
                 filter_fn=None) -> dict:
     """跑一组回测，返回全漏斗/各层累计 + 分层增量超额。
 
-    filter_fn: Optional[Callable[[list, date], list]] —— (codes, T) → 过滤后 codes，
-    按每个调仓日 T 逐期过滤（市值/行业过滤必须用当季价格与数据，避免未来函数）。
+    filter_fn 通过 run_backtest 的 filter_fn 参数接入收益计算链路——
+    在每季度 portfolio_return 之前逐期过滤候选池（市值/行业过滤必须用当季价格，
+    避免未来函数）。若不接入 run_backtest 而仅后置过滤 pools，则过滤是 no-op
+    （收益已按未过滤池算完，过滤不影响结果）。
     """
-    res = run_backtest(lookup, build_offset=build_offset)
-    if filter_fn is not None:
-        for i, T in enumerate(res["rebalance_dates"]):
-            for k in ("base", "l2", "l3", "l4", "full"):
-                res["pools"][k][i] = filter_fn(res["pools"][k][i], T)
+    res = run_backtest(lookup, build_offset=build_offset, filter_fn=filter_fn)
     return {
         "name": name,
         "incremental_excess": res["incremental_excess"],

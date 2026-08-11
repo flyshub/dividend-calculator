@@ -37,12 +37,16 @@ BENCH_ALT = "H00300"    # 沪深300全收益
 
 
 def after_tax_dividend_contrib(
-    lookup, code: str, build_day: date, settle_day: date
+    lookup, code: str, build_day: date, settle_day: date,
+    tax_override: Optional[float] = None,
 ) -> float:
     """区间内每笔分红按持仓时长定税后净额，于除权日按当日价格再买入。
 
     返回 Σ(税后每股分红 / 除权日价格)，即分红复投对总收益的收益率贡献。
     无未来函数：只取公告日 ≤ settle_day 的记录。
+
+    tax_override: 若非 None，所有分红按此单一税率计算（用于 hfq 无税上界对照，
+    tax_override=0.0 即数学等价于 hfq 全收益）。
     """
     records = lookup.dividends(code, settle_day) or []
     contrib = 0.0
@@ -57,22 +61,28 @@ def after_tax_dividend_contrib(
         px = lookup.price(code, ex_date)
         if not px:
             continue
-        hold_days = (ex_date - build_day).days
-        if hold_days > 365:
-            tax = TAX_GT_1Y
-        elif hold_days >= 30:
-            tax = TAX_1M_1Y
+        if tax_override is not None:
+            tax = tax_override
         else:
-            tax = TAX_LT_1M
+            hold_days = (ex_date - build_day).days
+            if hold_days > 365:
+                tax = TAX_GT_1Y
+            elif hold_days >= 30:
+                tax = TAX_1M_1Y
+            else:
+                tax = TAX_LT_1M
         contrib += dps * (1.0 - tax) / px
     return contrib
 
 
 def portfolio_total_return(
     lookup, codes: Sequence[str], build_day: date, settle_day: date,
-    cost: float = COST,
+    cost: float = COST, tax_override: Optional[float] = None,
 ) -> Optional[float]:
-    """等权组合区间总收益（价格收益 + 税后分红复投 - 双边成本）。"""
+    """等权组合区间总收益（价格收益 + 税后分红复投 - 双边成本）。
+
+    tax_override: 非 None 时所有分红按此税率计算（hfq 无税对照用 0.0）。
+    """
     rets = []
     for code in codes:
         pb = lookup.price(code, build_day)
@@ -80,7 +90,8 @@ def portfolio_total_return(
         if not pb or not ps:
             continue
         price_ret = ps / pb - 1.0
-        div_contrib = after_tax_dividend_contrib(lookup, code, build_day, settle_day)
+        div_contrib = after_tax_dividend_contrib(
+            lookup, code, build_day, settle_day, tax_override=tax_override)
         rets.append((1.0 + price_ret) * (1.0 + div_contrib) - 1.0)
     if not rets:
         return None
@@ -121,9 +132,12 @@ def top_n_codes(lookup, codes: Sequence[str], T: date, n: int) -> List[str]:
 
 def run_portfolio(
     lookup, engine_result: dict, top_n: Optional[int] = None,
-    cost: float = COST,
+    cost: float = COST, tax_override: Optional[float] = None,
 ) -> dict:
-    """对每档每季度：等权（或 TopN）总收益 + 换手率。"""
+    """对每档每季度：等权（或 TopN）总收益 + 换手率。
+
+    tax_override: 非 None 时所有分红按此税率计算（hfq 无税上界对照用 0.0）。
+    """
     rebalance = engine_result["rebalance_dates"]
     pools = engine_result["pools"]
     layers = ("base", "l2", "l3", "l4", "full")
@@ -147,7 +161,8 @@ def run_portfolio(
         for k in layers:
             codes = pools[k][i]
             sel = top_n_codes(lookup, codes, T, top_n) if top_n and codes else codes
-            r = portfolio_total_return(lookup, sel, bd, settle, cost)
+            r = portfolio_total_return(lookup, sel, bd, settle, cost,
+                                       tax_override=tax_override)
             quarterly[k].append(r)
             cur = set(sel)
             if prev_pool[k]:

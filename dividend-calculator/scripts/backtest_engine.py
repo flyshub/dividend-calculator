@@ -299,10 +299,14 @@ def portfolio_return(codes: List[str], build_day: date, settle_day: date,
 def run_backtest(lookup,
                  start: date = date(2013, 1, 1),
                  end: date = date(2026, 8, 10),
-                 build_offset: int = 1) -> dict:
+                 build_offset: int = 1,
+                 filter_fn=None) -> dict:
     """分层回测主流程。返回五档组合的季度收益与逐层增量超额。
 
     build_offset: 调仓日 T 之后第 N 个交易日建仓（默认 1 = T+1；稳健性检验用 T+5）。
+    filter_fn: Optional[(codes, T) -> codes] 按每个调仓日 T 逐期过滤候选池
+        （base/l2/l3/l4/full 每层均过滤），在 portfolio_return 之前应用，使过滤
+        真正进入收益链路（T6 稳健性变体用）。默认 None 不过滤。
     """
     days = lookup.trading_days
     rebalance = quarterly_rebalance_dates(days, start, end)
@@ -336,11 +340,16 @@ def run_backtest(lookup,
             if layer >= 4:
                 layer_buckets["full"].append(code)
 
+        # 稳健性过滤：在收益计算前逐期过滤候选池（防 no-op）
+        if filter_fn is not None:
+            for k in ("base", "l2", "l3", "l4", "full"):
+                layer_buckets[k] = filter_fn(layer_buckets[k], T)
+
         for k, codes in layer_buckets.items():
             pools[k].append(codes)
             per_quarter[k].append(portfolio_return(codes, build, settle, lookup))
 
-    # 逐层增量超额（核心交付）：+L2 超基线、+L3 超 L2、+L4 超 L3、全漏斗超 L4
+    # 逐层增量超额（核心交付）：+L2 超基线、+L3 超 L2、+L4 超 L3、全漏斗超 L4、全漏斗超基线
     def cum(rets) -> float:
         vs = [r for r in rets if r is not None]
         if not vs:
@@ -352,12 +361,18 @@ def run_backtest(lookup,
 
     layers = ("base", "l2", "l3", "l4", "full")
     excess = {}
+    # 逐层
     for i in range(1, len(layers)):
         prev, cur = layers[i - 1], layers[i]
         excess[f"{cur}_over_{prev}"] = [
             (r - p) if (r is not None and p is not None) else None
             for r, p in zip(per_quarter[cur], per_quarter[prev])
         ]
+    # 全漏斗 vs 基线（报告 headline 用）
+    excess["full_over_base"] = [
+        (r - p) if (r is not None and p is not None) else None
+        for r, p in zip(per_quarter["full"], per_quarter["base"])
+    ]
 
     return {
         "rebalance_dates": rebalance,
