@@ -71,13 +71,16 @@ def random_start_offsets(n: int = 4, seed: int = 42) -> List[date]:
 
 def run_variant(lookup, name: str, build_offset: int = 1,
                 filter_fn=None) -> dict:
-    """跑一组回测，返回全漏斗/各层累计 + 分层增量超额。"""
+    """跑一组回测，返回全漏斗/各层累计 + 分层增量超额。
+
+    filter_fn: Optional[Callable[[list, date], list]] —— (codes, T) → 过滤后 codes，
+    按每个调仓日 T 逐期过滤（市值/行业过滤必须用当季价格与数据，避免未来函数）。
+    """
     res = run_backtest(lookup, build_offset=build_offset)
-    # 变体过滤：仅对入选池做后过滤，等价于漏斗后置剔除
     if filter_fn is not None:
-        for i in range(len(res["rebalance_dates"])):
+        for i, T in enumerate(res["rebalance_dates"]):
             for k in ("base", "l2", "l3", "l4", "full"):
-                res["pools"][k][i] = filter_fn(res["pools"][k][i])
+                res["pools"][k][i] = filter_fn(res["pools"][k][i], T)
     return {
         "name": name,
         "incremental_excess": res["incremental_excess"],
@@ -94,10 +97,10 @@ def main() -> None:
     results = [run_variant(lookup, "主回测 (T+1)")]
     results.append(run_variant(
         lookup, "剔微盘 <50亿",
-        filter_fn=lambda cs: filter_small_cap(lookup, cs, date(2026, 8, 10))))
+        filter_fn=lambda cs, T: filter_small_cap(lookup, cs, T)))
     results.append(run_variant(
         lookup, "剔金融",
-        filter_fn=lambda cs: filter_financial(cs, names)))
+        filter_fn=lambda cs, T: filter_financial(cs, names)))
     results.append(run_variant(lookup, "延迟 T+5", build_offset=5))
 
     print("== 稳健性检验：各变体全漏斗累计收益 ==")
