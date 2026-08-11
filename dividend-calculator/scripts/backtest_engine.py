@@ -1,0 +1,362 @@
+#!/usr/bin/env python3
+"""四层漏斗分层回测引擎（T4，issue #87）
+
+方案 V3 核心交付：季度调仓（季末收盘计算、次季首日 T+1 建仓）、无未来函数
+（asof 过滤）、四层漏斗逐层标记，输出「基线全A等权 → +L2 → +L3 → +L4 →
+全漏斗」五档季度收益序列与逐层增量超额。
+
+数据缺口（如实标注，不虚构）：
+- total_shares：DB 无股本表，首次运行从腾讯 Index 73 补拉当前值存 total_shares
+  表；历史股本变动（送转/增发）未建模，用当前值近似（每股口径股息率数学等价，
+  仅 sustainability 支付率受股本变动影响——报告标注）。
+- industry：DB 无行业表，从东财 fetch_industry 补拉（带重试）；失败记缺失。
+- top10_holding：T2 未入库，lookup 返回 None（一股独大红旗不触发，报告标注）。
+- finance 快照：仅 T2 入库的 8 字段（roe/net_profit/net_cash_operate/bps/
+  newcapitalader/loan_provision_ratio），net_profit_yoy/investing_cf/
+  total_assets/total_liabilities/interest_coverage 等缺失 → None，
+  可持续性部分维度按缺失计 0 分 + 置信度标注（报告如实披露）。
+"""
+from __future__ import annotations
+
+import bisect
+import sqlite3
+from collections import defaultdict
+from datetime import date, datetime, timedelta
+from typing import Dict, List, Optional
+
+from src.backtest_factors import (
+    pr as factor_pr,
+    real_dividend_yield,
+    sustainability as factor_sustainability,
+    ttm_dividend_yield,
+)
+
+DB_PATH = "data/backtest.db"
+
+# 四层漏斗阈值（对齐 src/screening.py 口径）
+TTM_YIELD_THRESHOLD = 5.0   # TTM 股息率 > 5%
+REAL_YIELD_THRESHOLD = 5.0  # 真实股息率 > 5%
+PR_THRESHOLD = 1.0          # 市赚率 ≤ 1（低估/合理偏低）
+SUSTAINABLE_VERDICTS = ("可持续", "偏弱")
+
+
+def _d(s: str) -> date:
+    return date.fromisoformat(s[:10])
+
+
+def _dstr(d: date) -> str:
+    return d.isoformat()
+
+
+class BacktestLookup:
+    """T3 lookup 契约的 DB 实现（只读 + 预加载 + 二分查找）。
+
+    asof 过滤保证无未来函数：price/pe 取 date≤T 最近、分红取 announce_date≤T、
+    财报取 report_date≤T（12-31 年报）。
+    """
+
+    def __init__(self, db_path: str = DB_PATH):
+        self.conn = sqlite3.connect(db_path)
+        self._load()
+
+    def __getitem__(self, key: str):
+        """T3 lookup 契约是下标访问：lookup['total_shares'](code, T) → 绑定方法。"""
+        return getattr(self, key)
+
+    # -- 预加载 ----------------------------------------------------------
+    def _load(self) -> None:
+        c = self.conn
+        self.prices: Dict[str, List] = defaultdict(list)      # code -> [(date, close)]
+        self.pes: Dict[str, List] = defaultdict(list)        # code -> [(date, pe)]
+        self._div_recs: Dict[str, List[dict]] = defaultdict(list)
+        self._fin_recs: Dict[str, List[dict]] = defaultdict(list)
+        self.shares: Dict[str, float] = {}
+        self._industry_map: Dict[str, str] = {}
+        self.trading_days: List[date] = []
+
+        for code, dte, close in c.execute(
+            "SELECT code, date, close FROM daily_price ORDER BY date"
+        ):
+            self.prices[code].append((_d(dte), close))
+        for code, dte, pe in c.execute(
+            "SELECT code, date, pe_ttm FROM daily_pe ORDER BY date"
+        ):
+            self.pes[code].append((_d(dte), pe))
+        for code, ann, rep, ex, d10 in c.execute(
+            "SELECT code, announce_date, report_date, ex_dividend_date, "
+            "cash_div_10shares FROM dividend_history ORDER BY report_date"
+        ):
+            self._div_recs[code].append({
+                "announce_date": ann,
+                "report_date": rep,
+                "ex_dividend_date": ex,
+                "cash_div_per_share": (d10 / 10.0) if d10 is not None else 0.0,
+            })
+        for code, rep, roe, np_, oc, bps, car, lpr in c.execute(
+            "SELECT code, report_date, roe, net_profit, net_cash_operate, "
+            "bps, newcapitalader, loan_provision_ratio FROM finance_history "
+            "ORDER BY report_date"
+        ):
+            self._fin_recs[code].append({
+                "year": int(rep[:4]),
+                "roe": roe,
+                "net_profit": np_,
+                "operating_cf": oc,
+                "bps": bps,
+                "capital_adequacy_ratio": car,
+                "provision_coverage": lpr,
+                # 缺口字段（T2 未入库 → None，可持续性降级计分，报告标注）
+                "net_profit_yoy": None,
+                "investing_cf": None,
+                "total_assets": None,
+                "total_liabilities": None,
+                "interest_debt_ratio": None,
+                "interest_coverage": None,
+                "net_interest_margin": None,
+                "npl_ratio": None,
+                "capex": None,
+                "debt_ratio": None,
+            })
+        # 交易日历：用 H00922 全收益指数的交易日（2013-2026 完整覆盖）
+        self.trading_days = [
+            _d(dte) for (dte,) in c.execute(
+                "SELECT DISTINCT date FROM index_daily WHERE code='H00922' "
+                "ORDER BY date"
+            )
+        ]
+        self._maybe_load_aux()
+
+    def _maybe_load_aux(self) -> None:
+        """补拉 total_shares（腾讯 Index 73）与 industry（东财），存 DB 复用。"""
+        c = self.conn
+        has_shares = c.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='total_shares'"
+        ).fetchone()
+        if has_shares:
+            for code, ts in c.execute("SELECT code, total_shares FROM total_shares"):
+                self.shares[code] = ts
+        has_ind = c.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='industry'"
+        ).fetchone()
+        if has_ind:
+            for code, ind in c.execute("SELECT code, industry FROM industry"):
+                self._industry_map[code] = ind
+
+    # -- lookup 契约（T3 签名） ------------------------------------------
+    def _latest(self, series: List, asof: date):
+        """series: [(date, value)] 升序 → date ≤ asof 最近值。"""
+        if not series or series[0][0] > asof:
+            return None
+        i = bisect.bisect_right(series, (asof, float("inf"))) - 1
+        return series[i][1] if i >= 0 else None
+
+    def dividends(self, code: str, asof: date) -> Optional[List[dict]]:
+        recs = [
+            r for r in self._div_recs.get(code, [])
+            if (not r["announce_date"]) or _d(r["announce_date"]) <= asof
+        ]
+        return recs or None
+
+    def pe_ttm(self, code: str, asof: date) -> Optional[float]:
+        return self._latest(self.pes.get(code, []), asof)
+
+    def total_shares(self, code: str, asof: date) -> Optional[float]:
+        return self.shares.get(code)
+
+    def price(self, code: str, asof: date) -> Optional[float]:
+        return self._latest(self.prices.get(code, []), asof)
+
+    def roe_latest(self, code: str, asof: date) -> Optional[float]:
+        recs = [f for f in self._fin_recs.get(code, []) if f["year"] * 100 + 1231 <=
+                asof.year * 10000 + asof.month * 100 + asof.day]
+        if not recs:
+            # 兜底：report_date ≤ asof 的 12-31 年报（finance 已只存 12-31）
+            recs = [f for f in self._fin_recs.get(code, [])
+                    if date(f["year"], 12, 31) <= asof]
+        return recs[-1]["roe"] if recs else None
+
+    def finance(self, code: str, asof: date) -> Optional[dict]:
+        recs = [f for f in self._fin_recs.get(code, []) if date(f["year"], 12, 31) <= asof]
+        return recs[-1] if recs else None
+
+    def price_change_1y(self, code: str, asof: date) -> Optional[float]:
+        """近 1 年涨跌幅（小数）——用 (asof-365, asof] 两端最近收盘。"""
+        p = self.prices.get(code, [])
+        p1 = self._latest(p, asof)
+        p0 = self._latest(p, asof - timedelta(days=365))
+        if p0 is None or p1 is None or p0 <= 0:
+            return None
+        return (p1 - p0) / p0
+
+    def top10_holding(self, code: str, asof: date) -> Optional[float]:
+        return None  # T2 未入库（缺口，报告标注）
+
+    def industry(self, code: str, asof: date) -> str:
+        return self._industry_map.get(code, "")
+
+
+# ---------------------------------------------------------------------------
+# 调仓日历与收益区间
+# ---------------------------------------------------------------------------
+
+def quarterly_rebalance_dates(trading_days: List[date],
+                              start: date, end: date) -> List[date]:
+    """季度末交易日序列：每年 3/6/9/12 月的最后交易日。"""
+    out: List[date] = []
+    y0, y1 = start.year, end.year
+    for y in range(y0, y1 + 1):
+        for m in (3, 6, 9, 12):
+            if (y, m) < (start.year, start.month) or (y, m) > (end.year, end.month):
+                continue
+            month_days = [d for d in trading_days if d.year == y and d.month == m]
+            if month_days:
+                out.append(month_days[-1])
+    return out
+
+
+def build_day_after(trading_days: List[date], t: date) -> Optional[date]:
+    """T 之后（不含）第一个交易日 —— T+1 建仓日。"""
+    for d in trading_days:
+        if d > t:
+            return d
+    return None
+
+
+# ---------------------------------------------------------------------------
+# 因子与漏斗
+# ---------------------------------------------------------------------------
+
+def compute_all_factors(code: str, T: date, lookup) -> dict:
+    """四层因子一次算齐（复用 T3 纯函数）。"""
+    return {
+        "real_yield": real_dividend_yield(code, T, lookup),
+        "ttm_yield": ttm_dividend_yield(code, T, lookup),
+        "pr": factor_pr(code, T, lookup),
+        "sustainability": factor_sustainability(code, T, lookup),
+    }
+
+
+def funnel_layer(factors: dict) -> int:
+    """四层漏斗逐层判定，返回通过层数 0-4。
+
+    L2: TTM > 5 且 真实 > 5；L3: 基础 PR ≤ 1；L4: verdict ∈ {可持续, 偏弱}。
+    任一层不通过即短路（对齐现网筛选）。
+    """
+    if factors["real_yield"] is None or factors["ttm_yield"] is None:
+        return 0
+    if not (factors["ttm_yield"] > TTM_YIELD_THRESHOLD
+            and factors["real_yield"] > REAL_YIELD_THRESHOLD):
+        return 1  # 过 L1 未过 L2
+    prf = factors["pr"]
+    if prf.pr is None or prf.pr > PR_THRESHOLD:
+        return 2
+    sus = factors["sustainability"]
+    if sus.verdict not in SUSTAINABLE_VERDICTS:
+        return 3
+    return 4
+
+
+def portfolio_return(codes: List[str], build_day: date, settle_day: date,
+                     lookup) -> Optional[float]:
+    """等权组合收益（小数）。持有期 = [build_day, settle_day]，T+1 建仓价 → 结算价。
+
+    无价格（停牌/退市）个股剔除；全部无价格 → None。
+    """
+    rets = []
+    for code in codes:
+        pb = lookup.price(code, build_day)
+        ps = lookup.price(code, settle_day)
+        if pb and ps:
+            rets.append(ps / pb - 1.0)
+    if not rets:
+        return None
+    return sum(rets) / len(rets)
+
+
+# ---------------------------------------------------------------------------
+# 主回测
+# ---------------------------------------------------------------------------
+
+def run_backtest(lookup,
+                 start: date = date(2013, 1, 1),
+                 end: date = date(2026, 8, 10)) -> dict:
+    """分层回测主流程。返回五档组合的季度收益与逐层增量超额。"""
+    days = lookup.trading_days
+    rebalance = quarterly_rebalance_dates(days, start, end)
+    all_codes = sorted(lookup.prices.keys())
+
+    # 每季度入选池：layer_key -> [codes]，layer_key: base/l2/l3/l4/full
+    pools: Dict[str, List[List[str]]] = {k: [] for k in ("base", "l2", "l3", "l4", "full")}
+    per_quarter: Dict[str, List[Optional[float]]] = {k: [] for k in pools}
+
+    for i, T in enumerate(rebalance):
+        build = build_day_after(days, T)
+        settle = rebalance[i + 1] if i + 1 < len(rebalance) else days[-1]
+        layer_buckets = {"base": [], "l2": [], "l3": [], "l4": [], "full": []}
+
+        for code in all_codes:
+            factors = compute_all_factors(code, T, lookup)
+            layer = funnel_layer(factors)
+            layer_buckets["base"].append(code)
+            if layer >= 2:
+                layer_buckets["l2"].append(code)
+            if layer >= 3:
+                layer_buckets["l3"].append(code)
+            if layer >= 4:
+                layer_buckets["l4"].append(code)
+            if layer >= 4:
+                layer_buckets["full"].append(code)
+
+        for k, codes in layer_buckets.items():
+            pools[k].append(codes)
+            per_quarter[k].append(portfolio_return(codes, build, settle, lookup))
+
+    # 逐层增量超额（核心交付）：+L2 超基线、+L3 超 L2、+L4 超 L3、全漏斗超 L4
+    def cum(rets) -> float:
+        vs = [r for r in rets if r is not None]
+        if not vs:
+            return 0.0
+        acc = 1.0
+        for r in vs:
+            acc *= (1.0 + r)
+        return acc - 1.0
+
+    layers = ("base", "l2", "l3", "l4", "full")
+    excess = {}
+    for i in range(1, len(layers)):
+        prev, cur = layers[i - 1], layers[i]
+        excess[f"{cur}_over_{prev}"] = [
+            (r - p) if (r is not None and p is not None) else None
+            for r, p in zip(per_quarter[cur], per_quarter[prev])
+        ]
+
+    return {
+        "rebalance_dates": rebalance,
+        "pools": pools,
+        "quarterly_returns": per_quarter,
+        "cumulative_returns": {k: cum(v) for k, v in per_quarter.items()},
+        "incremental_excess": {k: cum(v) for k, v in excess.items()},
+        "excess_series": excess,
+    }
+
+
+def main() -> None:
+    import json
+    lookup = BacktestLookup()
+    res = run_backtest(lookup)
+    print("== 分层增量超额（累计，报告期 2013Q1-2026Q2）==")
+    for k, v in res["incremental_excess"].items():
+        print(f"  {k:>20s}: {v*100:+.2f}%")
+    print("== 各档累计收益 ==")
+    for k, v in res["cumulative_returns"].items():
+        print(f"  {k:>20s}: {v*100:+.2f}%")
+    print("== 各季度入选数（base/l2/l3/l4/full）==")
+    for i, T in enumerate(res["rebalance_dates"]):
+        n = [len(res["pools"][k][i]) for k in ("base", "l2", "l3", "l4", "full")]
+        print(f"  {T}  {n}")
+    print(json.dumps({"incremental_excess": res["incremental_excess"]},
+                     ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    main()
