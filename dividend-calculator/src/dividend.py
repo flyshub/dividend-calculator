@@ -11,7 +11,8 @@ from .datasource.validation import check_dividend_yield
 from .api import get_stock_info
 from .tencent_quote import fetch_tencent_quote
 from .datasource import get_data_source_manager
-from .utils import get_stock_list_cache, extract_dividend_per_10, parse_dividend_df, compute_ttm_dividend
+from .utils import get_stock_list_cache, compute_ttm_dividend
+from .dividend_records import summarize_fhps_df, summarize_cninfo_df, summarize_dividend_rows
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -76,14 +77,20 @@ def get_latest_full_year_dividend(
     （12月=年报，与 JS calculator.js 一致），且过滤「未实施」预案；mootdx xdxr
     只含已除权记录，会导致未除权的最新年报（如 600662 2025 年报除权日在未来）
     财年滞后一年。故 akshare 优先，mootdx 降级兜底。
+
+    issue #97：①② 改走 dividend_records 各源 adapter（summarize_fhps_df /
+    summarize_cninfo_df），解析口径与 TTM/走势图统一（财年判定单一实现
+    sustainability.classify_fiscal_report）；旧 dividend._parse_fhps_detail 退役，
+    #100 再删除。③ mootdx 兜底保持 DataSourceManager 不变。
     """
     # 方式1: akshare fhps_detail_em（按报告期判定财年，对齐 JS，数据最全）
     try:
         import akshare as ak
         fhps_df = ak.stock_fhps_detail_em(symbol=stock_code)
         if not fhps_df.empty:
-            total_div, year, details, expl = _parse_fhps_detail(fhps_df, stock_info)
-            if total_div > 0:
+            summary = summarize_fhps_df(fhps_df)
+            if summary.fiscal_total_per_10 > 0 and summary.latest_year:
+                total_div, year, details, expl = _summary_to_dividend(summary, stock_info)
                 logger.info("通过akshare fhps_detail_em获取分红数据成功: %s %s年", stock_code, year)
                 return total_div, year, details, expl, "akshare fhps_detail_em"
     except Exception as e:
@@ -94,13 +101,9 @@ def get_latest_full_year_dividend(
         import akshare as ak
         dividend_df = ak.stock_dividend_cninfo(symbol=stock_code)
         if not dividend_df.empty:
-            total_div, year, details, expl = parse_dividend_df(
-                dividend_df, stock_info,
-                report_col="报告时间",
-                scheme_col="实施方案分红说明",
-                payout_col="派息比例",
-            )
-            if total_div > 0:
+            summary = summarize_cninfo_df(dividend_df)
+            if summary.fiscal_total_per_10 > 0 and summary.latest_year:
+                total_div, year, details, expl = _summary_to_dividend(summary, stock_info)
                 logger.info("通过akshare cninfo获取分红数据成功: %s %s年", stock_code, year)
                 return total_div, year, details, expl, "akshare cninfo"
     except Exception as e:
@@ -119,30 +122,90 @@ def get_latest_full_year_dividend(
     return 0.0, None, [], "所有数据源都无法获取分红数据", "无"
 
 
+def _summary_to_dividend(
+    summary, stock_info: StockInfo
+) -> Tuple[float, Optional[str], List[DividendDetail], str]:
+    """DividendSummary → (总分红金额, 财年, 分红明细, 说明)。
+
+    换算：total_dividend = fiscal_total_per_10 / 10 × total_shares；
+    明细只取最新完整财年的记录（含该财年中期分配）；explanation 文案沿用
+    _parse_fhps_detail（中文逗号）与 parse_dividend_df（ASCII 逗号）的迁移前
+    格式，但分红条目标签统一为 #37 M4 口径（"YYYY年报"/"YYYY中期分配"，
+    不再用 "半年报"）。
+    """
+    year = summary.latest_year
+    total_per_10 = summary.fiscal_total_per_10
+    year_details = [
+        DividendDetail(r.report_time, r.dividend_per_10)
+        for r in summary.records
+        if (r.report_time or "").startswith(year)
+    ]
+    dps = total_per_10 / 10.0
+    total_shares = stock_info.total_shares
+    total_dividend = dps * total_shares
+
+    dividend_list = [
+        f"{d.report_time}: 10派{d.dividend_per_10}元" for d in year_details
+    ]
+    if summary.source == "akshare cninfo":
+        # 迁移前 parse_dividend_df 文案（ASCII 逗号 + 空格分隔）
+        explanation = (
+            f"{year}年度 {', '.join(dividend_list)}, "
+            f"合计10派{total_per_10:.3f}元(每股{dps:.4f}元), "
+            f"总股本{total_shares / 1e8:.2f}亿股, "
+            f"总分红{total_dividend / 1e8:.2f}亿元"
+        )
+    else:
+        # 迁移前 _parse_fhps_detail 文案（中文逗号分隔）
+        explanation = (
+            f"{year}年度 {'，'.join(dividend_list)}，"
+            f"合计10派{total_per_10:.3f}元(每股{dps:.4f}元)，"
+            f"总股本{total_shares / 1e8:.2f}亿股，"
+            f"总分红{total_dividend / 1e8:.2f}亿元"
+        )
+
+    return total_dividend, year, year_details, explanation
+
+
 def get_ttm_dividend(
     stock_code: str, stock_info: StockInfo
 ) -> Tuple[Optional[float], Optional[str], Optional[str], str]:
     """TTM 股息率口径（#19）：近 12 个月实际派发现金分红总额。
 
-    复用 api._get_all_dividend_records（东财 RPT_SHAREBONUS_DET 主 → mootdx xdxr 兜底，
-    含除权除息日）。失败返回 (None, None, None, '无')，绝不抛出。
+    主：东财分红明细（fetch_dividend_rows → dividend_records.summarize_dividend_rows，
+    与主股息率/走势图同一解析口径）；mootdx xdxr 兜底（东财取数失败 → xdxr，
+    复用 api._get_xdxr_records）。失败返回 (None, None, None, '无')，绝不抛出。
 
     Returns:
         (ttm_total_div, period, count_note, source)
     """
     try:
-        from .api import _get_all_dividend_records
-        records, source = _get_all_dividend_records(stock_code)
-        if not records:
+        from .eastmoney_fetcher import fetch_dividend_rows
+        rows = fetch_dividend_rows(stock_code)
+        if rows is None:
+            # 网络/HTTP 取数失败（#38 M5 语义），不短路，落入 mootdx 兜底
+            raise ConnectionError("东财分红接口取数失败")
+        if not rows:
+            # 请求成功但真无分红——与旧 _get_all_dividend_records 语义一致，不兜底
             return None, None, None, "无"
-        ttm_total, start, end, count = compute_ttm_dividend(records, stock_info.total_shares)
-        if ttm_total is None:
-            return None, None, None, "无"
-        period = f"{start}~{end}" if start and end else None
-        return ttm_total, period, f"{count}次派息", source
+        summary = summarize_dividend_rows(rows, source="东财")
+        records, source = summary.records, summary.source
     except Exception as e:
-        logger.debug("TTM 分红获取失败 %s: %s", stock_code, e)
+        logger.debug("TTM 东财获取失败 %s: %s", stock_code, e)
+        from .api import _get_xdxr_records
+        records, source = _get_xdxr_records(stock_code)
+
+    if not records:
         return None, None, None, "无"
+    try:
+        ttm_total, start, end, count = compute_ttm_dividend(records, stock_info.total_shares)
+    except Exception as e:
+        logger.debug("TTM 计算失败 %s: %s", stock_code, e)
+        return None, None, None, "无"
+    if ttm_total is None:
+        return None, None, None, "无"
+    period = f"{start}~{end}" if start and end else None
+    return ttm_total, period, f"{count}次派息", source
 
 
 def _parse_fhps_detail(
