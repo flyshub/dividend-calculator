@@ -130,6 +130,21 @@ def _is_implemented(progress: str) -> bool:
     return "实施" in progress and "未实施" not in progress
 
 
+def classify_fiscal_report(year: int, month: int) -> Tuple[bool, str]:
+    """财年判定**单一实现**（#37 M4）：仅 12 月报告期是完整财年年报。
+
+    其余月份（3/4 月 Q1、6/9 月半年报）均为中期分配，不构成完整财年；
+    季度分红监管扩散下防御性收紧为 month == 12（与 JS calculator.js 同步）。
+    本模块 parse_dividend_rows 与 dividend_records 各源 adapter 均调用此函数，
+    不允许在其他位置重复实现 is_annual = (m == 12)。
+
+    Returns:
+        (is_annual, label)，label 为 "YYYY年报" / "YYYY中期分配"（NOT "半年报"）
+    """
+    is_annual = month == 12
+    return is_annual, f"{year}年报" if is_annual else f"{year}中期分配"
+
+
 def parse_dividend_rows(rows: List[dict]) -> Tuple[List[DividendRecord], Optional[str]]:
     """解析东财分红明细行 → DividendRecord 列表 + 最新有年报的财年字符串。
 
@@ -157,10 +172,8 @@ def parse_dividend_rows(rows: List[dict]) -> Tuple[List[DividendRecord], Optiona
             continue
         year = int(m.group(1))
         month = int(m.group(2))
-        # 与 JS 一致（#37 M4）：仅 12 月报告期是完整财年年报；3/6/9 月为中期分配
-        # （季度分红监管扩散，3/4 月 Q1 分红不构成完整财年）
-        is_annual = month == 12
-        label = f"{year}年报" if is_annual else f"{year}中期分配"
+        # 财年判定单一实现（classify_fiscal_report，见模块内定义与 dividend_records 复用）
+        is_annual, label = classify_fiscal_report(year, month)
 
         ex_date = str(row.get("EX_DIVIDEND_DATE") or "")[:10]
         # 预案公告日：该财年股息「生效」的起点（走势图按此归因，非除权日）。

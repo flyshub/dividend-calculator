@@ -176,3 +176,134 @@ def test_source_label():
     """source 标注默认 "东财"，可覆盖。"""
     assert summarize_dividend_rows(_fixture_rows()).source == "东财"
     assert summarize_dividend_rows(_fixture_rows(), source="mootdx xdxr").source == "mootdx xdxr"
+
+
+# ---------------------------------------------------------------------------
+# 各源 adapter（issue #97 主链路迁移）
+# ---------------------------------------------------------------------------
+
+def _fhps_df():
+    """akshare stock_fhps_detail_em 列名 fixture（数值复用 test_regression_snapshot.py 真实值：
+    2024年报 5.0 / 2025-06-30 中期 2.0 / 预披露 7.33 / 股东大会决议通过 8.0）。"""
+    import pandas as pd
+    return pd.DataFrame([
+        {"报告期": "2024-12-31", "方案进度": "实施分配", "现金分红-现金分红比例": 5.0,
+         "除权除息日": "2025-07-01", "预案公告日": "2025-04-30"},
+        {"报告期": "2025-06-30", "方案进度": "实施分配", "现金分红-现金分红比例": 2.0,
+         "除权除息日": "2025-12-01", "预案公告日": "2025-08-30"},
+        # 预披露 / 未实施预案 → 应过滤（对齐 _parse_fhps_detail）
+        {"报告期": "2025-12-31", "方案进度": "预披露", "现金分红-现金分红比例": 7.33,
+         "除权除息日": "2026-07-15", "预案公告日": "2026-04-30"},
+        {"报告期": "2025-12-31", "方案进度": "股东大会决议通过", "现金分红-现金分红比例": 8.0,
+         "除权除息日": "", "预案公告日": ""},
+    ])
+
+
+def test_summarize_fhps_df():
+    """fhps adapter：过滤预披露/未实施，财年/标签/除权日映射与 _parse_fhps_detail 一致。"""
+    from src.dividend_records import summarize_fhps_df
+    s = summarize_fhps_df(_fhps_df(), as_of_date=date(2026, 7, 31))
+    assert {r.report_time for r in s.records} == {"2024年报", "2025中期分配"}
+    assert s.latest_year == "2024"  # 2025 仅有中期分配，无年报 → 非完整财年
+    assert s.fiscal_total_per_10 == pytest.approx(5.0)
+    by_time = {r.report_time: r for r in s.records}
+    assert by_time["2024年报"].ex_dividend_date == "2025-07-01"
+    assert by_time["2024年报"].plan_notice_date == "2025-04-30"
+    assert s.ttm_total_per_10 == pytest.approx(2.0)  # 窗口内仅 2025-12-01（2025-07-01 在窗口外）
+    assert s.source == "akshare fhps_detail_em"
+
+
+def test_summarize_fhps_df_matches_old_parse():
+    """迁移后主口径与 _parse_fhps_detail 的 year/总额一致（#97 回归锚）。"""
+    import pandas as pd
+    from src.dividend import _parse_fhps_detail
+    from src.datasource.base import StockInfo
+    from src.dividend_records import summarize_fhps_df
+    info = StockInfo(stock_code="600036", current_price=38.80, total_shares=2.522e10)
+    total, year, details, _ = _parse_fhps_detail(_fhps_df(), info)
+    s = summarize_fhps_df(_fhps_df())
+    assert year == s.latest_year == "2024"
+    assert total == pytest.approx(s.fiscal_total_per_10 / 10 * info.total_shares)
+    # 旧 details 仅含目标财年记录；新模块按 latest_year 过滤后应一致
+    year_records = [r for r in s.records if r.report_time.startswith(s.latest_year)]
+    assert {d.report_time for d in details} == {r.report_time for r in year_records}
+    assert {d.dividend_per_10 for d in details} == {r.dividend_per_10 for r in year_records}
+
+
+def test_summarize_fhps_df_only_interim():
+    """fhps 仅中期分配（无任何年报）→ latest_year=None、fiscal_total=0.0，
+    与完整财年原则一致（无年报 → 不构成完整财年 → 主链路降级下源）。"""
+    import pandas as pd
+    from src.dividend_records import summarize_fhps_df
+    df = pd.DataFrame([
+        {"报告期": "2025-06-30", "方案进度": "实施分配", "现金分红-现金分红比例": 2.0,
+         "除权除息日": "2025-12-01", "预案公告日": "2025-08-30"},
+    ])
+    s = summarize_fhps_df(df, as_of_date=date(2026, 7, 31))
+    assert {r.report_time for r in s.records} == {"2025中期分配"}
+    assert s.latest_year is None
+    assert s.fiscal_total_per_10 == 0.0
+    assert s.ttm_total_per_10 == pytest.approx(2.0)
+
+
+def _cninfo_df():
+    """akshare stock_dividend_cninfo 列名 fixture（600036 实地验证：2024年报 10派20 /
+    2025半年报 10派10.13 / 2025年报 10派10.03；含无报告期特别分红 + 股改无派息行）。"""
+    import pandas as pd
+    return pd.DataFrame([
+        {"报告时间": "2024年报", "实施方案分红说明": "10派20元(含税)",
+         "派息比例": 20.0, "除权日": "2025-07-11"},
+        {"报告时间": "2025半年报", "实施方案分红说明": "10派10.13元(含税)",
+         "派息比例": 10.13, "除权日": "2026-01-16"},
+        {"报告时间": "2025年报", "实施方案分红说明": "10派10.03元(含税)",
+         "派息比例": 10.03, "除权日": "2026-07-10"},
+        # 无报告期的特别分红（600036 实地：报告时间 NaN）→ 跳过
+        {"报告时间": float("nan"), "实施方案分红说明": "10派1.8元(含税)",
+         "派息比例": 1.8, "除权日": "2006-09-21"},
+        # 股改分红无派息比例（600036 实地：派息比例 NaN）→ 跳过
+        {"报告时间": "2005年报", "实施方案分红说明": "10转增0.8589股",
+         "派息比例": float("nan"), "除权日": "2006-02-24"},
+    ])
+
+
+def test_summarize_cninfo_df():
+    """cninfo adapter：文本报告时间 → 统一财年标签；半年报归中期分配。"""
+    from src.dividend_records import summarize_cninfo_df
+    s = summarize_cninfo_df(_cninfo_df(), as_of_date=date(2026, 7, 31))
+    assert {r.report_time for r in s.records} == {"2024年报", "2025中期分配", "2025年报"}
+    assert s.latest_year == "2025"
+    assert s.fiscal_total_per_10 == pytest.approx(10.13 + 10.03)
+    by_time = {r.report_time: r for r in s.records}
+    assert by_time["2025年报"].ex_dividend_date == "2026-07-10"
+    assert s.ttm_total_per_10 == pytest.approx(10.13 + 10.03)  # 窗口内 2026-01-16 + 2026-07-10
+    assert s.source == "akshare cninfo"
+
+
+def test_summarize_cninfo_df_matches_old_parse():
+    """迁移后与旧 utils.parse_dividend_df 的 year/总额一致（#97 回归锚）。"""
+    from src.utils import parse_dividend_df
+    from src.datasource.base import StockInfo
+    from src.dividend_records import summarize_cninfo_df
+    info = StockInfo(stock_code="600036", current_price=38.80, total_shares=2.522e10)
+    total, year, details, _ = parse_dividend_df(
+        _cninfo_df(), info, report_col="报告时间", scheme_col="实施方案分红说明",
+        payout_col="派息比例",
+    )
+    s = summarize_cninfo_df(_cninfo_df())
+    assert year == s.latest_year == "2025"
+    assert total == pytest.approx(s.fiscal_total_per_10 / 10 * info.total_shares)
+
+
+def test_cninfo_quarterly_labeled_interim():
+    """季度分红文本（600900 实地：2025三季报 10派2.1）→ 中期分配，非年报。"""
+    import pandas as pd
+    from src.dividend_records import summarize_cninfo_df
+    df = pd.DataFrame([
+        {"报告时间": "2025三季报", "实施方案分红说明": "10派2.1元(含税)",
+         "派息比例": 2.1, "除权日": "2026-02-12"},
+    ])
+    s = summarize_cninfo_df(df, as_of_date=date(2026, 7, 31))
+    assert {r.report_time for r in s.records} == {"2025中期分配"}
+    assert s.latest_year is None
+    assert s.fiscal_total_per_10 == 0.0
+    assert s.ttm_total_per_10 == pytest.approx(2.1)

@@ -92,7 +92,6 @@ class TestMain:
     def test_generates_three_files_with_history(self, ex, tmp_path, monkeypatch):
         csv_dir = tmp_path / "csv"
         site_dir = tmp_path / "site"
-        static_dir = tmp_path / "static"
         csv_dir.mkdir()
         # 两天：2026-08-08（1 批）、2026-08-09（2 批，取较晚批次）
         _write_csv(csv_dir / "screener_20260808_100000.csv", _sample_rows()[:1])
@@ -100,7 +99,6 @@ class TestMain:
         _write_csv(csv_dir / "screener_20260809_150000.csv", _sample_rows())
         monkeypatch.setattr(ex, "CSV_DIR", csv_dir)
         monkeypatch.setattr(ex, "SITE_DIR", site_dir)
-        monkeypatch.setattr(ex, "STATIC_SITE_DIR", static_dir)
 
         assert ex.main() == 0
 
@@ -122,27 +120,11 @@ class TestMain:
         day9 = json.loads((site_dir / "screener_2026-08-09.json").read_text(encoding="utf-8"))
         assert len(day9) == 2
 
-    def test_dual_dir_output_identical(self, ex, tmp_path, monkeypatch):
-        """site/ 与 src/static/ 双目录产物逐字节一致（双端同步约定）。"""
-        csv_dir = tmp_path / "csv"
-        site_dir = tmp_path / "site"
-        static_dir = tmp_path / "static"
-        csv_dir.mkdir()
-        _write_csv(csv_dir / "screener_20260809_100000.csv", _sample_rows())
-        monkeypatch.setattr(ex, "CSV_DIR", csv_dir)
-        monkeypatch.setattr(ex, "SITE_DIR", site_dir)
-        monkeypatch.setattr(ex, "STATIC_SITE_DIR", static_dir)
-
-        assert ex.main() == 0
-        for fname in ["latest.json", "history.json", "screener_2026-08-09.json"]:
-            assert (site_dir / fname).read_bytes() == (static_dir / fname).read_bytes(), fname
-
     def test_no_csv_returns_error(self, ex, tmp_path, monkeypatch):
         csv_dir = tmp_path / "empty"
         csv_dir.mkdir()
         monkeypatch.setattr(ex, "CSV_DIR", csv_dir)
         monkeypatch.setattr(ex, "SITE_DIR", tmp_path / "site")
-        monkeypatch.setattr(ex, "STATIC_SITE_DIR", tmp_path / "static")
         assert ex.main() == 1
 
     def test_same_day_multiple_batches_takes_latest(self, ex, tmp_path, monkeypatch):
@@ -156,7 +138,6 @@ class TestMain:
         _write_csv(csv_dir / "screener_20260809_170000.csv", rows)
         monkeypatch.setattr(ex, "CSV_DIR", csv_dir)
         monkeypatch.setattr(ex, "SITE_DIR", tmp_path / "site")
-        monkeypatch.setattr(ex, "STATIC_SITE_DIR", tmp_path / "static")
 
         assert ex.main() == 0
         latest = json.loads((tmp_path / "site" / "latest.json").read_text(encoding="utf-8"))
@@ -214,17 +195,15 @@ class TestRetention:
         assert [c.name for c in csvs] == ["screener_20260809_100000.csv"]
 
     def test_main_truncates_history_and_prunes_orphans(self, ex, tmp_path, monkeypatch):
-        """main 后：history 只含保留期日期，过期按日 JSON 被清理，双端一致。"""
+        """main 后：history 只含保留期日期，过期按日 JSON 被清理。"""
         csv_dir = tmp_path / "csv"
         site_dir = tmp_path / "site"
-        static_dir = tmp_path / "static"
         csv_dir.mkdir()
         # 过期（2026-02-01）与保留期（2026-08-09）CSV
         _write_csv(csv_dir / "screener_20260201_100000.csv", _sample_rows()[:1])
         _write_csv(csv_dir / "screener_20260809_100000.csv", _sample_rows())
         monkeypatch.setattr(ex, "CSV_DIR", csv_dir)
         monkeypatch.setattr(ex, "SITE_DIR", site_dir)
-        monkeypatch.setattr(ex, "STATIC_SITE_DIR", static_dir)
         monkeypatch.setattr(ex, "RETENTION_DAYS", 90)
         # 预写一个过期按日 JSON 孤儿（模拟旧产物残留）
         site_dir.mkdir(parents=True)
@@ -238,6 +217,3 @@ class TestRetention:
         # 过期 CSV 被删、孤儿 JSON 被删
         assert not (csv_dir / "screener_20260201_100000.csv").exists()
         assert not (site_dir / "screener_2026-02-01.json").exists(), "孤儿按日 JSON 应被清理"
-        # 双端一致（含清理后）
-        for fname in ["latest.json", "history.json", "screener_2026-08-09.json"]:
-            assert (site_dir / fname).read_bytes() == (static_dir / fname).read_bytes(), fname

@@ -14,7 +14,7 @@
 
 ## 目录
 
-- `index.html` — 页面（UI 与 `src/static/index.html` 一致）
+- `index.html` — 页面（单一页面来源，本地 `src/web.py` 与 GitHub Pages 共用本目录）
 - `js/calculator.js` — 纯计算逻辑（Node/browser 双端可用）
 - `js/datasources.js` — 浏览器数据获取层
 - `js/app.js` — 综合分析编排

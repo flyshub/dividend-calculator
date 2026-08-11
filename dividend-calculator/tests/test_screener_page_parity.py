@@ -1,10 +1,11 @@
-"""选股结果页双端同步 + 口径卡与 screening.py 默认值对账（code-review 修复）。
+"""选股结果页口径卡与 screening.py 默认值对账（code-review 修复）。
 
 口径卡的阈值硬编码在 HTML 散文里，与 src/screening.py 的 DEFAULT_* 常量构成
-双事实源（code-review Standards #1）。本测试锁定三件事：
-  1. site/ 与 src/static/ 的 screener.html 逐字节一致（双端同步防漂移）；
-  2. 口径卡列出的四漏斗阈值/区间与 screening.py 默认值一致（改默认值必须同步页面）；
-  3. 口径卡确实存在（防误删）。
+双事实源（code-review Standards #1）。本测试锁定三件事（#98 单页收拢后
+页面来源仅 site/，原双端逐字节一致校验已随 src/static/ 一并退役）：
+  1. 口径卡列出的四漏斗阈值/区间与 screening.py 默认值一致（改默认值必须同步页面）；
+  2. 口径卡确实存在（防误删）；
+  3. 'PR ≤ 1.0' 边界与 classify_valuation 的 1.0 边界一致。
 """
 from pathlib import Path
 
@@ -17,20 +18,14 @@ from src.screening import (
 )
 
 ROOT = Path(__file__).resolve().parent.parent
-PAGES = ["site/screener.html", "src/static/screener.html"]
+PAGES = ["site/screener.html"]
 
 
 def _read(page: str) -> str:
     return (ROOT / page).read_text(encoding="utf-8")
 
 
-def test_both_screener_pages_are_byte_identical():
-    """双端 screener.html 必须逐字节一致。"""
-    site, static = (_read(p) for p in PAGES)
-    assert site == static
-
-
-def test_criteria_card_exists_on_both_pages():
+def test_criteria_card_exists_on_page():
     for page in PAGES:
         assert "选股口径" in _read(page), f"{page} 缺少选股口径卡"
 
