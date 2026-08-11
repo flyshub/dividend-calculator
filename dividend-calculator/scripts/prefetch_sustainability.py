@@ -38,7 +38,7 @@ def prefetch_one(code: str, cache: ScreenerCache):
     """预拉单只 6 类数据并写缓存。
 
     内部走 sustainability.prefetch_and_cache（限流 + S2 完整性检查：financial/
-    cashflow 同时为空视为拉取失败，标记 source=东财预拉(失败) 不写缓存，返回 None）。
+    cashflow 同时为空视为拉取失败，不写缓存，返回 None）。
     """
     return prefetch_and_cache(cache, code)
 

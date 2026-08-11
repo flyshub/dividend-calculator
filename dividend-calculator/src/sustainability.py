@@ -486,8 +486,8 @@ def prefetch_and_cache(cache, code: str) -> Optional[SustainabilitySnapshot]:
     """预取 6 类数据 + 限流 + 写缓存，一次调用完成。返回写入的快照。
 
     S2 完整性检查：financial/cashflow 同时为空数组视为拉取失败（正常公司必有
-    财报），标记 source="东财预拉(失败)" 且**不写缓存**（避免空数据投毒导致
-    假阴性 verdict，数据铁律：不缓存失败数据），此时返回 None。
+    财报），此时**不写缓存**（避免空数据投毒导致假阴性 verdict，数据铁律：
+    不缓存失败数据），直接返回 None。
     限流：与 scripts/prefetch_sustainability.py 一致，内部先 batch_wait()。
     """
     batch_wait()  # 限流
@@ -500,7 +500,7 @@ def prefetch_and_cache(cache, code: str) -> Optional[SustainabilitySnapshot]:
     # S2：财务/现金流同时为空 → 拉取失败（正常公司必有财报），标记不缓存
     if (financial is not None and len(financial) == 0
             and cashflow is not None and len(cashflow) == 0):
-        logger.warning("[%s] 财务/现金流同时为空，判为拉取失败，不缓存（source=东财预拉(失败)）", code)
+        logger.warning("[%s] 财务/现金流同时为空，判为拉取失败，不缓存", code)
         return None
     snap = _dict_to_snapshot(code, {
         "financial_rows": financial,
