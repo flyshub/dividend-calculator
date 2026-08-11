@@ -29,17 +29,6 @@
     '算力', '数据中心', '大模型',
   ];
 
-  function inferFiscalYear(year, month) {
-    /* 3-8月除权 → 上年度年报；9-12月 → 当年中报；1-2月 → 上年度中报 */
-    if (month >= 3 && month <= 8) {
-      return { year: year - 1, isAnnual: true };
-    } else if (month >= 9) {
-      return { year: year, isAnnual: false };
-    } else {
-      return { year: year - 1, isAnnual: false };
-    }
-  }
-
   function reportTime(year, isAnnual) {
     return year + (isAnnual ? '年报' : '中报');
   }
@@ -972,7 +961,6 @@
   }
 
   return {
-    inferFiscalYear: inferFiscalYear,
     reportTime: reportTime,
     calculateDividendYield: calculateDividendYield,
     parseDividendRecords: parseDividendRecords,

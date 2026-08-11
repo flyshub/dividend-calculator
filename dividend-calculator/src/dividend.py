@@ -13,7 +13,6 @@ from .tencent_quote import fetch_tencent_quote
 from .datasource import get_data_source_manager
 from .utils import get_stock_list_cache, compute_ttm_dividend
 from .dividend_records import summarize_fhps_df, summarize_cninfo_df, summarize_dividend_rows
-import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +79,8 @@ def get_latest_full_year_dividend(
 
     issue #97：①② 改走 dividend_records 各源 adapter（summarize_fhps_df /
     summarize_cninfo_df），解析口径与 TTM/走势图统一（财年判定单一实现
-    sustainability.classify_fiscal_report）；旧 dividend._parse_fhps_detail 退役，
-    #100 再删除。③ mootdx 兜底保持 DataSourceManager 不变。
+    sustainability.classify_fiscal_report）；旧 dividend._parse_fhps_detail 已删除（#100）。
+    ③ mootdx 兜底保持 DataSourceManager 不变。
     """
     # 方式1: akshare fhps_detail_em（按报告期判定财年，对齐 JS，数据最全）
     try:
@@ -129,9 +128,9 @@ def _summary_to_dividend(
 
     换算：total_dividend = fiscal_total_per_10 / 10 × total_shares；
     明细只取最新完整财年的记录（含该财年中期分配）；explanation 文案沿用
-    _parse_fhps_detail（中文逗号）与 parse_dividend_df（ASCII 逗号）的迁移前
-    格式，但分红条目标签统一为 #37 M4 口径（"YYYY年报"/"YYYY中期分配"，
-    不再用 "半年报"）。
+    迁移前格式：fhps 链路中文逗号分隔、cninfo 链路 ASCII 逗号 + 空格分隔，
+    与 JS parseDividendRecords 文案逐字一致（分红条目标签统一为 #37 M4 口径
+    "YYYY年报"/"YYYY中期分配"）。
     """
     year = summary.latest_year
     total_per_10 = summary.fiscal_total_per_10
@@ -148,7 +147,7 @@ def _summary_to_dividend(
         f"{d.report_time}: 10派{d.dividend_per_10}元" for d in year_details
     ]
     if summary.source == "akshare cninfo":
-        # 迁移前 parse_dividend_df 文案（ASCII 逗号 + 空格分隔）
+        # cninfo 链路文案（ASCII 逗号 + 空格分隔，沿用迁移前格式）
         explanation = (
             f"{year}年度 {', '.join(dividend_list)}, "
             f"合计10派{total_per_10:.3f}元(每股{dps:.4f}元), "
@@ -156,7 +155,7 @@ def _summary_to_dividend(
             f"总分红{total_dividend / 1e8:.2f}亿元"
         )
     else:
-        # 迁移前 _parse_fhps_detail 文案（中文逗号分隔）
+        # fhps 链路文案（中文逗号分隔，沿用迁移前格式，与 JS 逐字一致）
         explanation = (
             f"{year}年度 {'，'.join(dividend_list)}，"
             f"合计10派{total_per_10:.3f}元(每股{dps:.4f}元)，"
@@ -206,99 +205,6 @@ def get_ttm_dividend(
         return None, None, None, "无"
     period = f"{start}~{end}" if start and end else None
     return ttm_total, period, f"{count}次派息", source
-
-
-def _parse_fhps_detail(
-    fhps_df: pd.DataFrame, stock_info: StockInfo
-) -> Tuple[float, Optional[str], List[DividendDetail], str]:
-    """
-    解析 akshare stock_fhps_detail_em 的分红数据
-
-    数据包含「实施分配」和「股东大会决议通过」两类进度，
-    过滤掉「预披露」（数据不全）。
-
-    Returns:
-        (总分红金额, 财年, 分红明细, 说明)
-    """
-    import datetime
-
-    # 只保留已实施分红（对齐 JS calculator.js T5 规则 + 排除停止/否决/预披露）：
-    # 方案进度须含「实施」且不含「未实施/停止/否决/预披露」——排除一切未落地预案。
-    valid = fhps_df[
-        fhps_df['现金分红-现金分红比例'].notna()
-        & (fhps_df['现金分红-现金分红比例'] > 0)
-        & fhps_df['方案进度'].astype(str).str.contains('实施')
-        & ~fhps_df['方案进度'].astype(str).str.contains('未实施')
-        & ~fhps_df['方案进度'].astype(str).str.contains('停止')
-        & ~fhps_df['方案进度'].astype(str).str.contains('否决')
-        & ~fhps_df['方案进度'].astype(str).str.contains('预披露')
-    ].copy()
-
-    if valid.empty:
-        return 0.0, None, [], "fhps_detail_em 无有效分红数据"
-
-    # 按财年分组
-    from collections import defaultdict
-    yearly: dict = defaultdict(lambda: {'total': 0.0, 'has_annual': False, 'details': []})
-
-    for _, row in valid.iterrows():
-        report_date = row['报告期']
-        if isinstance(report_date, (datetime.date, datetime.datetime)):
-            y, m = report_date.year, report_date.month
-        elif isinstance(report_date, str):
-            parts = str(report_date).split('-')
-            y, m = int(parts[0]), int(parts[1])
-        else:
-            continue
-
-        dp10 = float(row['现金分红-现金分红比例'])
-        if dp10 != dp10 or dp10 <= 0:  # NaN check (NaN != NaN is True)
-            continue
-
-        # 判断年报/中报（#37 M4）：仅 12 月报告期是完整财年年报；
-        # 其余月份（3/4 月 Q1、6/9 月半年报）均为中期分配，不构成完整财年。
-        # 季度分红监管扩散下，防御性收紧为 month == 12（与 JS calculator.js 同步）。
-        is_annual = (m == 12)
-        label = f"{y}年报" if is_annual else f"{y}中期分配"
-        fiscal_year = y
-
-        yearly[fiscal_year]['total'] += dp10
-        yearly[fiscal_year]['has_annual'] = yearly[fiscal_year]['has_annual'] or is_annual
-        yearly[fiscal_year]['details'].append(
-            DividendDetail(report_time=label, dividend_per_10=dp10)
-        )
-
-    if not yearly:
-        return 0.0, None, [], "fhps_detail_em 无有效年度分红"
-
-    # 选最新财年：优先有年报的，否则最新有数据的
-    sorted_years = sorted(yearly.keys(), reverse=True)
-    target_year = None
-    for fy in sorted_years:
-        if yearly[fy]['has_annual']:
-            target_year = fy
-            break
-    if target_year is None:
-        target_year = sorted_years[0]
-
-    year_data = yearly[target_year]
-    total_per_10 = year_data['total']
-    dps = total_per_10 / 10.0
-    total_shares = stock_info.total_shares
-    total_dividend = dps * total_shares
-
-    dividend_list = [
-        f"{d.report_time}: 10派{d.dividend_per_10}元"
-        for d in year_data['details']
-    ]
-    explanation = (
-        f"{target_year}年度 {'，'.join(dividend_list)}，"
-        f"合计10派{total_per_10:.3f}元(每股{dps:.4f}元)，"
-        f"总股本{total_shares / 1e8:.2f}亿股，"
-        f"总分红{total_dividend / 1e8:.2f}亿元"
-    )
-
-    return total_dividend, str(target_year), year_data['details'], explanation
 
 
 def _get_stock_name(stock_code: str) -> Optional[str]:

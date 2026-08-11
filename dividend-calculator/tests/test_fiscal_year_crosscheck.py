@@ -1,9 +1,9 @@
-"""test_fiscal_year_crosscheck.py — 三套财年判定口径交叉校验（审查 #8）
+"""test_fiscal_year_crosscheck.py — 两套财年判定口径交叉校验（审查 #8）
 
-两套语义：
+两套语义（#100 后仅剩两条链路）：
 - 除权月口径（utils.infer_fiscal_year）：财年归属，3-8月除权→上年年报
-- 报告期月口径（sustainability.parse_dividend_rows / dividend._parse_fhps_detail）：
-  报告期类型，12月→年报，其余月份（3/4/6/9 等）→中期分配（#37 M4）
+- 报告期月口径（sustainability.parse_dividend_rows，财年判定单一实现
+  classify_fiscal_report）：报告期类型，12月→年报，其余月份（3/4/6/9 等）→中期分配（#37 M4）
 
 差异来自**输入信号不同**（除权日 vs 报告期），非规则本身。本文件固化
 「正常场景一致」+「已知不一致场景」，防止未来被静默破坏。
@@ -12,7 +12,6 @@ import pytest
 
 from src.utils import infer_fiscal_year, FiscalYear
 from src.sustainability import parse_dividend_rows
-from src.dividend import _parse_fhps_detail
 
 
 def _rows_for_report_period(report_date: str) -> list:
@@ -86,32 +85,3 @@ class TestKnownDivergence:
         assert _report_period_label(_rows_for_report_period("2025-06-30")) == "2025中期分配"
         fy = infer_fiscal_year(2026, 4)  # 次年4月除权 → 2025年报
         assert (fy.year, fy.is_annual) == (2025, True)
-
-
-# ── fhps_detail（akshare 报告期口径）与 parse_dividend_rows 一致 ─────────
-
-class TestReportPeriodConsistency:
-    def test_fhps_and_parse_rows_same_rule(self):
-        """两条报告期链路（_parse_fhps_detail vs parse_dividend_rows）同规则"""
-        import pandas as pd
-        from src.datasource.base import StockInfo
-
-        stock_info = StockInfo(stock_code="600900", current_price=26.56, total_shares=2.27e10)
-
-        # 12-31 → 年报（akshare fhps 用 报告期 列）
-        df_annual = pd.DataFrame([{
-            "报告期": "2025-12-31", "方案进度": "实施",
-            "现金分红-现金分红比例": 5.0,
-        }])
-        total, year, details, _ = _parse_fhps_detail(df_annual, stock_info)
-        assert details[0].report_time == "2025年报"
-        assert _report_period_label(_rows_for_report_period("2025-12-31")) == "2025年报"
-
-        # 6-30 → 中期分配
-        df_half = pd.DataFrame([{
-            "报告期": "2025-06-30", "方案进度": "实施",
-            "现金分红-现金分红比例": 5.0,
-        }])
-        total2, year2, details2, _ = _parse_fhps_detail(df_half, stock_info)
-        assert details2[0].report_time == "2025中期分配"
-        assert _report_period_label(_rows_for_report_period("2025-06-30")) == "2025中期分配"
