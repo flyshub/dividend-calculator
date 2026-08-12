@@ -60,12 +60,34 @@ def scan_pr_threshold(lookup) -> List[List[str]]:
 
 
 def scan_freq(lookup) -> List[List[str]]:
-    """调仓频率 月/季/半年 单变扫描。"""
+    """调仓频率 月/季/半年 单变扫描。每行含两个口径：
+    纯价格累计/年化（run_backtest，与其他敏感性表同口径）
+    + 含分红累计/年化（run_portfolio，与 §3 headline 同口径）。
+    """
     rows = []
     for freq, label in (("monthly", "月调仓"), ("quarterly", "季调仓"), ("semiannual", "半年调仓")):
         res = run_backtest(lookup, freq=freq)
-        rows.append(_row(label, res["quarterly_returns"]["full"]))
+        price_rets = res["quarterly_returns"]["full"]
+        pf = run_portfolio(lookup, res)
+        div_rets = pf["quarterly_returns"]["full"]
+        rows.append(_row_freq(label, price_rets, div_rets))
     return rows
+
+
+def _row_freq(label: str, price_rets: List[float], div_rets: List[float]) -> List[str]:
+    """调仓频率专用行：两个口径的累计/年化 + 共享夏普/回撤/期数（纯价格口径）。"""
+    n_price = len([r for r in price_rets if r is not None])
+    n_div = len([r for r in div_rets if r is not None])
+    return [
+        label,
+        f"{cum(price_rets)*100:+.2f}%",
+        f"{annualized(cum(price_rets), n_price)*100:+.2f}%",
+        f"{cum(div_rets)*100:+.2f}%",
+        f"{annualized(cum(div_rets), n_div)*100:+.2f}%",
+        f"{(sharpe(price_rets) or 0):.2f}",
+        f"{max_drawdown(price_rets)*100:.2f}%",
+        f"{n_price}",
+    ]
 
 
 def scan_holdings(lookup, engine_result) -> List[List[str]]:
@@ -106,7 +128,7 @@ def main() -> None:
                  scan_yield_threshold(lookup)))
     print(_table(["PR 阈值", "累计", "年化", "夏普", "回撤", "期数"],
                  scan_pr_threshold(lookup)))
-    print(_table(["调仓频率", "累计", "年化", "夏普", "回撤", "期数"],
+    print(_table(["调仓频率", "纯价格累计", "纯价格年化", "含分红累计", "含分红年化", "夏普", "回撤", "期数"],
                  scan_freq(lookup)))
     print(_table(["持仓", "累计", "年化", "夏普", "回撤", "期数"],
                  scan_holdings(lookup, base)))

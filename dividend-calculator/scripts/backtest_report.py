@@ -302,7 +302,7 @@ def section_sensitivity(lookup: BacktestLookup, eng: dict) -> str:
     out.append(_table(["PR 阈值", "累计", "年化", "夏普", "回撤", "期数"],
                       scan_pr_threshold(lookup)))
     out.append("\n")
-    out.append(_table(["调仓频率", "累计", "年化", "夏普", "回撤", "期数"],
+    out.append(_table(["调仓频率", "纯价格累计", "纯价格年化", "含分红累计", "含分红年化", "夏普", "回撤", "期数"],
                       scan_freq(lookup)))
     out.append("\n")
     out.append(_table(["持仓", "累计", "年化", "夏普", "回撤", "期数"],
