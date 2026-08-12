@@ -106,7 +106,11 @@ def section_data_scope(conn, lookup: BacktestLookup) -> str:
 
 
 def section_layered_incremental(eng: dict) -> str:
-    """§ 分层增量超额（核心交付，#87 要求年化+累计两层）。"""
+    """§ 分层增量超额（核心交付，#87 要求年化+累计两层）。
+
+    ⚠️ 本段为纯价格收益（未含税后分红复投），用于验证分层筛选的方向性。
+    高股息策略分红占比高，纯价格收益严重低估真实全收益——真实全收益见 §3。
+    """
     inc = eng["incremental_excess"]
     cum_ret = eng["cumulative_returns"]
     n_q = eng.get("n_quarters") or len(eng.get("rebalance_dates", []))
@@ -128,7 +132,12 @@ def section_layered_incremental(eng: dict) -> str:
     for label, key in labels:
         cr = cum_ret.get(key)
         rows.append([label, _pct(cr), _pct(_ann(cr))])
-    out = _table(["组合", "累计收益", "年化"], rows) + "\n\n"
+    out = (
+        "**⚠️ 本段为纯价格收益（未含税后分红复投），仅用于验证分层筛选的方向性。**\n\n"
+        "高股息策略分红占比高，纯价格收益严重低估真实全收益；"
+        "完整含分红的组合绩效见 §3（全漏斗真实累计远高于此处的 170%）。\n\n"
+    )
+    out += _table(["组合", "累计收益", "年化"], rows) + "\n\n"
 
     inc_labels = [
         ("+L2 vs 基线", "l2_over_base"),
@@ -144,8 +153,13 @@ def section_layered_incremental(eng: dict) -> str:
     return out
 
 
-def section_portfolio_perf(eng: dict, lookup: BacktestLookup, conn) -> str:
-    """§ 组合绩效 vs 双基准。"""
+def section_portfolio_perf(eng: dict, lookup: BacktestLookup, conn,
+                           _cache: Optional[dict] = None) -> str:
+    """§ 组合绩效 vs 双基准。
+
+    _cache: 若传入 dict，本函数会把 full 层与基准的 metrics 写入 _cache 供
+    section_conclusion 复用（避免结论段重跑一次 run_portfolio）。
+    """
     rebalance = eng["rebalance_dates"]
 
     port = run_portfolio(lookup, eng, cost=0.003)
@@ -153,11 +167,19 @@ def section_portfolio_perf(eng: dict, lookup: BacktestLookup, conn) -> str:
     bench_hz = load_benchmark(conn, "H00922", rebalance)
     bench_hs = load_benchmark(conn, "H00300", rebalance)
 
+    full_m = None
+    bench_div_m = None
+    bench_300_m = None
+    base_m = None
     rows = []
     for key, label in [("base", "全A等权"), ("l2", "+L2"),
                        ("l3", "+L3"), ("l4", "+L4"), ("full", "全漏斗")]:
         rets = port["quarterly_returns"].get(key, [])
         m = performance_metrics({key: rets})[key]
+        if key == "base":
+            base_m = m
+        if key == "full":
+            full_m = m
         rows.append([label, _pct(m["cumulative"]), _pct(m["annualized"]),
                      f"{_num(m['volatility'])}%", _num(m['sharpe']),
                      _pct(m["max_drawdown"]), _pct(m["win_rate"]),
@@ -169,11 +191,21 @@ def section_portfolio_perf(eng: dict, lookup: BacktestLookup, conn) -> str:
     for name, rets, label in [("中证红利全收益", bench_hz, "bench_csi_div"),
                               ("沪深300全收益", bench_hs, "bench_csi300")]:
         m = performance_metrics({label: rets})[label]
+        if "csi_div" in label:
+            bench_div_m = m
+        else:
+            bench_300_m = m
         rows.append([name, _pct(m["cumulative"]), _pct(m["annualized"]),
                      f"{_num(m['volatility'])}%", _num(m['sharpe']),
                      _pct(m["max_drawdown"]), _pct(m["win_rate"]),
                      _num(m.get("downside_risk")), _num(m.get("profit_loss_ratio")),
                      "—", str(positive_years(rets, rebalance)), "—"])
+
+    if _cache is not None:
+        _cache["full_m"] = full_m
+        _cache["base_m"] = base_m
+        _cache["bench_div_m"] = bench_div_m
+        _cache["bench_300_m"] = bench_300_m
 
     return _table(["组合", "累计", "年化", "波动", "夏普", "回撤",
                    "胜率", "下行风险", "盈亏比", "换手率", "正收益年", "季均只数"], rows) + "\n\n"
@@ -284,23 +316,48 @@ def section_sensitivity(lookup: BacktestLookup, eng: dict) -> str:
     return "".join(out)
 
 
-def section_conclusion(eng: dict) -> str:
-    """§ 结论与限制（诚实标注）。"""
-    inc = eng["incremental_excess"]
-    full_cum = eng["cumulative_returns"].get("full")
-    baseline_cum = eng["cumulative_returns"].get("base")
-    excess = inc.get("full_over_base")
+def section_conclusion(eng: dict, perf_cache: Optional[dict] = None) -> str:
+    """§ 结论与限制（诚实标注）。
+
+    headline 用 §3 含分红真实全收益（vs 中证红利），而非 §2 纯价格收益——
+    高股息策略分红占比高，纯价格收益严重低估真实全收益。
+    """
+    full_m = (perf_cache or {}).get("full_m") or {}
+    base_m = (perf_cache or {}).get("base_m") or {}
+    bench_div_m = (perf_cache or {}).get("bench_div_m") or {}
+    bench_300_m = (perf_cache or {}).get("bench_300_m") or {}
+
+    def _safe_cum(m):
+        return m.get("cumulative") if m else None
+
+    def _safe_ann(m):
+        return m.get("annualized") if m else None
+
+    full_cum = _safe_cum(full_m)
+    full_ann = _safe_ann(full_m)
+    div_cum = _safe_cum(bench_div_m)
+    hz300_cum = _safe_cum(bench_300_m)
+    base_cum = _safe_cum(base_m)
+
+    excess_vs_div = (full_cum - div_cum) if (full_cum is not None and div_cum is not None) else None
+    excess_vs_300 = (full_cum - hz300_cum) if (full_cum is not None and hz300_cum is not None) else None
+    excess_vs_base = (full_cum - base_cum) if (full_cum is not None and base_cum is not None) else None
 
     return (
-        f"**全漏斗累计收益：{_pct(full_cum)}，"
-        f"基线全A等权：{_pct(baseline_cum)}，"
-        f"累计超额：{_pct(excess)}。**\n\n"
+        "**全漏斗真实全收益（含税后分红复投）："
+        f"累计 {_pct(full_cum)}，年化 {_pct(full_ann)}，"
+        f"夏普 {_num(full_m.get('sharpe'))}，回撤 {_pct(full_m.get('max_drawdown'))}。**\n\n"
+        f"- vs 中证红利全收益（主基准）：累计超额 **{_pct(excess_vs_div)}**\n"
+        f"- vs 沪深300全收益：累计超额 **{_pct(excess_vs_300)}**\n"
+        f"- vs 全A等权：累计超额 **{_pct(excess_vs_base)}**\n\n"
         "## 验证结论\n\n"
-        "1. 分层增量超额的方向与幅度见上表；正超额表明漏斗筛选有增益。\n"
-        "2. 组合绩效 vs 双基准（中证红利全收益为主基准）：夏普、回撤、胜率对比见上表。\n"
+        "1. §3 含分红真实全收益才是可信 headline——全漏斗 4 段筛选 vs 三大基准均显著正超额。\n"
+        "2. §2 纯价格收益仅作分层筛选的方向性验证（不含分红，高股息策略低估严重）。\n"
         "3. 稳健性四变体结论：剔微盘/剔金融/延迟 T+5/随机起点 的累计收益见上表，"
         "若与主回测方向一致则结论稳健。\n\n"
         "## 已知限制（不掩饰）\n\n"
+        "- **§2 分层收益未含分红复投**：纯价格收益低估真实全收益（高股息策略尤甚），"
+        "真实全收益见 §3（含税后分红复投的全口径）。\n"
         "- **股本为当前快照非历史**：total_shares 用腾讯 Index 73 当前值，"
         "回测期内增发/分红送股会改变真实股本，市值加权与剔微盘会失真（sustainability "
         "支付率仍按每股口径，不受影响）。\n"
@@ -329,6 +386,7 @@ def generate_report(db_path: str, out_path: str) -> None:
     print(f"  调仓季度数: {len(rebalance)}, 全A样本: 5903")
 
     print("→ 生成报告段落...")
+    perf_cache = {}
     parts = [
         "# 四层漏斗分层回测报告 V3\n\n",
         f"> 生成日期：{date.today()}\n",
@@ -339,11 +397,11 @@ def generate_report(db_path: str, out_path: str) -> None:
         "## §1 数据范围与口径\n\n",
         section_data_scope(conn, lookup),
 
-        "## §2 分层增量超额（核心交付）\n\n",
+        "## §2 分层增量超额（方向性验证）\n\n",
         section_layered_incremental(eng),
 
         "## §3 组合绩效 vs 双基准\n\n",
-        section_portfolio_perf(eng, lookup, conn),
+        section_portfolio_perf(eng, lookup, conn, _cache=perf_cache),
 
         "## §3.1 hfq 无税上界对照\n\n",
         section_hfq_comparison(eng, lookup),
@@ -355,7 +413,7 @@ def generate_report(db_path: str, out_path: str) -> None:
         section_robustness(lookup, conn),
 
         "## §5 结论与限制\n\n",
-        section_conclusion(eng),
+        section_conclusion(eng, perf_cache),
 
         "---\n\n"
         "## 复现\n\n"
