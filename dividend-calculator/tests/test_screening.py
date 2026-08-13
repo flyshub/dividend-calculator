@@ -47,9 +47,11 @@ def _dividend(code="600900", real=6.0, ttm=6.5, total=_MISSING, ttm_total=_MISSI
                             dividend_source="m")
 
 
-def _finance(code="600900", roe=16.0):
+def _finance(code="600900", roe=16.0, roe_5y=None, cyclical=None, payout=0.5):
     return FinanceSnapshot(code=code, roe_latest=roe, roe_period="2025年报",
-                           net_profit_annual=1e9, payout_ratio=0.5, finance_source="东财")
+                           net_profit_annual=1e9, payout_ratio=payout,
+                           roe_5y_median=roe_5y, is_cyclical=cyclical,
+                           finance_source="东财")
 
 
 def _candidate(code="600900", **kw):
@@ -190,6 +192,21 @@ class TestFunnel3Pr:
         result = run_funnel([c], FunnelConfig(pr_zone=("合理",)))
         assert result.stage_counts[2] == 1
 
+    def test_corrected_pr_affects_funnel_zone(self):
+        # payout 0.25 → N=2.0 → 修正 PR = 2×8/16 = 1.0 → 合理偏低（基础 PR 0.5 会判低估）
+        c = _candidate(finance=_finance(payout=0.25))
+        result = run_funnel([c])
+        assert result.stage_counts[2] == 1
+        assert c.pr == pytest.approx(1.0)
+        assert c.valuation_zone == "合理偏低"
+
+    def test_cyclical_median_affects_funnel_zone(self):
+        # 周期股：roe_latest 16 → PR 0.5 低估；中位数 8 → PR 1.0 合理偏低（仍过默认档）
+        c = _candidate(finance=_finance(roe=16.0, roe_5y=8.0, cyclical=True))
+        result = run_funnel([c])
+        assert result.stage_counts[2] == 1
+        assert c.pr == pytest.approx(1.0)
+
 
 class TestFunnel4Sustainability:
     def _run(self, verdict="可持续", **cfg):
@@ -277,6 +294,46 @@ class TestDefaultPrEvaluator:
         val = default_pr_evaluator(_candidate(quote=_quote(pe=None)))
         assert val.pr is None
         assert val.valuation_zone == "无法判定"
+
+    # ---- 修正 PR（评审 P1-2：漏斗③ 对齐单股页 pr.py:468 优先修正 PR）----
+
+    def test_corrected_pr_used_when_payout_present(self):
+        # payout 0.25 → N=2.0 → 修正 PR = 2×8/16 = 1.0（基础 PR 仅 0.5）
+        val = default_pr_evaluator(_candidate(finance=_finance(payout=0.25)))
+        assert val.pr == pytest.approx(1.0)
+        assert val.valuation_zone == "合理偏低"
+
+    def test_basic_pr_fallback_when_payout_missing(self):
+        # payout None → N=None → 回退基础 PR = 8/16 = 0.5
+        val = default_pr_evaluator(_candidate(finance=_finance(payout=None)))
+        assert val.pr == pytest.approx(0.5)
+        assert val.valuation_zone == "低估"
+
+    def test_payout_50pct_n_factor_one(self):
+        # payout 0.5 → N=1.0 → 修正 PR == 基础 PR
+        val = default_pr_evaluator(_candidate(finance=_finance(payout=0.5)))
+        assert val.pr == pytest.approx(0.5)
+
+    # ---- 周期股用 5 年 ROE 中位数（Phase 3，对齐 pr.py:460）----
+
+    def test_cyclical_uses_5y_median(self):
+        # is_cyclical=True + roe_5y_median=8 → PR = 8/8 = 1.0（而非 roe_latest 16 → 0.5）
+        val = default_pr_evaluator(_candidate(
+            finance=_finance(roe=16.0, roe_5y=8.0, cyclical=True)))
+        assert val.pr == pytest.approx(1.0)
+        assert val.valuation_zone == "合理偏低"
+
+    def test_cyclical_without_median_uses_latest(self):
+        # is_cyclical=True 但 roe_5y_median 缺失 → 回退 roe_latest
+        val = default_pr_evaluator(_candidate(
+            finance=_finance(roe=16.0, roe_5y=None, cyclical=True)))
+        assert val.pr == pytest.approx(0.5)
+
+    def test_non_cyclical_uses_latest_even_with_median(self):
+        # 非周期股即使有 roe_5y_median 也不用（对齐 pr.py：仅周期股 PB-PR 用中位数）
+        val = default_pr_evaluator(_candidate(
+            finance=_finance(roe=16.0, roe_5y=8.0, cyclical=False)))
+        assert val.pr == pytest.approx(0.5)
 
 
 class TestBuildOutputRows:

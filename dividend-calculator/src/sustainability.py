@@ -184,6 +184,7 @@ def parse_dividend_rows(rows: List[dict]) -> Tuple[List[DividendRecord], Optiona
             dividend_per_10=dp10,
             report_time=label,
             plan_notice_date=plan_date,
+            total_shares=_to_float(row.get("TOTAL_SHARES")),
         ))
 
         if year not in yearly:
@@ -227,7 +228,10 @@ def aggregate_dividend_history(records: List[DividendRecord],
         if not ym:
             continue
         year = ym.group(1)
-        amount = rec.dividend_per_10 / 10.0 * total_shares
+        # 行股本优先（东财 RPT_SHAREBONUS_DET 每行自带历史 TOTAL_SHARES，股本变动公司
+        # 各年总额用各自行股本折算）；缺失（cninfo/mootdx 路径）回退参数股本
+        shares = rec.total_shares if rec.total_shares else total_shares
+        amount = rec.dividend_per_10 / 10.0 * shares
         year_amount[year] = year_amount.get(year, 0.0) + amount
         # 仅年报记录参与削减比较（#39 M6）。排除"半年报"子串：旧 label「半年报」
         # 含「年报」子串，遗留数据会被误判为年报——与 JS（indexOf('半年报') === -1）完全一致

@@ -15,13 +15,17 @@
     python scripts/init_screener.py --source all-a --with-finance  # 补全 + 导入 ROE
 """
 import argparse
+import json
 import sqlite3
+import statistics
 import sys
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.pr_calculator import classify_industry  # noqa: E402
 from src.screener_cache import ScreenerCache, StockListItem  # noqa: E402
 from src.screener_quotes import fetch_all_quotes  # noqa: E402
 
@@ -60,24 +64,62 @@ def _existing_codes(cache: ScreenerCache) -> set:
     return set(cache.get_stock_codes())
 
 
-def _import_finance_from_backtest(cache) -> int:
-    """从 backtest.db 批量导入最新 ROE 到 finance_snapshot。"""
+def _roe_5y_median(annual_rows: List[Tuple[str, float]]) -> Optional[float]:
+    """最近 5 个年报的 ROE 中位数（语义对齐 pr.py:237-243：years.max()-4 窗口 + median）。
+
+    annual_rows: [(report_date "YYYY-MM-DD", roe)]，仅年报（12-31）。
+    窗口按年份值取（max_year-4 起），不足 5 年取全部；无数据返回 None。
+    """
+    if not annual_rows:
+        return None
+    max_year = max(int(d[:4]) for d, _ in annual_rows)
+    vals = [roe for d, roe in annual_rows if int(d[:4]) >= max_year - 4]
+    return float(statistics.median(vals)) if vals else None
+
+
+def _load_industry_cache(path: Optional[Path] = None) -> Dict[str, str]:
+    """industry_cache.json → {code: 东财行业字符串}；文件缺失/损坏返回空 dict（不阻塞）。"""
+    path = path or PROJECT_ROOT / "data" / "industry_cache.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _import_finance_from_backtest(
+    cache,
+    backtest_db: Optional[Path] = None,
+    industry_cache_path: Optional[Path] = None,
+) -> int:
+    """从 backtest.db 批量导入 ROE 到 finance_snapshot。
+
+    补算（评审 P1-2 / Phase 3）：
+    - roe_5y_median：每 code 取最近 5 个年报（12-31）的 ROE 中位数
+    - is_cyclical：industry_cache.json → classify_industry；缓存缺失置 None（不阻塞、不拉网络）
+    """
     from src.screener_cache import FinanceSnapshot
-    db = PROJECT_ROOT / "data" / "backtest.db"
+    db = backtest_db or PROJECT_ROOT / "data" / "backtest.db"
+    industries = _load_industry_cache(industry_cache_path)
     conn = sqlite3.connect(db)
-    rows = conn.execute("""
-        SELECT code, roe, report_date FROM roe r
-        WHERE report_date = (SELECT MAX(report_date) FROM roe r2 WHERE r2.code = r.code)
-        ORDER BY code
-    """).fetchall()
+    rows = conn.execute(
+        "SELECT code, roe, report_date FROM roe ORDER BY code, report_date"
+    ).fetchall()
     conn.close()
-    n = 0
-    for code, roe, period in rows:
-        if roe is None:
+    # 按 code 分组；仅年报（12-31）参与中位数窗口
+    by_code: Dict[str, List[Tuple[str, float]]] = {}
+    for code, roe, report_date in rows:
+        if roe is None or not str(report_date).endswith("-12-31"):
             continue
+        by_code.setdefault(code, []).append((str(report_date), float(roe)))
+    n = 0
+    for code, annual in by_code.items():
+        latest_date, latest_roe = annual[-1]  # 已按 report_date 升序
+        is_cyclical = classify_industry(industries[code])[0] if code in industries else None
         cache.upsert_finance(FinanceSnapshot(
-            code=code, roe_latest=float(roe), roe_period=period,
-            net_profit_annual=None, payout_ratio=None, finance_source="backtest.db",
+            code=code, roe_latest=latest_roe, roe_period=latest_date,
+            net_profit_annual=None, payout_ratio=None,
+            roe_5y_median=_roe_5y_median(annual), is_cyclical=is_cyclical,
+            finance_source="backtest.db",
         ))
         n += 1
     return n

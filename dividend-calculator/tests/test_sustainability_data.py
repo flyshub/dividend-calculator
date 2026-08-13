@@ -190,6 +190,56 @@ def test_aggregate_consecutive_breaks():
 
 
 # ---------------------------------------------------------------------------
+# 行股本（TOTAL_SHARES）优先折算（P1-1：股本变动公司历史失真修复）
+# ---------------------------------------------------------------------------
+
+def _sharebonus_rows_with_shares():
+    """600900 真实行股本：2021 行 22,741,859,230 / 2025 行 24,468,217,716（东财 RPT_SHAREBONUS_DET 实测）。"""
+    return [
+        {"REPORT_DATE": "2021-12-31", "PRETAX_BONUS_RMB": 5.0, "ASSIGN_PROGRESS": "实施",
+         "EX_DIVIDEND_DATE": "2022-07-01", "TOTAL_SHARES": 22_741_859_230},
+        {"REPORT_DATE": "2025-12-31", "PRETAX_BONUS_RMB": 5.0, "ASSIGN_PROGRESS": "实施",
+         "EX_DIVIDEND_DATE": "2026-07-01", "TOTAL_SHARES": 24_468_217_716},
+    ]
+
+
+def test_parse_dividend_rows_populates_total_shares():
+    """TOTAL_SHARES 行股本 → 记录自带各自值；缺失行 → None。"""
+    rows = _sharebonus_rows_with_shares() + [
+        # 无 TOTAL_SHARES（cninfo/mootdx 路径）→ None
+        {"REPORT_DATE": "2024-12-31", "PRETAX_BONUS_RMB": 5.0, "ASSIGN_PROGRESS": "实施",
+         "EX_DIVIDEND_DATE": "2025-07-01"},
+    ]
+    records, _ = parse_dividend_rows(rows)
+    by_time = {r.report_time: r for r in records}
+    assert by_time["2021年报"].total_shares == pytest.approx(22_741_859_230)
+    assert by_time["2025年报"].total_shares == pytest.approx(24_468_217_716)
+    assert by_time["2024年报"].total_shares is None
+
+
+def test_aggregate_uses_per_row_total_shares():
+    """各年总额用对应行股本折算（2021 年 = dp10/10 × 22.74B，而非 × 24.47B）。"""
+    records, _ = parse_dividend_rows(_sharebonus_rows_with_shares())
+    h = aggregate_dividend_history(records, "2025", 1e9)
+    # 最新年（2025）用行股本 24.47B，而非参数股本 1e9
+    assert h.latest_year_amount == pytest.approx(5.0 / 10 * 24_468_217_716)
+    # 历史均值（2021 年）用行股本 22.74B
+    assert h.history_mean_amount == pytest.approx(5.0 / 10 * 22_741_859_230)
+
+
+def test_aggregate_falls_back_to_param_shares():
+    """行股本缺失（None）→ 回退参数股本（保持既有行为）。"""
+    rows = [
+        {"REPORT_DATE": "2025-12-31", "PRETAX_BONUS_RMB": 5.0, "ASSIGN_PROGRESS": "实施",
+         "EX_DIVIDEND_DATE": "2026-07-01"},  # 无 TOTAL_SHARES
+    ]
+    records, _ = parse_dividend_rows(rows)
+    assert records[0].total_shares is None
+    h = aggregate_dividend_history(records, "2025", 1e9)
+    assert h.latest_year_amount == pytest.approx(5.0 / 10 * 1e9)
+
+
+# ---------------------------------------------------------------------------
 # parse_dividend_rows（东财分红明细 → DividendRecord + 最新财年）
 # ---------------------------------------------------------------------------
 

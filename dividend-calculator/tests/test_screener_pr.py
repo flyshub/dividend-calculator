@@ -54,6 +54,37 @@ class TestEvaluatePrBatch:
         results = evaluate_pr_batch(["600900"], cache)
         assert results == []  # 缺 ROE 跳过
 
+    def test_uses_corrected_pr(self, tmp_path):
+        """口径对齐漏斗③：payout_ratio=0.25 → N=2 → 修正 PR=1.0（合理偏低），非基础 PR=0.5（低估）。"""
+        from src.screener_cache import FinanceSnapshot, QuoteSnapshot
+        cache = ScreenerCache(tmp_path / "s.db")
+        cache.upsert_quote(QuoteSnapshot(code="600900", name="x", price=10, pe_ttm=8.0,
+                                         pb=1.0, total_shares=1e9, market_cap=1e10,
+                                         quote_time="", source="腾讯"))
+        cache.upsert_finance(FinanceSnapshot(code="600900", roe_latest=16.0, roe_period="2025年报",
+                                             net_profit_annual=1e9, payout_ratio=0.25,
+                                             finance_source="东财"))
+        results = evaluate_pr_batch(["600900"], cache)
+        assert results[0]["pr"] == 1.0
+        assert results[0]["valuation_zone"] == "合理偏低"  # 修正 PR 生效：0.5(低估) → 1.0(合理偏低)
+        assert results[0]["roe_used"] == 16.0  # 非周期股用 roe_latest
+
+    def test_cyclical_uses_roe_5y_median(self, tmp_path):
+        """周期股用 5 年 ROE 中位数（对齐 pr.py:460）：中位数 10 → PR=0.8，而非 roe_latest 16 → 0.5。"""
+        from src.screener_cache import FinanceSnapshot, QuoteSnapshot
+        cache = ScreenerCache(tmp_path / "s.db")
+        cache.upsert_quote(QuoteSnapshot(code="600900", name="x", price=10, pe_ttm=8.0,
+                                         pb=1.0, total_shares=1e9, market_cap=1e10,
+                                         quote_time="", source="腾讯"))
+        cache.upsert_finance(FinanceSnapshot(code="600900", roe_latest=16.0, roe_period="2025年报",
+                                             net_profit_annual=1e9, payout_ratio=0.5,
+                                             roe_5y_median=10.0, is_cyclical=True,
+                                             finance_source="东财"))
+        results = evaluate_pr_batch(["600900"], cache)
+        assert results[0]["pr"] == 0.8  # 8/10，非 8/16
+        assert results[0]["roe_used"] == 10.0  # 周期股用中位数
+        assert results[0]["roe_latest"] == 16.0  # 原始字段保留
+
     def test_empty(self, tmp_path):
         cache = ScreenerCache(tmp_path / "s.db")
         assert evaluate_pr_batch([], cache) == []

@@ -4,7 +4,7 @@
   ① 行情可用（quote 的价格/总股本/市值均为正）
   ② 真实股息率 > min_real 且 TTM 股息率 > min_ttm（实时重算；
      缺 total/ttm_dividend 时回退快照旧值，仅缺失回退、非 0，#81）
-  ③ 市赚率估值区间 ∈ pr_zone（PR = PE_TTM / ROE，纯计算）
+  ③ 市赚率估值区间 ∈ pr_zone（修正 PR = N×PE_TTM/ROE，纯计算；周期股用 5 年 ROE 中位数）
   ④ 可持续性 verdict ∈ sus_verdict（评估由数据获取层注入）
 
 本 module 不碰网络、不碰缓存：数据获取（拉行情/股息/财务/可持续性）
@@ -13,7 +13,12 @@
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence
 
-from src.pr_calculator import classify_valuation, compute_basic_pr
+from src.pr_calculator import (
+    classify_valuation,
+    compute_basic_pr,
+    compute_corrected_pr,
+    compute_n_factor,
+)
 from src.screener_cache import DividendSnapshot, FinanceSnapshot, QuoteSnapshot
 
 # 默认阈值（与 spec #67 / 页面口径卡一致，page-parity 测试引用）
@@ -84,14 +89,19 @@ def compute_real_yield(total_dividend: Optional[float], market_cap: Optional[flo
 
 
 def default_pr_evaluator(candidate: FunnelCandidate) -> PrValuation:
-    """默认 PR 评估（纯计算）：PR = PE_TTM / ROE_latest + 估值四档分类。
+    """默认 PR 评估（纯计算），口径对齐单股页 pr.py:460/468：
+    - ROE 取值：周期股用 5 年 ROE 中位数（单年 ROE 失真，多年平滑），否则最新年报 ROE
+    - 优先修正 PR = N×PE_TTM/ROE（N=0.5/股利支付率，截断[1,2]）；payout_ratio 缺失回退基础 PR
 
     缺 PE 或 ROE → 无法判定（不调网络，与既有纯缓存路径一致）。
     """
     quote, fin = candidate.quote, candidate.finance
     if quote is None or quote.pe_ttm is None or fin is None or fin.roe_latest is None:
         return PrValuation(pr=None, valuation_zone="无法判定")
-    pr_val = compute_basic_pr(quote.pe_ttm, fin.roe_latest)
+    roe = fin.roe_5y_median if (fin.is_cyclical and fin.roe_5y_median is not None) else fin.roe_latest
+    n = compute_n_factor(fin.payout_ratio)
+    pr_val = (compute_corrected_pr(quote.pe_ttm, roe, n) if n is not None
+              else compute_basic_pr(quote.pe_ttm, roe))
     return PrValuation(pr=pr_val, valuation_zone=classify_valuation(pr_val))
 
 

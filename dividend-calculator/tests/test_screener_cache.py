@@ -160,6 +160,88 @@ class TestFinanceSnapshot:
         assert got.roe_latest == pytest.approx(16.4)
         assert got.payout_ratio == pytest.approx(0.58)
 
+    def test_upsert_and_read_roe_5y_median_cyclical(self, cache):
+        # 周期股 PR 字段（评审 P1-2 / Phase 3）：roe_5y_median + is_cyclical 往返
+        f = FinanceSnapshot(code="600900", roe_latest=16.4, roe_period="2025年报",
+                            net_profit_annual=1e10, payout_ratio=0.58,
+                            roe_5y_median=12.3, is_cyclical=True,
+                            finance_source="东财")
+        cache.upsert_finance(f)
+        got = cache.get_finance("600900")
+        assert got is not None
+        assert got.roe_5y_median == pytest.approx(12.3)
+        assert got.is_cyclical is True  # SQLite INTEGER → bool 还原
+
+    def test_upsert_and_read_cyclical_false(self, cache):
+        f = FinanceSnapshot(code="600900", roe_latest=16.4, roe_period="2025年报",
+                            net_profit_annual=1e10, payout_ratio=0.58,
+                            roe_5y_median=12.3, is_cyclical=False,
+                            finance_source="东财")
+        cache.upsert_finance(f)
+        got = cache.get_finance("600900")
+        assert got is not None
+        assert got.is_cyclical is False
+
+    def test_get_all_finance_roundtrip(self, cache):
+        cache.upsert_finance(FinanceSnapshot(
+            code="600900", roe_latest=16.4, roe_period="2025年报",
+            net_profit_annual=1e10, payout_ratio=0.58,
+            roe_5y_median=12.3, is_cyclical=True, finance_source="东财"))
+        all_fin = cache.get_all_finance()
+        assert all_fin["600900"].roe_5y_median == pytest.approx(12.3)
+        assert all_fin["600900"].is_cyclical is True
+
+
+class TestMigration:
+    """旧库缺列 → 打开时自动 ALTER TABLE 补齐（评审 P1-2：146MB 存量 screener.db 兼容）。"""
+
+    def _old_schema_db(self, tmp_path):
+        """手工建旧版 finance_snapshot（无 roe_5y_median/is_cyclical 列）+ 旧 dividend 表。"""
+        import sqlite3
+        db = tmp_path / "old.db"
+        conn = sqlite3.connect(db)
+        conn.executescript("""
+            CREATE TABLE finance_snapshot (
+                code TEXT PRIMARY KEY, roe_latest REAL, roe_period TEXT,
+                net_profit_annual REAL, payout_ratio REAL, finance_source TEXT, updated_at TEXT);
+            CREATE TABLE dividend_snapshot (
+                code TEXT PRIMARY KEY, real_yield REAL, ttm_yield REAL,
+                real_yield_year TEXT, ttm_period TEXT, dividend_source TEXT, updated_at TEXT);
+        """)
+        conn.execute(
+            "INSERT INTO finance_snapshot VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("600900", 16.4, "2025年报", 1e10, 0.58, "东财", "2026-08-10"))
+        conn.commit()
+        conn.close()
+        return db
+
+    def test_old_db_migrated_and_readable(self, tmp_path):
+        db = self._old_schema_db(tmp_path)
+        cache = ScreenerCache(db)  # 打开即迁移
+        got = cache.get_finance("600900")
+        assert got is not None
+        assert got.roe_latest == pytest.approx(16.4)
+        assert got.roe_5y_median is None      # 旧行新列 → NULL
+        assert got.is_cyclical is None
+
+    def test_old_db_upsert_with_new_fields_after_migration(self, tmp_path):
+        db = self._old_schema_db(tmp_path)
+        cache = ScreenerCache(db)
+        cache.upsert_finance(FinanceSnapshot(
+            code="600987", roe_latest=15.0, roe_period="2025年报",
+            net_profit_annual=1e9, payout_ratio=0.4,
+            roe_5y_median=11.0, is_cyclical=True, finance_source="backtest.db"))
+        got = cache.get_finance("600987")
+        assert got is not None
+        assert got.roe_5y_median == pytest.approx(11.0)
+        assert got.is_cyclical is True
+
+    def test_migration_idempotent(self, tmp_path):
+        db = self._old_schema_db(tmp_path)
+        ScreenerCache(db)          # 第一次迁移
+        cache = ScreenerCache(db)  # 第二次打开不报错（幂等）
+        assert cache.get_finance("600900") is not None
+
 
 class TestSustainabilitySnapshot:
     def test_upsert_and_read(self, cache):

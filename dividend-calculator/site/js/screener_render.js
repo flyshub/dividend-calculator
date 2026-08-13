@@ -36,15 +36,37 @@
     return '<span class="badge ' + cls + '">' + sus + '</span>';
   }
 
+  // 提示徽标：灰底虚线边框的注释，title 提供 hover 说明（低调，不喧宾夺主）
+  function noteBadge(text, tip) {
+    return ' <span class="badge badge-note" title="' + esc(tip) + '">' + esc(text) + '</span>';
+  }
+
+  // 小盘股提示：PR 阈值回测样本为沪深300，总市值 <100 亿的行加注释
+  function prNote(r) {
+    var cap = Number(r['总市值(亿)']);
+    if (isFinite(cap) && cap < 100) {
+      return noteBadge('小盘未验证', '市赚率阈值回测样本为沪深300，小盘股低 PR 可能是价值陷阱，请人工核实');
+    }
+    return '';
+  }
+
+  // 偏弱可持续性提示：红旗只降档不否决，偏弱可能因特别分红/突击分红或周期拐头
+  function susNote(r) {
+    if (r['可持续性'] === '偏弱') {
+      return noteBadge('核实分红性质', '偏弱可能因特别分红/突击分红或周期拐头，请人工核实');
+    }
+    return '';
+  }
+
   // 单行渲染（行字段拼接，返回值拼进 innerHTML；字符串列已 esc）
   // 列序须与 site/screener.html 的 <th> 表头一致
   function rowHtml(r) {
     return '<td>' + esc(r['代码']) + '</td>' +
       '<td>' + esc(r['名称']) + '</td>' +
       '<td class="num yield">' + fmtNum(r['真实股息率%'], 2) + '</td>' +
-      '<td>' + susBadge(esc(r['可持续性'])) + '</td>' +
+      '<td>' + susBadge(esc(r['可持续性'])) + susNote(r) + '</td>' +
       '<td>' + zoneBadge(esc(r['估值区间'])) + '</td>' +
-      '<td class="num">' + fmtNum(r['市赚率PR'], 2) + '</td>' +
+      '<td class="num">' + fmtNum(r['市赚率PR'], 2) + prNote(r) + '</td>' +
       '<td class="num">' + fmtNum(r['ROE%'], 2) + '</td>' +
       '<td class="num">' + fmtNum(r['总市值(亿)'], 1) + '</td>' +
       '<td class="num">' + fmtNum(r['TTM股息率%'], 2) + '</td>' +
@@ -52,5 +74,5 @@
       '<td>' + esc(r['数据来源']) + '</td>';
   }
 
-  return { esc: esc, fmtNum: fmtNum, zoneBadge: zoneBadge, susBadge: susBadge, rowHtml: rowHtml };
+  return { esc: esc, fmtNum: fmtNum, zoneBadge: zoneBadge, susBadge: susBadge, noteBadge: noteBadge, prNote: prNote, susNote: susNote, rowHtml: rowHtml };
 }));

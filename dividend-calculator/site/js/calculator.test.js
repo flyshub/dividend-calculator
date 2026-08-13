@@ -177,6 +177,52 @@ test('parseDividendRecords 明细按除权日升序 (#99)', () => {
   const r = Calc.parseDividendRecords(rows, 1000);
   assert.deepEqual(r.details.map(d => d.report_time), ['2025中期分配', '2025年报']);
 });
+test('parseDividendRecords 历史聚合各年用行股本 (P1-1)', () => {
+  // 东财 RPT_SHAREBONUS_DET 行自带 TOTAL_SHARES（历史股本）：600900 2021=22741859230、2025=24468217716
+  const rows = [
+    { REPORT_DATE: '2025-12-31 00:00:00', PRETAX_BONUS_RMB: 10, ASSIGN_PROGRESS: '实施分配', TOTAL_SHARES: 24468217716 },
+    { REPORT_DATE: '2021-12-31 00:00:00', PRETAX_BONUS_RMB: 10, ASSIGN_PROGRESS: '实施分配', TOTAL_SHARES: 22741859230 },
+  ];
+  const r = Calc.parseDividendRecords(rows, 1e9); // 参数股本 10 亿，应被行股本覆盖
+  // 最新财年股息率仍用参数股本（DPS/股价自洽，P1-1 不改）
+  assert.equal(r.totalDividend, (10 / 10) * 1e9);
+  const h = r.sustainabilityHistory;
+  assert.equal(h.latest_year_amount, (10 / 10) * 24468217716);  // 2025 行股本
+  assert.equal(h.history_mean_amount, (10 / 10) * 22741859230); // 2021 行股本
+  assert.equal(h.consecutive_years, 1); // 2025→2024 断档（无 2022-2024 数据）
+});
+test('parseDividendRecords 行股本缺失回退参数股本 (P1-1)', () => {
+  const rows = [
+    { REPORT_DATE: '2025-12-31 00:00:00', PRETAX_BONUS_RMB: 10, ASSIGN_PROGRESS: '实施分配' },
+    { REPORT_DATE: '2024-12-31 00:00:00', PRETAX_BONUS_RMB: 10, ASSIGN_PROGRESS: '实施分配' },
+  ];
+  const r = Calc.parseDividendRecords(rows, 5e9);
+  const h = r.sustainabilityHistory;
+  assert.equal(h.latest_year_amount, (10 / 10) * 5e9);
+  assert.equal(h.history_mean_amount, (10 / 10) * 5e9);
+});
+test('parseDividendRecords 行股本为0/NaN视为无效回退参数 (P1-1)', () => {
+  const rows = [
+    { REPORT_DATE: '2025-12-31 00:00:00', PRETAX_BONUS_RMB: 10, ASSIGN_PROGRESS: '实施分配', TOTAL_SHARES: 0 },
+    { REPORT_DATE: '2024-12-31 00:00:00', PRETAX_BONUS_RMB: 10, ASSIGN_PROGRESS: '实施分配', TOTAL_SHARES: 'abc' },
+  ];
+  const r = Calc.parseDividendRecords(rows, 5e9);
+  const h = r.sustainabilityHistory;
+  assert.equal(h.latest_year_amount, (10 / 10) * 5e9);
+  assert.equal(h.history_mean_amount, (10 / 10) * 5e9);
+});
+test('parseDividendRecords 同年多笔分红各用各行股本 (P1-1)', () => {
+  // 同一财年中期分配与年报实施时股本不同（增发/转送）→ 逐笔折算，与 Python 逐记录一致
+  const rows = [
+    { REPORT_DATE: '2025-12-31 00:00:00', PRETAX_BONUS_RMB: 80, ASSIGN_PROGRESS: '实施分配', TOTAL_SHARES: 24468217716 },
+    { REPORT_DATE: '2025-09-30 00:00:00', PRETAX_BONUS_RMB: 30, ASSIGN_PROGRESS: '实施分配', TOTAL_SHARES: 22741859230 },
+  ];
+  const r = Calc.parseDividendRecords(rows, 1e9);
+  const h = r.sustainabilityHistory;
+  const perRecord = (30 / 10) * 22741859230 + (80 / 10) * 24468217716;
+  assert.equal(h.latest_year_amount, perRecord);
+  assert.equal(h.history_mean_amount, null); // 仅一年数据，无历史年
+});
 
 // ---- parseFinancials（TTM = 最新累计 + 上年全年 - 上年同期）----
 test('parseFinancials 空字符串不污染中位数', () => {

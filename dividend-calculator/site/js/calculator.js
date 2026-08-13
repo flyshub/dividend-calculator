@@ -64,12 +64,14 @@
       var isAnnual = (month === 12);
       var label = isAnnual ? (y + '年报') : (y + '中期分配');
 
-      if (!yearly[y]) yearly[y] = { total: 0, hasAnnual: false, details: [] };
-      yearly[y].total += dp10;
+      if (!yearly[y]) yearly[y] = { hasAnnual: false, details: [] };
       yearly[y].hasAnnual = yearly[y].hasAnnual || isAnnual;
+      /* P1-1: 每笔分红携带各自行股本（历史股本），0/NaN 视为无效存 null */
+      var ts = row.TOTAL_SHARES ? Number(row.TOTAL_SHARES) : null;
       yearly[y].details.push({
         report_time: label, dividend_per_10: dp10,
         ex_dividend_date: String(row.EX_DIVIDEND_DATE || '').slice(0, 10),
+        total_shares: (ts > 0) ? ts : null,
       });
     }
 
@@ -93,7 +95,7 @@
       return (a.ex_dividend_date || '').localeCompare(b.ex_dividend_date || '');
     });
 
-    var totalPer10 = target.total;
+    var totalPer10 = target.details.reduce(function (s, d) { return s + (Number(d.dividend_per_10) || 0); }, 0);
     var dps = totalPer10 / 10.0;
     var totalDividend = dps * totalShares;
 
@@ -151,21 +153,29 @@
 
   /* 按财年聚合 → {consecutive_years, ever_cut, latest_year_amount, history_mean_amount} */
   function _aggregateDividendHistory(yearly, targetYear, totalShares) {
+    /* P1-1: 每笔分红用各自行股本（历史股本）折算，缺失/无效回退参数股本 —— 与 Python 逐记录一致 */
+    function recShares(d) {
+      return (d.total_shares != null && d.total_shares > 0) ? d.total_shares : totalShares;
+    }
     var yearAmount = {};
     Object.keys(yearly).forEach(function (y) {
-      yearAmount[y] = (yearly[y].total / 10.0) * totalShares;
+      var sum = 0;
+      (yearly[y].details || []).forEach(function (d) {
+        sum += (Number(d.dividend_per_10) || 0) / 10.0 * recShares(d);
+      });
+      yearAmount[y] = sum;
     });
-    /* 仅年报记录参与 ever_cut（#39）：yearly[y].details 含 {report_time, dividend_per_10}，
-     * report_time 为 'YYYY年报'/'YYYY半年报'（注意 '半年报' 含 '年报' 子串，需双重判断）。
+    /* 仅年报记录参与 ever_cut（#39）：yearly[y].details 含 {report_time, dividend_per_10, total_shares}，
+     * report_time 为 'YYYY年报'/'YYYY中期分配'（注意 '中期分配' 不含 '年报' 子串，双重判断防 '半年报'）。
      * 半年报混入会掩盖相邻年降幅（如 2025 年报 8 元 + 半年报 3 元被当作 11 元）。 */
     var annualAmount = {};
     Object.keys(yearly).forEach(function (y) {
-      var sum10 = 0;
+      var sum = 0;
       (yearly[y].details || []).forEach(function (d) {
         var t = String(d.report_time || '');
-        if (t.indexOf('年报') !== -1 && t.indexOf('半年报') === -1) sum10 += Number(d.dividend_per_10) || 0;
+        if (t.indexOf('年报') !== -1 && t.indexOf('半年报') === -1) sum += (Number(d.dividend_per_10) || 0) / 10.0 * recShares(d);
       });
-      annualAmount[y] = (sum10 / 10.0) * totalShares;
+      annualAmount[y] = sum;
     });
     var yearsSorted = Object.keys(yearAmount).map(Number).sort(function (a, b) { return b - a; });
     if (!yearsSorted.length) {
