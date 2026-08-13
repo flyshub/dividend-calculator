@@ -104,3 +104,44 @@
 2. ~~Phase 3 周期股中位数~~ → 已确认：本期做
 3. ~~Phase 4 提示层~~ → 已确认：本期做
 4. **P2-1**：f115 实测结果决定切换或标注，实现时先验证。
+---
+
+# Issue #122：月频管线补真正的财务拉取
+
+## 现状（已核实）
+
+- `fill_screener_data.py --finance` → `fill_finance` → `evaluate_pr_batch`（只读缓存、返回值被丢弃）→ **空操作**
+- 可复用链路已存在：`pr.py::_get_financial(code)` 返回 (roe_latest, roe_5y_median, net_profit_annual, src, errors, roe_period)，mootdx F10 → akshare 同花顺；`pr.py::_get_industry(code)` 返回行业（→ classify_industry 判周期）
+- `upsert_finance(FinanceSnapshot)` 已支持全部字段（含 roe_5y_median/is_cyclical/updated_at）
+- 模式参照：`screener_dividend.py::compute_dividends_for_candidates`（batch + batch_wait 限流 + upsert + 进度）
+
+## 方案
+
+新建 `src/screener_finance.py`（镜像 screener_dividend.py）：
+
+- `compute_finance_for_candidates(batch, cache, fresh_days=7)`：逐股
+  1. 新鲜度检查：`finance_snapshot.updated_at` 在 fresh_days 内 → 跳过（增量复用）
+  2. `_get_financial(code)` → roe_latest/roe_5y_median/net_profit_annual/roe_period
+  3. `_get_industry(code)` → classify_industry → is_cyclical
+  4. payout_ratio = dividend_snapshot.total_dividend / net_profit_annual（净利润缺失/≤0 → None，漏斗回退基础 PR）
+  5. `cache.upsert_finance(...)`，finance_source 标注实际来源
+- `fill_finance` 改用该函数，batch_wait 限流 0.8s/只 + 进度汇报（对齐 fill_dividends）
+
+## 验收标准（issue #122）
+
+- [ ] 对含过期 finance_snapshot 的样本执行 `--finance` 后，DB 中 ROE/中位数/周期标记确实更新
+- [ ] 限流与增量复用生效（fresh_days 内数据跳过）
+- [ ] 相关测试通过（mock 网络）；真实数据冒烟 `--limit 3` 验证可获得性（数据铁律）
+
+## 测试
+
+- tests/test_screener_finance.py（新）：mock `_get_financial`/`_get_industry` → upsert 字段正确（含 payout_ratio/is_cyclical）；新鲜跳过/过期拉取；净利润缺失 → payout None；batch_wait mock（同 test_screener_pr.py 模式）
+- 回归：pytest 全量 + verify_js_vs_python（不动 JS，仅确认无回归）
+
+## 风险
+
+| 风险 | 影响 | 缓解 |
+|---|---|---|
+| 全 A 逐股拉取耗时（~0.8s/只） | 月频 +~30-60 分钟 | 只拉 get_dividend_codes（有股息候选），非全市场 |
+| mootdx F10 海外可用性 | 回退 akshare 同花顺（已实测 10/10） | 复用 pr.py 既有降级链 |
+| 真实数据冒烟需网络 | CI 排除 | 本地手动 `--limit 3` 验证后合并 |

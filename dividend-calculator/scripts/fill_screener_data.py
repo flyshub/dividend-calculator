@@ -52,22 +52,22 @@ def fill_dividends(cache: ScreenerCache, limit: int = 0):
 
 def fill_finance(cache: ScreenerCache, limit: int = 0):
     """全 A 逐股拉财务/PR（带进度汇报）。"""
-    from src.screener_pr import evaluate_pr_batch
+    from src.screener_finance import compute_finance_for_candidates
     # 只对股息>5% 的候选（漏斗② 之后）评估 PR——但此处补全财务，拉全有股息率的
     codes = cache.get_dividend_codes(real_yield_min=0.0)
     if limit:
         codes = codes[:limit]
     total = len(codes)
-    print(f"拉取财务/PR: {total} 只（复用已有 ROE 缓存）", flush=True)
+    print(f"拉取财务: {total} 只（限流 0.8s/只，预计 ~{total*0.8/60:.0f} 分钟）", flush=True)
     t0 = time.time()
     batch_size = 50
     done = 0
     for i in range(0, total, batch_size):
         batch = codes[i:i + batch_size]
-        evaluate_pr_batch(batch, cache)
+        compute_finance_for_candidates(batch, cache)
         done += len(batch)
         _report(done, total, t0, "财务")
-    print(f"✓ 财务/PR 拉取完成: {done} 只, 耗时 {(time.time()-t0)/60:.1f} 分钟", flush=True)
+    print(f"✓ 财务拉取完成: {done} 只, 耗时 {(time.time()-t0)/60:.1f} 分钟", flush=True)
 
 
 def main():
