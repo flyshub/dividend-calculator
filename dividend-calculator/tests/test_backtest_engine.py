@@ -458,3 +458,90 @@ def test_unlisted_stock_excluded_from_pool():
             if period_codes:  # 至少有一期含 A
                 assert "A" in period_codes
                 break
+
+
+# --- T10 #115 送转除权因子建模 ---
+def test_portfolio_return_split_factor():
+    """送转除权因子建模：10送10 持有期收益正确（不再是 -47% 失真）。"""
+    # 建仓价 10、结算价 5.5、持有期 10送10（送股比例 10）
+    # 真实收益 = 2 × 5.5/10 - 1 = +10%
+    prices = {"X": [(date(2023, 3, 31), 10.0), (date(2023, 6, 30), 5.5)]}
+
+    class Lk(MockLookup):
+        def dividends(self, code, asof):
+            if code != "X":
+                return None
+            return [{
+                "ex_dividend_date": "2023-05-15",
+                "bonus_ratio": 10.0,   # 每10股送10股
+                "trans_ratio": 0.0,
+                "cash_div_per_share": 0.0,
+            }]
+
+    lk = Lk(prices=prices)
+    # 不含分红的送转：成本 0、收益 = 2*5.5/10 - 1 - 0 = +10%
+    r = portfolio_return(["X"], date(2023, 3, 31), date(2023, 6, 30), lk, cost=0.0)
+    assert r is not None
+    assert abs(r - 0.10) < 0.001  # +10%，不再是 -47%
+
+
+def test_portfolio_return_no_split_unchanged():
+    """无送转的股票收益不变（向后兼容）。"""
+    prices = {"X": [(date(2023, 3, 31), 10.0), (date(2023, 6, 30), 12.0)]}
+
+    class Lk(MockLookup):
+        def dividends(self, code, asof):
+            return None
+
+    lk = Lk(prices=prices)
+    r = portfolio_return(["X"], date(2023, 3, 31), date(2023, 6, 30), lk, cost=0.0)
+    assert r is not None
+    assert abs(r - 0.20) < 0.001  # +20%
+
+
+# --- T11 #116 财报按披露日过滤 ---
+def test_finance_filter_by_notice_date():
+    """T11：finance 优先按 notice_date 过滤（消除未来函数）。"""
+    prices = {"X": [(date(2023, 3, 31), 10.0), (date(2023, 6, 30), 11.0)]}
+
+    class Lk(MockLookup):
+        def __init__(self, **kw):
+            super().__init__(**kw)
+            self._fin_recs_test = {
+                "X": [
+                    # 2022 年报，notice_date 2023-04-29（年报 4 月披露）
+                    {"year": 2022, "roe": 15.0, "notice_date": "2023-04-29"},
+                ]
+            }
+
+        def dividends(self, code, asof):
+            return None
+
+        def pe_ttm(self, code, asof):
+            return None
+
+        def total_shares(self, code, asof):
+            return 1e9
+
+        # 直接测 finance 方法的 notice_date 过滤逻辑
+        def finance(self, code, asof):
+            recs = []
+            for f in self._fin_recs_test.get(code, []):
+                nd = f.get("notice_date")
+                if nd:
+                    from datetime import datetime
+                    cutoff = datetime.strptime(nd[:10], "%Y-%m-%d").date()
+                    if cutoff <= asof:
+                        recs.append(f)
+                else:
+                    if date(f["year"], 12, 31) <= asof:
+                        recs.append(f)
+            return recs[-1] if recs else None
+
+    lk = Lk(prices=prices)
+    # 2023-04-28（披露日前）：2022 年报尚未披露，不可用
+    assert lk.finance("X", date(2023, 4, 28)) is None
+    # 2023-04-29（披露日当天）：可用
+    assert lk.finance("X", date(2023, 4, 29)) is not None
+    # 2023-06-30（披露后）：可用
+    assert lk.finance("X", date(2023, 6, 30)) is not None

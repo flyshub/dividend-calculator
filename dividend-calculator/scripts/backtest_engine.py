@@ -103,20 +103,23 @@ class BacktestLookup:
             "SELECT code, date, pe_ttm FROM daily_pe ORDER BY date"
         ):
             self.pes[code].append((_d(dte), pe))
-        for code, ann, rep, ex, d10 in c.execute(
+        for code, ann, rep, ex, d10, br, tr in c.execute(
             "SELECT code, announce_date, report_date, ex_dividend_date, "
-            "cash_div_10shares FROM dividend_history ORDER BY report_date"
+            "cash_div_10shares, bonus_ratio, trans_ratio FROM dividend_history "
+            "ORDER BY report_date"
         ):
             self._div_recs[code].append({
                 "announce_date": ann,
                 "report_date": rep,
                 "ex_dividend_date": ex,
                 "cash_div_per_share": (d10 / 10.0) if d10 is not None else 0.0,
+                "bonus_ratio": br or 0.0,    # 每10股送股
+                "trans_ratio": tr or 0.0,    # 每10股转增
             })
-        for code, rep, roe, np_, oc, bps, car, lpr in c.execute(
+        for code, rep, roe, np_, oc, bps, car, lpr, nd in c.execute(
             "SELECT code, report_date, roe, net_profit, net_cash_operate, "
-            "bps, newcapitalader, loan_provision_ratio FROM finance_history "
-            "ORDER BY report_date"
+            "bps, newcapitalader, loan_provision_ratio, notice_date "
+            "FROM finance_history ORDER BY report_date"
         ):
             self._fin_recs[code].append({
                 "year": int(rep[:4]),
@@ -126,6 +129,7 @@ class BacktestLookup:
                 "bps": bps,
                 "capital_adequacy_ratio": car,
                 "provision_coverage": lpr,
+                "notice_date": nd,    # T11 #116：实际披露日（None=未入库，回退报告期）
                 # 缺口字段（T2 未入库 → None，可持续性降级计分，报告标注）
                 "net_profit_yoy": None,
                 "investing_cf": None,
@@ -212,7 +216,27 @@ class BacktestLookup:
         return recs[-1]["roe"] if recs else None
 
     def finance(self, code: str, asof: date) -> Optional[dict]:
-        recs = [f for f in self._fin_recs.get(code, []) if date(f["year"], 12, 31) <= asof]
+        """T11 #116：优先按 notice_date 实际披露日过滤，回退报告期 12-31。
+
+        notice_date 为 None（未入库）时按报告期过滤（旧行为）。
+        notice_date 为空字符串/无效时同样回退报告期。
+        """
+        recs = []
+        for f in self._fin_recs.get(code, []):
+            nd = f.get("notice_date")
+            if nd:
+                try:
+                    cutoff = _d(nd[:10]) if isinstance(nd, str) else nd
+                    if cutoff <= asof:
+                        recs.append(f)
+                except Exception:
+                    # notice_date 解析失败 → 回退报告期判断
+                    if date(f["year"], 12, 31) <= asof:
+                        recs.append(f)
+            else:
+                # 无 notice_date → 按报告期 12-31 过滤（旧行为）
+                if date(f["year"], 12, 31) <= asof:
+                    recs.append(f)
         return recs[-1] if recs else None
 
     def price_change_1y(self, code: str, asof: date) -> Optional[float]:
@@ -319,6 +343,9 @@ def portfolio_return(codes: List[str], build_day: date, settle_day: date,
                      lookup, cost: float = 0.003) -> Optional[float]:
     """等权组合收益（小数）。持有期 = [build_day, settle_day]，T+1 建仓价 → 结算价。
 
+    T10 #115：送转除权因子建模。持有期内发生送转时，持仓股数按
+    (1 + (bonus+trans)/10) 增加，收益 = 因子 × ps/pb - 1。
+
     双边交易成本：每期全换手，买入 0.3% + 卖出 0.3% 从收益中扣除
     （季度调仓下换手 ≈ 100%，成本 = cost×2 计入单期）。
 
@@ -329,7 +356,19 @@ def portfolio_return(codes: List[str], build_day: date, settle_day: date,
         pb = lookup.price(code, build_day)
         ps = lookup.price(code, settle_day)
         if pb and ps:
-            gross = ps / pb - 1.0
+            # T10 #115：累积持有期送转因子
+            split_factor = 1.0
+            for rec in (lookup.dividends(code, settle_day) or []):
+                ex = rec.get("ex_dividend_date")
+                if not ex:
+                    continue
+                ex_d = _d(ex) if isinstance(ex, str) else ex
+                if build_day < ex_d <= settle_day:
+                    br = rec.get("bonus_ratio") or 0.0
+                    tr = rec.get("trans_ratio") or 0.0
+                    if br or tr:
+                        split_factor *= (1.0 + (br + tr) / 10.0)
+            gross = split_factor * ps / pb - 1.0
             rets.append(gross - 2.0 * cost)
     if not rets:
         return None
