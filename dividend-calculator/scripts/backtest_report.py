@@ -175,30 +175,30 @@ def section_portfolio_perf(eng: dict, lookup: BacktestLookup, conn,
     for key, label in [("base", "全A等权"), ("l2", "+L2"),
                        ("l3", "+L3"), ("l4", "+L4"), ("full", "全漏斗")]:
         rets = port["quarterly_returns"].get(key, [])
-        m = performance_metrics({key: rets})[key]
+        m = performance_metrics({key: rets}, rebalance_dates=rebalance)[key]
         if key == "base":
             base_m = m
         if key == "full":
             full_m = m
         rows.append([label, _pct(m["cumulative"]), _pct(m["annualized"]),
-                     f"{_num(m['volatility'])}%", _num(m['sharpe']),
+                     _pct(m['volatility']), _num(m['sharpe']),
                      _pct(m["max_drawdown"]), _pct(m["win_rate"]),
-                     _num(m.get("downside_risk")), _num(m.get("profit_loss_ratio")),
+                     _pct(m.get("downside_risk")), _num(m.get("profit_loss_ratio")),
                      _num(avg_turnover(port["turnover"].get(key, []))),
                      str(positive_years(rets, rebalance)),
                      f"{avg_pool_size(eng['pools'], key):.1f}"])
 
     for name, rets, label in [("中证红利全收益", bench_hz, "bench_csi_div"),
                               ("沪深300全收益", bench_hs, "bench_csi300")]:
-        m = performance_metrics({label: rets})[label]
+        m = performance_metrics({label: rets}, rebalance_dates=rebalance)[label]
         if "csi_div" in label:
             bench_div_m = m
         else:
             bench_300_m = m
         rows.append([name, _pct(m["cumulative"]), _pct(m["annualized"]),
-                     f"{_num(m['volatility'])}%", _num(m['sharpe']),
+                     _pct(m['volatility']), _num(m['sharpe']),
                      _pct(m["max_drawdown"]), _pct(m["win_rate"]),
-                     _num(m.get("downside_risk")), _num(m.get("profit_loss_ratio")),
+                     _pct(m.get("downside_risk")), _num(m.get("profit_loss_ratio")),
                      "—", str(positive_years(rets, rebalance)), "—"])
 
     if _cache is not None:
@@ -220,14 +220,15 @@ def section_hfq_comparison(eng: dict, lookup: BacktestLookup) -> str:
     """
     port_after = run_portfolio(lookup, eng, cost=0.003)
     port_pretax = run_portfolio(lookup, eng, cost=0.003, tax_override=0.0)
+    rebalance = eng["rebalance_dates"]
 
     rows = []
     for key, label in [("base", "全A等权"), ("l2", "+L2"),
                        ("l3", "+L3"), ("l4", "+L4"), ("full", "全漏斗")]:
         after = port_after["quarterly_returns"].get(key, [])
         pretax = port_pretax["quarterly_returns"].get(key, [])
-        m_a = performance_metrics({key: after})[key]
-        m_p = performance_metrics({key: pretax})[key]
+        m_a = performance_metrics({key: after}, rebalance_dates=rebalance)[key]
+        m_p = performance_metrics({key: pretax}, rebalance_dates=rebalance)[key]
         rows.append([label, _pct(m_a["cumulative"]), _pct(m_p["cumulative"]),
                      _pct(m_p["cumulative"] - m_a["cumulative"])])
 
@@ -271,7 +272,8 @@ def section_robustness(lookup: BacktestLookup, conn) -> str:
         try:
             res = fn()
             rets = res.get("quarterly_returns", {}).get("full", [])
-            m = performance_metrics({"v": rets})["v"] if rets else {}
+            m = performance_metrics({"v": rets},
+                                    rebalance_dates=res.get("rebalance_dates"))["v"] if rets else {}
             cum = res.get("cumulative_returns", {}).get("full")
             excess = (cum - base_cum) if (cum is not None and base_cum is not None
                                           and name != "主回测 T+1") else None

@@ -103,6 +103,8 @@ SCHEMA = {
             report_date       TEXT,   -- REPORT_DATE 报告期（12-31 完整财年 / 中期）
             ex_dividend_date  TEXT,   -- EX_DIVIDEND_DATE 除权除息日
             cash_div_10shares REAL,   -- PRETAX_BONUS_RMB 每10股派息
+            bonus_ratio       REAL,   -- BONUS_RATIO 每10股送股数（送股，除权因子）
+            trans_ratio       REAL,   -- TRAN_ADD_RATIO 每10股转增股数（转增，除权因子）
             PRIMARY KEY (code, report_date)
         )""",
     "finance_history": """
@@ -115,6 +117,7 @@ SCHEMA = {
             bps                 REAL,   -- BPS 每股净资产
             newcapitalader      REAL,   -- NEWCAPITALADER 资本充足率（银行专项）
             loan_provision_ratio REAL,  -- LOAN_PROVISION_RATIO 拨备覆盖率（银行专项）
+            notice_date         TEXT,   -- NOTICE_DATE 实际披露日（消除财报未来函数的关键，T2 #107）
             PRIMARY KEY (code, report_date)
         )""",
     "index_daily": """
@@ -174,7 +177,31 @@ def _connect() -> sqlite3.Connection:
 def create_schema(conn: sqlite3.Connection) -> None:
     for ddl in SCHEMA.values():
         conn.execute(ddl)
+    _migrate(conn)
     conn.commit()
+
+
+# 历史库演进：旧表缺新列时 ALTER ADD COLUMN（CREATE TABLE IF NOT EXISTS 不加列）
+_MIGRATIONS = {
+    "dividend_history": [
+        ("bonus_ratio", "REAL"),
+        ("trans_ratio", "REAL"),
+    ],
+    "finance_history": [
+        ("notice_date", "TEXT"),
+    ],
+}
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    for table, cols in _MIGRATIONS.items():
+        existing = {
+            r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        for name, typ in cols:
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {typ}")
+                print(f"迁移：{table} 新增列 {name}")
 
 
 def _mark_done(conn: sqlite3.Connection, table: str, code: str) -> None:
@@ -238,12 +265,17 @@ def financial_rows_to_db(code: str, rows: list) -> list:
             r.get("PARENTNETPROFIT"),
             r.get("NETCASH_OPERATE_PK"), r.get("BPS"),
             r.get("NEWCAPITALADER"), r.get("LOAN_PROVISION_RATIO"),
+            _d10(r.get("NOTICE_DATE")),
         ))
     return out
 
 
 def dividend_rows_to_db(code: str, rows: list) -> list:
-    """东财分红行 → dividend_history 元组（含公告日，无未来函数约束）。"""
+    """东财分红行 → dividend_history 元组（含公告日，无未来函数约束）。
+
+    送转字段：BONUS_RATIO=每10股送股数、TRAN_ADD_RATIO=每10股转增股数
+    （T1 #108，除权因子建模用；实测 600519 2014 年报 BONUS_RATIO=1 = 10送1）。
+    """
     out = []
     for r in rows:
         report = _d10(r.get("REPORT_DATE"))
@@ -255,6 +287,8 @@ def dividend_rows_to_db(code: str, rows: list) -> list:
             report,
             _d10(r.get("EX_DIVIDEND_DATE")),
             r.get("PRETAX_BONUS_RMB"),
+            r.get("BONUS_RATIO"),
+            r.get("TRAN_ADD_RATIO"),
         ))
     return out
 
@@ -409,7 +443,8 @@ def build_dividend(conn: sqlite3.Connection, codes: list) -> None:
         if db_rows:
             conn.executemany(
                 "INSERT OR REPLACE INTO dividend_history (code, announce_date, report_date,"
-                " ex_dividend_date, cash_div_10shares) VALUES (?, ?, ?, ?, ?)",
+                " ex_dividend_date, cash_div_10shares, bonus_ratio, trans_ratio)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
                 db_rows,
             )
             conn.commit()
@@ -435,9 +470,9 @@ def build_finance(conn: sqlite3.Connection, codes: list) -> None:
         db_rows = financial_rows_to_db(code, rows)
         if db_rows:
             conn.executemany(
-                "INSERT OR REPLACE INTO finance_history (code, report_date, roe, net_profit,"
-                " net_cash_operate, bps, newcapitalader, loan_provision_ratio)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO finance_history (code, report_date, notice_date,"
+                " roe, net_profit, net_cash_operate, bps, newcapitalader,"
+                " loan_provision_ratio) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 db_rows,
             )
             conn.commit()

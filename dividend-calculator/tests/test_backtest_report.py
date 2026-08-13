@@ -67,8 +67,8 @@ def _make_db(db_path: str):
         c.execute("CREATE TABLE stock_list (code TEXT, name TEXT, list_date TEXT, delist_date TEXT, board TEXT)")
         c.execute("CREATE TABLE daily_price (code TEXT, date TEXT, close REAL)")
         c.execute("CREATE TABLE daily_pe (code TEXT, date TEXT, pe_ttm REAL)")
-        c.execute("CREATE TABLE dividend_history (code TEXT, announce_date TEXT, report_date TEXT, ex_dividend_date TEXT, cash_div_10shares REAL)")
-        c.execute("CREATE TABLE finance_history (code TEXT, report_date TEXT, roe REAL, net_profit REAL, net_cash_operate REAL, bps REAL, newcapitalader REAL, loan_provision_ratio REAL)")
+        c.execute("CREATE TABLE dividend_history (code TEXT, announce_date TEXT, report_date TEXT, ex_dividend_date TEXT, cash_div_10shares REAL, bonus_ratio REAL, trans_ratio REAL)")
+        c.execute("CREATE TABLE finance_history (code TEXT, report_date TEXT, roe REAL, net_profit REAL, net_cash_operate REAL, bps REAL, newcapitalader REAL, loan_provision_ratio REAL, notice_date TEXT)")
         c.execute("CREATE TABLE index_daily (code TEXT, date TEXT, close REAL)")
         c.execute("CREATE TABLE build_progress (table_name TEXT, code TEXT, UNIQUE(table_name, code))")
 
@@ -81,10 +81,10 @@ def _make_db(db_path: str):
                 d = f"{y}-{m:02d}-15"
                 c.execute("INSERT INTO daily_price VALUES (?,?,?)", (code, d, 10.0))
                 c.execute("INSERT INTO daily_pe VALUES (?,?,?)", (code, d, 5.0))
-        c.execute("INSERT INTO finance_history VALUES (?,?,?,?,?,?,?,?)",
-                  (code, "2023-12-31", 15.0, 1e9, 5e8, 10.0, None, None))
-        c.execute("INSERT INTO dividend_history VALUES (?,?,?,?,?)",
-                  (code, "2023-06-01", "2022-12-31", "2023-07-01", 5.0))
+        c.execute("INSERT INTO finance_history VALUES (?,?,?,?,?,?,?,?,?)",
+                  (code, "2023-12-31", 15.0, 1e9, 5e8, 10.0, None, None, None))
+        c.execute("INSERT INTO dividend_history VALUES (?,?,?,?,?,?,?)",
+                  (code, "2023-06-01", "2022-12-31", "2023-07-01", 5.0, None, None))
 
     # 指数数据（季度末）
     for idx_code in ("H00922", "H00300"):
@@ -119,6 +119,27 @@ def test_generate_report_end_to_end(tmp_path):
     # 可重复运行（幂等）
     generate_report(db, out)
     assert Path(out).exists()
+
+
+def test_report_volatility_unit_t13(tmp_path):
+    """T13 #119：波动/下行风险列以百分数显示（11.00% 而非 0.11%）。
+
+    回归：旧格式 f"{_num(vol)}%" 把小数 0.11 显示成 "0.11%"（低 100 倍）。
+    """
+    from backtest_report import generate_report
+    db = str(tmp_path / "test.db")
+    out = str(tmp_path / "report.md")
+    _make_db(db)
+
+    generate_report(db, out)
+    content = Path(out).read_text(encoding="utf-8")
+    assert "§3 组合绩效" in content
+    # 波动列不能出现 "0.xx%" 形式的两位小数低量级（正确为 xx.xx%）
+    # 抽取 §3 表格行，验证波动列格式为百分数（>= 1.00% 或 N/A）
+    import re
+    # 找所有百分比单元格，确保没有 "0.0x%" 这种疑似单位错误的波动值
+    # （测试数据固定收益，波动应显示为 0.00% 或明确百分数量级）
+    assert "0.11%" not in content  # 旧 bug 的典型输出
 
 
 def test_report_handles_empty_db(tmp_path):

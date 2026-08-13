@@ -83,6 +83,22 @@ class BacktestLookup:
             "SELECT code, date, close FROM daily_price ORDER BY date"
         ):
             self.prices[code].append((_d(dte), close))
+        # 退市日（stock_list.delist_date，T5 #110：退市股不可入选/持有）
+        self.delist: Dict[str, date] = {}
+        # 上市日（stock_list.list_date，T16 #121：未上市股不可入选）
+        self.listdt: Dict[str, date] = {}
+        has_sl = c.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='stock_list'"
+        ).fetchone()
+        if has_sl:
+            for code, dd, ld in c.execute(
+                "SELECT code, delist_date, list_date FROM stock_list "
+                "WHERE delist_date IS NOT NULL OR list_date IS NOT NULL"
+            ):
+                if dd:
+                    self.delist[code] = _d(dd)
+                if ld:
+                    self.listdt[code] = _d(ld)
         for code, dte, pe in c.execute(
             "SELECT code, date, pe_ttm FROM daily_pe ORDER BY date"
         ):
@@ -363,6 +379,14 @@ def run_backtest(lookup,
         layer_buckets = {"base": [], "l2": [], "l3": [], "l4": [], "full": []}
 
         for code in all_codes:
+            # T5 #110：退市日早于调仓日的股票不可入选（已退市无法持有）
+            dd = getattr(lookup, "delist", {}).get(code)
+            if dd is not None and dd <= T:
+                continue
+            # T16 #121：上市日晚于调仓日的股票不可入选（未上市不可持有）
+            ld = getattr(lookup, "listdt", {}).get(code)
+            if ld is not None and ld >= T:
+                continue
             factors = compute_all_factors(code, T, lookup)
             layer = funnel_layer(factors, yield_thr, real_yield_thr, pr_thr)
             layer_buckets["base"].append(code)
@@ -396,16 +420,20 @@ def run_backtest(lookup,
 
     layers = ("base", "l2", "l3", "l4", "full")
     excess = {}
-    # 逐层
+    # 逐层：比值口径超额 (1+r)/(1+p)-1（T3 #106：线性 r-p 在大波动期失真甚至翻转符号）
     for i in range(1, len(layers)):
         prev, cur = layers[i - 1], layers[i]
+        if prev == "l4" and cur == "full":
+            continue  # l4 ≡ full（同池），恒等行无信息量
         excess[f"{cur}_over_{prev}"] = [
-            (r - p) if (r is not None and p is not None) else None
+            ((1.0 + r) / (1.0 + p) - 1.0)
+            if (r is not None and p is not None and 1.0 + p > 0) else None
             for r, p in zip(per_quarter[cur], per_quarter[prev])
         ]
     # 全漏斗 vs 基线（报告 headline 用）
     excess["full_over_base"] = [
-        (r - p) if (r is not None and p is not None) else None
+        ((1.0 + r) / (1.0 + p) - 1.0)
+        if (r is not None and p is not None and 1.0 + p > 0) else None
         for r, p in zip(per_quarter["full"], per_quarter["base"])
     ]
 

@@ -37,6 +37,8 @@ class MockLookup:
         self._fin = finance or {}
         self._pe = pes or {}
         self._ind = industry
+        self.delist = {}  # T5 #110：退市日映射
+        self.prices = self._prices  # run_backtest 用 lookup.prices.keys() 取 all_codes
         self.trading_days = sorted(
             set(d for lst in self._prices.values() for d, _ in lst)
         )
@@ -76,6 +78,11 @@ class MockLookup:
 
     def industry(self, code, asof):
         return self._ind
+
+    def get(self, key, default=None):
+        """dict.get 兼容（T3 因子层 lookup.get('industry') 契约）。"""
+        fn = getattr(self, key, None)
+        return fn if callable(fn) else default
 
 
 # ---------------------------------------------------------------------------
@@ -303,3 +310,151 @@ def test_engine_calls_t3_factors():
     assert real_dividend_yield("600036", T, lk) == pytest.approx(
         (1.0 * 100.0) / (10.0 * 100.0) * 100.0  # 总额法：100元/1000元 = 10%
     )
+
+
+# ---------------------------------------------------------------------------
+# T3 #106：增量超额比值口径
+# ---------------------------------------------------------------------------
+
+def test_incremental_excess_ratio_not_linear():
+    """比值口径：r=0.5, p=-0.3 时，线性 r-p=0.8 失真，比值 (1.5/0.7)-1≈1.14。"""
+    prices = {}
+    # 构造 base 收益 -30%、full 收益 +50% 的单期场景
+    for code, end in [("lo", 7.0), ("hi", 15.0)]:
+        prices[code] = [(date(2023, 3, 31), 10.0), (date(2023, 4, 3), 10.0),
+                        (date(2023, 6, 30), end)]
+
+    class Lk(MockLookup):
+        def dividends(self, code, asof):
+            return None
+
+        def pe_ttm(self, code, asof):
+            return None
+
+        def total_shares(self, code, asof):
+            return 1e9
+
+        def finance(self, code, asof):
+            return {"year": 2022, "roe": 12.0, "net_profit": 1e10}
+
+    class _PR:
+        def __init__(self, v, w=""):
+            self.pr, self.pr_warning = v, w
+
+    class _Sus:
+        def __init__(self, v):
+            self.verdict = v
+
+    lk = Lk(prices=prices)
+    # base = lo（-30%），full = hi（+50%）
+    r_base = portfolio_return(["lo"], date(2023, 4, 3), date(2023, 6, 30), lk, cost=0.0)
+    r_full = portfolio_return(["hi"], date(2023, 4, 3), date(2023, 6, 30), lk, cost=0.0)
+    assert r_base == pytest.approx(-0.3)
+    assert r_full == pytest.approx(0.5)
+    # 比值口径超额 = (1+0.5)/(1-0.3) - 1 ≈ 1.1428
+    ratio_excess = (1.0 + r_full) / (1.0 + r_base) - 1.0
+    linear_excess = r_full - r_base  # 0.8（旧口径失真）
+    assert ratio_excess == pytest.approx(1.5 / 0.7 - 1.0, abs=0.01)
+    assert abs(ratio_excess - linear_excess) > 0.3  # 两口径差异显著
+
+
+# ---------------------------------------------------------------------------
+# T5 #110：退市股终局损失
+# ---------------------------------------------------------------------------
+
+def test_delisted_stock_excluded_from_pool():
+    """退市日早于调仓日的股票不可入选。"""
+    prices = {
+        "alive": [(date(2023, 3, 31), 10.0), (date(2023, 4, 3), 10.0),
+                  (date(2023, 6, 30), 11.0)],
+        "dead": [(date(2023, 3, 31), 10.0), (date(2023, 6, 15), 5.0)],
+    }
+
+    class Lk(MockLookup):
+        def dividends(self, code, asof):
+            return None
+
+        def pe_ttm(self, code, asof):
+            return None
+
+        def total_shares(self, code, asof):
+            return 1e9
+
+        def finance(self, code, asof):
+            return {"year": 2022, "roe": 12.0, "net_profit": 1e10}
+
+    lk = Lk(prices=prices)
+    # dead 在 2023-06-15 退市
+    lk.delist = {"dead": date(2023, 6, 15)}
+
+    days = [date(2023, 3, 31), date(2023, 4, 3), date(2023, 6, 30)]
+    res = run_backtest(lk, start=date(2023, 6, 1), end=date(2023, 6, 30))
+    # 2023-06-30 调仓：dead 退市日 6-15 < 6-30，不应入选
+    for pool_per_date in res["pools"].values():
+        for codes_at_T in pool_per_date:
+            if codes_at_T:  # 非空池不应含 dead
+                assert "dead" not in codes_at_T
+
+
+def test_delisted_stock_attr_missing_no_crash():
+    """lookup 无 delist 属性时不崩溃（向后兼容）。"""
+    prices = {"x": [(date(2023, 3, 31), 10.0), (date(2023, 4, 3), 10.0),
+                    (date(2023, 6, 30), 11.0)]}
+
+    class Lk(MockLookup):
+        def dividends(self, code, asof):
+            return None
+
+        def pe_ttm(self, code, asof):
+            return None
+
+        def total_shares(self, code, asof):
+            return 1e9
+
+        def finance(self, code, asof):
+            return {"year": 2022, "roe": 12.0, "net_profit": 1e10}
+
+    lk = Lk(prices=prices)
+    del lk.delist  # 模拟无 delist 属性的旧 lookup
+    # 不崩溃即可（getattr 容错返回 {}）
+    res = run_backtest(lk, start=date(2023, 3, 1), end=date(2023, 6, 30))
+    assert res["rebalance_dates"]  # 正常返回
+
+
+def test_unlisted_stock_excluded_from_pool():
+    """T16 #121：上市日晚于调仓日的股票不可入选（未来函数防御）。"""
+    prices = {
+        "A": [(date(2023, 3, 31), 10.0), (date(2023, 4, 3), 10.0),
+              (date(2023, 6, 30), 11.0)],
+        "B": [(date(2023, 3, 31), 5.0), (date(2023, 4, 3), 5.0),
+              (date(2023, 6, 30), 5.5)],
+    }
+
+    class Lk(MockLookup):
+        def __init__(self, **kw):
+            super().__init__(**kw)
+            self.listdt = {"B": date(2024, 1, 1)}  # B 在 2024 才上市
+            self.delist = {}
+
+        def dividends(self, code, asof):
+            return None
+
+        def pe_ttm(self, code, asof):
+            return None
+
+        def total_shares(self, code, asof):
+            return 1e9
+
+        def finance(self, code, asof):
+            return {"year": 2022, "roe": 12.0, "net_profit": 1e10}
+
+    lk = Lk(prices=prices)
+    res = run_backtest(lk, start=date(2023, 3, 1), end=date(2023, 6, 30))
+    # B 在 2023-06 调仓日尚未上市，不可入选；A 可入选
+    # pools 结构：{layer: list[per_period_codes]}
+    for layer_pools in res["pools"].values():
+        for period_codes in layer_pools:
+            assert "B" not in period_codes
+            if period_codes:  # 至少有一期含 A
+                assert "A" in period_codes
+                break

@@ -48,6 +48,11 @@ def after_tax_dividend_contrib(
 
     tax_override: 若非 None，所有分红按此单一税率计算（用于 hfq 无税上界对照，
     tax_override=0.0 即数学等价于 hfq 全收益）。
+
+    T8 #113 已知限制：税率按 build_day → ex_date 的持仓时长定档，每期独立结算。
+    跨期继承持仓时不重置建仓日，因此实际持仓 >1 年的分红可能被误判为 1月-1年档
+    （10% 而非 0%），税拖累被略微高估。完整 FIFO 需跟踪每只股票的最早建仓日，
+    属结构性改造（当前组合模型每期独立结算），#113 暂保留限制标注。
     """
     records = lookup.dividends(code, settle_day) or []
     contrib = 0.0
@@ -80,11 +85,14 @@ def portfolio_total_return(
     lookup, codes: Sequence[str], build_day: date, settle_day: date,
     cost: float = COST, tax_override: Optional[float] = None,
     weights: Optional[Sequence[float]] = None,
+    turnover_ratio: float = 1.0,
 ) -> Optional[float]:
-    """组合区间总收益（价格收益 + 税后分红复投 - 双边成本）。
+    """组合区间总收益（价格收益 + 税后分红复投 - 按实际换手缩放的成本）。
 
     tax_override: 非 None 时所有分红按此税率计算（hfq 无税对照用 0.0）。
     weights: 个股权重序列（与 codes 等长，归一化后应用）；None = 等权。
+    turnover_ratio: 本期实际换手比例（0=零换手继承上期持仓,1=全换手），
+        T7 #112：成本按 turnover_ratio × 双边成本计提，避免 base 零换手被收满额成本。
     """
     rets = []
     wts = []
@@ -102,7 +110,8 @@ def portfolio_total_return(
         return None
     s = sum(wts)
     wts = [w / s for w in wts] if s > 0 else [1.0 / len(wts)] * len(wts)
-    return sum(r * w for r, w in zip(rets, wts)) - 2.0 * cost
+    scaled_cost = 2.0 * cost * turnover_ratio
+    return sum(r * w for r, w in zip(rets, wts)) - scaled_cost
 
 
 def top_n_codes(lookup, codes: Sequence[str], T: date, n: int) -> List[str]:
@@ -181,23 +190,32 @@ def run_portfolio(
                 quarterly[k].append(None)
                 turnover[k].append(None)
             continue
-        build = T + timedelta(days=1)  # T+1 建仓（无交易日历则用自然日，引擎已保证 T 为交易日）
-        # 取 T 后最近有价格的交易日作为建仓日
-        bd = build
-        while lookup.price(pools["base"][i][0] if pools["base"][i] else "000001", bd) is None:
-            bd += timedelta(days=1)
+        build = T + timedelta(days=1)  # T+1 建仓
+        # T6 #111：用交易日历找 T 后第一个交易日（替代探针股 hack）
+        trading_days = getattr(lookup, "trading_days", None)
+        if trading_days:
+            future = [d for d in trading_days if d > T]
+            bd = future[0] if future else build
+        else:
+            bd = build
         for k in layers:
             codes = pools[k][i]
             sel = top_n_codes(lookup, codes, T, top_n) if top_n and codes else codes
             wts = _compute_weights(lookup, sel, T, weighting) if sel else None
-            r = portfolio_total_return(lookup, sel, bd, settle, cost,
-                                       tax_override=tax_override, weights=wts)
-            quarterly[k].append(r)
+            # T7 #112：实际换手比例（0=零换手继承,1=全换手），成本按此缩放
             cur = set(sel)
             if prev_pool[k]:
-                turnover[k].append(len(cur & prev_pool[k]) / max(len(cur | prev_pool[k]), 1))
+                union = max(len(cur | prev_pool[k]), 1)
+                held = len(cur & prev_pool[k])
+                # 单边换手率 = (新买入数 + 卖出数) / 2 / 池大小；近似 = 1 - 交集/并集
+                actual_turnover = 1.0 - held / union
             else:
-                turnover[k].append(None)
+                actual_turnover = 1.0  # 首期全建仓
+            r = portfolio_total_return(lookup, sel, bd, settle, cost,
+                                       tax_override=tax_override, weights=wts,
+                                       turnover_ratio=actual_turnover)
+            quarterly[k].append(r)
+            turnover[k].append(actual_turnover if prev_pool[k] else None)
             prev_pool[k] = cur
 
     return {
@@ -216,10 +234,14 @@ def cum(rets: Sequence[Optional[float]]) -> float:
     return acc - 1.0
 
 
-def annualized(total: float, n_quarters: int) -> float:
-    if n_quarters <= 0:
+def annualized(total: float, n_periods: int, periods_per_year: int = 4) -> float:
+    """年化收益。periods_per_year=4（季度）/12（月）/2（半年）。
+
+    T4 #109：频率扫描须按实际期长年化，否则月调仓被高估 n/4 年数、半年被低估。
+    """
+    if n_periods <= 0:
         return 0.0
-    years = n_quarters / 4.0
+    years = n_periods / periods_per_year
     return (1.0 + total) ** (1.0 / years) - 1.0
 
 
@@ -236,7 +258,13 @@ def max_drawdown(rets: Sequence[Optional[float]]) -> float:
     return mdd
 
 
-def sharpe(rets: Sequence[Optional[float]], rf: float = 0.02) -> Optional[float]:
+def sharpe(rets: Sequence[Optional[float]], rf: float = 0.03,
+           periods_per_year: int = 4) -> Optional[float]:
+    """夏普比率。periods_per_year=4（季度）/12（月）/2（半年）。
+
+    rf=3% 近似中国 10 年期国债 2013-2026 区间均值（2.5%-4.5%，约 3.2%）。
+    T8 #113：旧 rf=2% 偏低，高估夏普；改 3% 更贴近无风险利率实际水平。
+    """
     vs = [r for r in rets if r is not None]
     if len(vs) < 2:
         return None
@@ -244,19 +272,21 @@ def sharpe(rets: Sequence[Optional[float]], rf: float = 0.02) -> Optional[float]
     std = math.sqrt(sum((v - mean) ** 2 for v in vs) / (len(vs) - 1))
     if std == 0:
         return None
-    return (mean - rf / 4.0) / std * math.sqrt(4.0)
+    return (mean - rf / periods_per_year) / std * math.sqrt(periods_per_year)
 
 
-def sortino(rets: Sequence[Optional[float]], rf: float = 0.02) -> Optional[float]:
+def sortino(rets: Sequence[Optional[float]], rf: float = 0.03,
+            periods_per_year: int = 4) -> Optional[float]:
     vs = [r for r in rets if r is not None]
     if len(vs) < 2:
         return None
     mean = sum(vs) / len(vs)
-    downside = [v for v in vs if v < rf / 4.0]
-    dstd = math.sqrt(sum((v - rf / 4.0) ** 2 for v in downside) / len(vs)) if downside else 0.0
+    target = rf / periods_per_year
+    downside = [v for v in vs if v < target]
+    dstd = math.sqrt(sum((v - target) ** 2 for v in downside) / len(vs)) if downside else 0.0
     if dstd == 0:
         return None
-    return (mean - rf / 4.0) / dstd * math.sqrt(4.0)
+    return (mean - target) / dstd * math.sqrt(periods_per_year)
 
 
 def calmar(rets: Sequence[Optional[float]]) -> Optional[float]:
@@ -275,17 +305,18 @@ def win_rate(rets: Sequence[Optional[float]]) -> Optional[float]:
     return sum(1 for r in vs if r > 0) / len(vs)
 
 
-def downside_risk(rets: Sequence[Optional[float]], rf: float = 0.02) -> Optional[float]:
+def downside_risk(rets: Sequence[Optional[float]], rf: float = 0.03,
+                  periods_per_year: int = 4) -> Optional[float]:
     """下行风险（仅对负偏离求标准差，年化）。"""
     vs = [r for r in rets if r is not None]
     if not vs:
         return None
-    target = rf / 4.0
+    target = rf / periods_per_year
     downside = [(v - target) for v in vs if v < target]
     if not downside:
         return 0.0
     var = sum(d * d for d in downside) / len(vs)
-    return math.sqrt(var) * math.sqrt(4.0)
+    return math.sqrt(var) * math.sqrt(periods_per_year)
 
 
 def profit_loss_ratio(rets: Sequence[Optional[float]]) -> Optional[float]:
@@ -324,14 +355,30 @@ def avg_turnover(turnover_series: Sequence[Optional[float]]) -> Optional[float]:
     return sum(vs) / len(vs) if vs else None
 
 
-def performance_metrics(quarterly: Dict[str, List[Optional[float]]]) -> dict:
+def performance_metrics(quarterly: Dict[str, List[Optional[float]]],
+                        rebalance_dates: Optional[Sequence[date]] = None) -> dict:
+    """绩效指标。rebalance_dates 提供时年化按日历跨度（T9 #114），
+
+    空仓期计入年化分母（不再因漏斗空仓被排除而高估年化）。
+    无 rebalance_dates 时回退 n_periods/ppy（向后兼容）。
+    """
+    # T9 #114：日历跨度年数（首→末调仓日）
+    years_calendar = None
+    if rebalance_dates and len(rebalance_dates) >= 2:
+        span_days = (rebalance_dates[-1] - rebalance_dates[0]).days
+        years_calendar = span_days / 365.25 if span_days > 0 else None
+
     out = {}
     for k, rets in quarterly.items():
         vs = [r for r in rets if r is not None]
         total = cum(rets)
+        if years_calendar is not None and years_calendar > 0:
+            ann = (1.0 + total) ** (1.0 / years_calendar) - 1.0
+        else:
+            ann = annualized(total, len(vs))
         out[k] = {
             "cumulative": total,
-            "annualized": annualized(total, len(vs)),
+            "annualized": ann,
             "volatility": (lambda s: s)(
                 math.sqrt(sum((r - sum(vs) / len(vs)) ** 2 for r in vs) / (len(vs) - 1))
                 if len(vs) > 1 else 0.0

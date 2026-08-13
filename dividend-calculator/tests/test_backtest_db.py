@@ -100,7 +100,7 @@ class TestFinancialFyearFilter:
                  "PARENTNETPROFIT": 1000, "NETCASH_OPERATE_PK": 500,
                  "BPS": 20.0, "NEWCAPITALADER": 12.0, "LOAN_PROVISION_RATIO": 3.5}]
         out = self.mod.financial_rows_to_db("600036", rows)[0]
-        assert out == ("600036", "2025-12-31", 10.5, 1000, 500, 20.0, 12.0, 3.5)
+        assert out == ("600036", "2025-12-31", 10.5, 1000, 500, 20.0, 12.0, 3.5, None)
 
     def test_roe_fallback_to_weighted_when_roejq_missing(self):
         """ROEJQ 为空时回退 ROE_WEIGHTED（东财该接口 ROE_WEIGHTED 实测全 None，双保险）。"""
@@ -123,7 +123,7 @@ class TestDividendMapping:
         rows = [{"NOTICE_DATE": "2025-04-10 00:00:00", "REPORT_DATE": "2024-12-31 00:00:00",
                  "EX_DIVIDEND_DATE": "2025-07-15 00:00:00", "PRETAX_BONUS_RMB": 8.2}]
         out = self.mod.dividend_rows_to_db("600900", rows)[0]
-        assert out == ("600900", "2025-04-10", "2024-12-31", "2025-07-15", 8.2)
+        assert out == ("600900", "2025-04-10", "2024-12-31", "2025-07-15", 8.2, None, None)
 
     def test_none_ex_dividend_kept_as_none(self):
         """未实施分红（除权日为 None）保留记录但不虚构日期。"""

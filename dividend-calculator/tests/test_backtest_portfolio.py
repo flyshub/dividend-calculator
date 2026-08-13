@@ -5,6 +5,7 @@ import os
 import sqlite3
 import sys
 from datetime import date
+from pathlib import Path
 
 import pytest
 
@@ -19,9 +20,11 @@ from backtest_portfolio import (
     max_drawdown,
     sharpe,
     sortino,
+    downside_risk,
     calmar,
     win_rate,
     cum,
+    annualized,
     load_benchmark,
 )
 
@@ -29,9 +32,10 @@ from backtest_portfolio import (
 class FakeLookup:
     """最小 lookup：price 用注入的序列，dividends 返回固定记录。"""
 
-    def __init__(self, prices=None, dividends=None):
+    def __init__(self, prices=None, dividends=None, trading_days=None):
         self._prices = prices or {}
         self._div = dividends or {}
+        self.trading_days = trading_days  # T6 #111：交易日历建仓日
 
     def price(self, code, asof):
         series = self._prices.get(code, [])
@@ -196,10 +200,45 @@ def test_run_portfolio_turnover_tracks():
     pf = run_portfolio(lookup, res, cost=0.0)
     # 第三期无下一 rebalance → None
     assert pf["quarterly_returns"]["full"][2] is None
-    # 换手：期1→期2 交集 {b} 并集 {a,b,c} → 1/3
-    assert pf["turnover"]["full"][1] == pytest.approx(1 / 3, rel=1e-9)
+    # 换手（T7 #112 真实换手率，0=零换手）：
+    # 期1→期2 交集 {b} 并集 {a,b,c} → 保留 1/3，换手 2/3
+    assert pf["turnover"]["full"][1] == pytest.approx(2 / 3, rel=1e-9)
     # 期0 无前值 → None
     assert pf["turnover"]["full"][0] is None
+
+
+def test_run_portfolio_uses_trading_calendar_build_day():
+    """T6 #111：建仓日用交易日历（替代探针股 hack），T+1 是周末则顺延。"""
+    # rebalance 2023-06-30（周五），T+1=7/1 周六不在交易日历 → 应顺延到 7/3（周一）
+    res = {
+        "rebalance_dates": [date(2023, 6, 30), date(2023, 9, 29)],
+        "pools": {"full": [["a"]], "base": [["a"]], "l2": [["a"]],
+                  "l3": [["a"]], "l4": [["a"]]},
+    }
+    # 交易日历：6/30、7/3、9/29（7/1、7/2 不在）
+    tdays = [date(2023, 6, 30), date(2023, 7, 3), date(2023, 9, 29)]
+    # 价格：7/3 有价、7/1-7/2 无价
+    px = {"a": [(date(2023, 6, 30), 10.0), (date(2023, 7, 3), 12.0),
+                (date(2023, 9, 29), 11.0)]}
+    lookup = FakeLookup(prices=px, dividends={"a": []}, trading_days=tdays)
+    pf = run_portfolio(lookup, res, cost=0.0)
+    # 建仓日用了 7/3：收益 = 11/12 - 1（建仓价 12、结算价 11）
+    assert pf["quarterly_returns"]["full"][0] == pytest.approx(11 / 12 - 1, rel=1e-9)
+
+
+def test_run_portfolio_fallback_no_trading_days():
+    """T6 #111：无交易日历时回退 T+1 自然日（向后兼容）。"""
+    res = {
+        "rebalance_dates": [date(2023, 6, 30), date(2023, 9, 29)],
+        "pools": {"full": [["a"]], "base": [["a"]], "l2": [["a"]],
+                  "l3": [["a"]], "l4": [["a"]]},
+    }
+    px = {"a": [(date(2023, 6, 30), 10.0), (date(2023, 7, 1), 12.0),
+                (date(2023, 9, 29), 11.0)]}
+    lookup = FakeLookup(prices=px, dividends={"a": []})  # 无 trading_days
+    pf = run_portfolio(lookup, res, cost=0.0)
+    # 无交易日历 → bd = T+1 = 7/1，建仓价 12，结算价 11
+    assert pf["quarterly_returns"]["full"][0] == pytest.approx(11 / 12 - 1, rel=1e-9)
 
 
 def test_portfolio_metrics_end_to_end():
@@ -224,3 +263,80 @@ def test_portfolio_metrics_end_to_end():
     assert m["cumulative"] == pytest.approx(1.1 * 1.1 - 1, rel=1e-9)
     assert m["max_drawdown"] == 0.0
     assert m["win_rate"] == 1.0
+
+
+# ---- T4 #109: 频率年化按实际期长 ----
+
+def test_annualized_quarterly_default():
+    """季度调仓（默认 periods_per_year=4）：12 期（3 年）累计 30% → 年化约 9.14%。"""
+    ann = annualized(0.30, 12)
+    assert ann == pytest.approx((1.30) ** (1 / 3) - 1, rel=1e-9)
+
+
+def test_annualized_monthly_periods_per_year_12():
+    """月调仓 36 期（3 年）累计 30%，periods_per_year=12 → 与季度 12 期 3 年同年化。"""
+    ann_m = annualized(0.30, 36, periods_per_year=12)
+    ann_q = annualized(0.30, 12, periods_per_year=4)
+    assert ann_m == pytest.approx(ann_q, rel=1e-9)
+
+
+def test_annualized_semiannual_periods_per_year_2():
+    """半年调仓 6 期（3 年）累计 30%，periods_per_year=2 → 同 3 年年化。"""
+    ann_s = annualized(0.30, 6, periods_per_year=2)
+    assert ann_s == pytest.approx((1.30) ** (1 / 3) - 1, rel=1e-9)
+
+
+def test_annualized_freq_bug_regression():
+    """T4 bug 回归：月调仓 36 期累计 30%，旧代码 n/4=9 年严重低估，
+    新代码按 12 期/年 = 3 年正确年化。"""
+    bad = (1.30) ** (1 / 9) - 1   # 旧：36/4=9 年
+    good = annualized(0.30, 36, periods_per_year=12)
+    assert good > bad  # 新 > 旧（旧严重低估年化）
+
+
+def test_sharpe_periods_per_year_scales():
+    """sharpe 按 periods_per_year 缩放 rf 与 sqrt(ppy)。"""
+    rets = [0.02, 0.01, -0.01, 0.03]
+    s_q = sharpe(rets, periods_per_year=4)
+    s_m = sharpe(rets, periods_per_year=12)
+    # 不同频率下夏普不同（并非相等），证明参数生效
+    assert s_q != pytest.approx(s_m, rel=1e-3)
+
+
+def test_downside_risk_periods_per_year_scales():
+    rets = [0.02, -0.01, -0.02, 0.03]
+    d_q = downside_risk(rets, periods_per_year=4)
+    d_m = downside_risk(rets, periods_per_year=12)
+    assert d_q is not None and d_m is not None
+    assert d_m > d_q  # 月度年化（sqrt(12)）> 季度年化（sqrt(4)）
+
+
+# --- T12 #118 显著性检验 ---
+def test_t_test_mean_significance():
+    """t 检验：显著正收益序列 p<0.05。"""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    from backtest_significance import t_test_mean
+    t, p = t_test_mean([0.05] * 20)  # 恒正、零方差 → se=0 → None
+    assert t is None  # 零方差退化
+    t, p = t_test_mean([0.01, 0.02, 0.03, 0.04, 0.05] * 4)
+    assert t is not None and p is not None
+    assert p < 0.05  # 显著正
+
+
+def test_block_bootstrap_ci_covers_true_mean():
+    """bootstrap CI 覆盖真实均值。"""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    from backtest_significance import block_bootstrap_ci
+    samples = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08] * 4
+    lo, hi = block_bootstrap_ci(samples, n_boot=500, seed=42)
+    assert lo is not None and hi is not None
+    mean = sum(samples) / len(samples)
+    assert lo <= mean <= hi  # CI 应覆盖真实均值
+
+
+def test_excess_series_ratio_caliber():
+    """超额用比值口径 (1+s)/(1+b)-1，与 T3 一致。"""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    from backtest_significance import excess_series
+    exc = excess_series([0.10], [0.05])
+    assert exc == [pytest.approx(1.10 / 1.05 - 1, rel=1e-9)]
