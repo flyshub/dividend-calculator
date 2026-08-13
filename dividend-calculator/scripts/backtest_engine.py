@@ -358,16 +358,18 @@ def portfolio_return(codes: List[str], build_day: date, settle_day: date,
         if pb and ps:
             # T10 #115：累积持有期送转因子
             split_factor = 1.0
-            for rec in (lookup.dividends(code, settle_day) or []):
-                ex = rec.get("ex_dividend_date")
-                if not ex:
-                    continue
-                ex_d = _d(ex) if isinstance(ex, str) else ex
-                if build_day < ex_d <= settle_day:
-                    br = rec.get("bonus_ratio") or 0.0
-                    tr = rec.get("trans_ratio") or 0.0
-                    if br or tr:
-                        split_factor *= (1.0 + (br + tr) / 10.0)
+            divs = getattr(lookup, "dividends", None)
+            if divs:
+                for rec in (divs(code, settle_day) or []):
+                    ex = rec.get("ex_dividend_date")
+                    if not ex:
+                        continue
+                    ex_d = _d(ex) if isinstance(ex, str) else ex
+                    if build_day < ex_d <= settle_day:
+                        br = rec.get("bonus_ratio") or 0.0
+                        tr = rec.get("trans_ratio") or 0.0
+                        if br or tr:
+                            split_factor *= (1.0 + (br + tr) / 10.0)
             gross = split_factor * ps / pb - 1.0
             rets.append(gross - 2.0 * cost)
     if not rets:
