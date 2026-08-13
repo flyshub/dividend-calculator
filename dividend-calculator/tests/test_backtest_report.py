@@ -158,3 +158,33 @@ def test_report_handles_empty_db(tmp_path):
     generate_report(db, out)  # 不应抛异常
     content = Path(out).read_text(encoding="utf-8")
     assert "N/A" in content or "0.00%" in content
+
+
+def test_section_attribution_renders_yearly_and_subperiod():
+    """T14 #120：section_attribution 生成年度收益表 + 子期间拆分。"""
+    from backtest_report import section_attribution
+    from datetime import date as _d
+    perf_cache = {
+        "quarterly_returns": {
+            "full": [0.05, 0.03, -0.02, 0.08],
+            "base": [0.02, 0.01, -0.01, 0.04],
+        },
+        "rebalance": [_d(2024, 3, 31), _d(2024, 6, 30),
+                      _d(2025, 3, 31), _d(2025, 6, 30)],
+        "bench_hz": [0.03, 0.02, -0.01, 0.05],
+        "bench_hs": [0.02, 0.01, -0.02, 0.06],
+    }
+    out = section_attribution({}, perf_cache)
+    # 年度表头
+    assert "逐年收益" in out
+    assert "2024" in out and "2025" in out
+    # 子期间拆分
+    assert "子期间拆分" in out
+    assert "2013-2019" in out or "2020-2026" in out
+
+
+def test_section_attribution_handles_empty_cache():
+    """空 cache（数据不足）→ 返回占位文本，不崩溃。"""
+    from backtest_report import section_attribution
+    out = section_attribution({}, None)
+    assert "归因数据不足" in out

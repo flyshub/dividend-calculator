@@ -206,6 +206,11 @@ def section_portfolio_perf(eng: dict, lookup: BacktestLookup, conn,
         _cache["base_m"] = base_m
         _cache["bench_div_m"] = bench_div_m
         _cache["bench_300_m"] = bench_300_m
+        # T14 #120：存季度收益序列 + rebalance 供归因段复用
+        _cache["quarterly_returns"] = port["quarterly_returns"]
+        _cache["rebalance"] = rebalance
+        _cache["bench_hz"] = bench_hz
+        _cache["bench_hs"] = bench_hs
 
     return _table(["组合", "累计", "年化", "波动", "夏普", "回撤",
                    "胜率", "下行风险", "盈亏比", "换手率", "正收益年", "季均只数"], rows) + "\n\n"
@@ -374,6 +379,86 @@ def section_conclusion(eng: dict, perf_cache: Optional[dict] = None) -> str:
     )
 
 
+def section_attribution(eng: dict, perf_cache: Optional[dict] = None) -> str:
+    """§ 归因：年度收益表 + 子期间拆分（T14 #120）。
+
+    回答"+108% vs 中证红利超额来自哪些年份"。仅做时间维度拆分，
+    因子归因（Fama-French 类）与行业暴露演化属后续工程，本段不覆盖。
+    """
+    cache = perf_cache or {}
+    qr = cache.get("quarterly_returns", {})
+    rebalance = cache.get("rebalance", eng.get("rebalance_dates", []))
+    bench_hz = cache.get("bench_hz", [])
+    bench_hs = cache.get("bench_hs", [])
+
+    if not rebalance or "full" not in qr:
+        return "（归因数据不足）\n\n"
+
+    full_rets = qr.get("full", [])
+    base_rets = qr.get("base", [])
+
+    # 按年份分组（用调仓日的年份）
+    def _by_year(rets):
+        buckets: dict[int, list] = {}
+        for i, r in enumerate(rets):
+            if i < len(rebalance) and r is not None:
+                y = rebalance[i].year
+                buckets.setdefault(y, []).append(r)
+        return buckets
+
+    def _cum(rets_list):
+        p = 1.0
+        for r in rets_list:
+            p *= (1.0 + r)
+        return p - 1.0
+
+    full_y = _by_year(full_rets)
+    base_y = _by_year(base_rets)
+    div_y = _by_year(bench_hz)
+    hs300_y = _by_year(bench_hs)
+
+    years = sorted(set(full_y) | set(base_y) | set(div_y) | set(hs300_y))
+    rows = []
+    for y in years:
+        rows.append([
+            str(y),
+            _pct(_cum(full_y.get(y, []))),
+            _pct(_cum(base_y.get(y, []))),
+            _pct(_cum(div_y.get(y, []))),
+            _pct(_cum(hs300_y.get(y, []))),
+        ])
+
+    out = ["### 逐年收益\n\n",
+           _table(["年份", "全漏斗", "全A等权", "中证红利", "沪深300"], rows),
+           "\n\n"]
+
+    # 子期间拆分：2013-2019 vs 2020-2026
+    def _sub_period(start_year, end_year, rets):
+        sub = [r for i, r in enumerate(rets)
+               if i < len(rebalance)
+               and r is not None
+               and start_year <= rebalance[i].year <= end_year]
+        return _cum(sub) if sub else None
+
+    sub_rows = []
+    for label, s, e in [("2013-2019（含 2015 牛熊）", 2013, 2019),
+                        ("2020-2026（疫后）", 2020, 2026)]:
+        sub_rows.append([
+            label,
+            _pct(_sub_period(s, e, full_rets)),
+            _pct(_sub_period(s, e, base_rets)),
+            _pct(_sub_period(s, e, bench_hz)),
+            _pct(_sub_period(s, e, bench_hs)),
+        ])
+
+    out.append("### 子期间拆分\n\n")
+    out.append(_table(["子期间", "全漏斗", "全A等权", "中证红利", "沪深300"], sub_rows))
+    out.append("\n\n")
+    out.append("> 注：因子归因（多因子模型）与行业/市值暴露演化属后续工程，"
+               "本段仅做时间维度拆分。\n\n")
+    return "".join(out)
+
+
 # ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
@@ -413,6 +498,9 @@ def generate_report(db_path: str, out_path: str) -> None:
 
         "## §4 稳健性检验\n\n",
         section_robustness(lookup, conn),
+
+        "## §4.1 归因分析\n\n",
+        section_attribution(eng, perf_cache),
 
         "## §5 结论与限制\n\n",
         section_conclusion(eng, perf_cache),
