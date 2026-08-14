@@ -55,17 +55,32 @@ def after_tax_dividend_contrib(
     属结构性改造（当前组合模型每期独立结算），#113 暂保留限制标注。
     """
     records = lookup.dividends(code, settle_day) or []
-    contrib = 0.0
+    # T12 #130 M-10：按除权日排序遍历，送转后现金分红按放大后股数计。
+    # 例：先 10送10（股数×2）再每股派 d 元 → 实际现金 = 2×d（保守方向修正）。
+    dated = []
     for rec in records:
         ex = rec.get("ex_dividend_date")
         dps = rec.get("cash_div_per_share")
-        if not ex or not dps:
+        br = rec.get("bonus_ratio") or 0.0
+        tr = rec.get("trans_ratio") or 0.0
+        # T12 #130：dps=0 但有送转的记录也要处理（放大后续股数）
+        if not ex or (not dps and not br and not tr):
             continue
         ex_date = ex if isinstance(ex, date) else date.fromisoformat(ex)
+        dated.append((ex_date, dps or 0.0, rec))
+    dated.sort(key=lambda x: x[0])
+    shares = 1.0
+    contrib = 0.0
+    for ex_date, dps, rec in dated:
         if not (build_day <= ex_date <= settle_day):
             continue
+        br = rec.get("bonus_ratio") or 0.0
+        tr = rec.get("trans_ratio") or 0.0
+        split = 1.0 + (br + tr) / 10.0
         px = lookup.price(code, ex_date)
         if not px:
+            # 无除权日价：送转仍放大股数，现金分红跳过（保守）
+            shares *= split
             continue
         if tax_override is not None:
             tax = tax_override
@@ -77,7 +92,10 @@ def after_tax_dividend_contrib(
                 tax = TAX_1M_1Y
             else:
                 tax = TAX_LT_1M
-        contrib += dps * (1.0 - tax) / px
+        # 当日除权记录：送转放大股数；现金分红按当日持股数发放
+        if dps > 0:
+            contrib += shares * dps * (1.0 - tax) / px
+        shares *= split
     return contrib
 
 

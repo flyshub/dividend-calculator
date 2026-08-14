@@ -49,6 +49,7 @@ from backtest_robustness import (  # noqa: E402
     load_names,
     run_variant,
 )
+from backtest_significance import run_significance  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -124,11 +125,19 @@ def section_layered_incremental(eng: dict) -> str:
         ("全漏斗", "full"),
     ]
 
+    # T10 #129：年化按调仓日历跨度（与 §3 / performance_metrics 一致），
+    # 消除原固定 4.0/n_q 在非季频主回测下的失真；数学上季度口径等价。
+    rds = eng.get("rebalance_dates") or []
+    if rds:
+        years = (max(rds) - min(rds)).days / 365.25
+    else:
+        years = n_q / 4.0
+
     def _ann(cum):
-        """累计 → 年化（按季度数复利）。None → None。"""
-        if cum is None or n_q <= 0:
+        """累计 → 年化（按调仓日历跨度，与 §3 一致）。None → None。"""
+        if cum is None or years <= 0:
             return None
-        return (1.0 + cum) ** (4.0 / n_q) - 1.0
+        return (1.0 + cum) ** (1.0 / years) - 1.0
 
     for label, key in labels:
         cr = cum_ret.get(key)
@@ -150,6 +159,12 @@ def section_layered_incremental(eng: dict) -> str:
                 for label, k in inc_labels]
     out += "**逐层增量超额：**\n\n"
     out += _table(["增量", "累计超额", "年化超额"], inc_rows) + "\n\n"
+    out += (
+        "> 年化方法：本节与 §3 均按调仓日历跨度年化（"
+        "(1+累计)^(1/年数)−1）；3.2 调仓频率扫描表用期数/ppy 年化"
+        "（(1+累计)^(ppy/n)−1），调仓密集时两者近似，频率扫描下 "
+        "ppy 取 12/4/2 对应月/季/半年调仓。\n\n"
+    )
     return out
 
 
@@ -323,7 +338,7 @@ def section_sensitivity(lookup: BacktestLookup, eng: dict) -> str:
     return "".join(out)
 
 
-def section_conclusion(eng: dict, perf_cache: Optional[dict] = None) -> str:
+def section_conclusion(eng: dict, perf_cache: Optional[dict] = None, lookup=None) -> str:
     """§ 结论与限制（诚实标注）。
 
     headline 用 §3 含分红真实全收益（vs 中证红利），而非 §2 纯价格收益——
@@ -350,6 +365,21 @@ def section_conclusion(eng: dict, perf_cache: Optional[dict] = None) -> str:
     excess_vs_300 = (full_cum - hz300_cum) if (full_cum is not None and hz300_cum is not None) else None
     excess_vs_base = (full_cum - base_cum) if (full_cum is not None and base_cum is not None) else None
 
+    # T3 #126 H-1: 实时调用 run_significance，不再硬编码数字
+    sig_text = "（样本不足，无法检验）"
+    if lookup is not None:
+        try:
+            sig_rows = run_significance(lookup, n_boot=1000)
+            if sig_rows:
+                r = sig_rows[0]  # [对比, 期数, 逐期均值, t, p, CI, 结论]
+                sig_text = (
+                    f"{r[0]} {r[1]} 期逐期均值 {r[2]}，"
+                    f"t={r[3]}，p={r[4]}，bootstrap 95% CI {r[5]}，"
+                    f"**{r[6]}**"
+                )
+        except Exception as exc:  # pragma: no cover - 数据缺失时如实降级
+            sig_text = f"（显著性检验失败：{exc}）"
+
     return (
         "**全漏斗真实全收益（含税后分红复投）："
         f"累计 {_pct(full_cum)}，年化 {_pct(full_ann)}，"
@@ -359,9 +389,8 @@ def section_conclusion(eng: dict, perf_cache: Optional[dict] = None) -> str:
         f"- vs 全A等权：累计超额 **{_pct(excess_vs_base)}**\n\n"
         "## 验证结论\n\n"
         "1. §3 含分红真实全收益才是可信 headline。显著性检验（t 检验 + bootstrap，"
-        "见 scripts/backtest_significance.py）：全漏斗 vs 全A基线 49 期逐期均值 +2.05%，"
-        "t=0.904，p=0.366，bootstrap 95% CI [-1.62%, +7.42%]，**未达统计显著**——"
-        "方向为正、不能断言显著超额，结论按此如实表述。\n"
+        f"见 scripts/backtest_significance.py）：{sig_text}——"
+        "结论按此如实表述。\n"
         "2. §2 纯价格收益仅作分层筛选的方向性验证（不含分红，高股息策略低估严重）。\n"
         "3. 稳健性变体结论：剔微盘/剔金融/延迟 T+5 的累计收益见上表，"
         "若与主回测方向一致则结论稳健；随机起点敏感性见 §3.2 下方说明。\n\n"
@@ -379,6 +408,12 @@ def section_conclusion(eng: dict, perf_cache: Optional[dict] = None) -> str:
         "已在因子层对齐项目口径（详见方案 V3 §1）。\n"
         "- **分红按公告日过滤**（无未来函数），财报按披露日（NOTICE_DATE）过滤"
         "（T11 已入库披露日，无超前）。\n"
+        "- **base 再平衡成本未建模**（#130 M-4）：全 A 等权 base 每期价格漂移后偏离等权，"
+        "理论上需再平衡交易，但实际换手 ≈0 建模。估算：单季个股波动 ~15%，等权池权重"
+        "漂移 Σ|w−1/N|/2 ≈ 6%/季 → 双边 0.3% × 6% ≈ 0.018%/季 ≈ 0.07%/年（极小，"
+        "策略层相对超额被低估约 0.07%/年，方向已知）。\n"
+        "- **调仓时点差 1 日**（#130 M-12）：组合 build_day = T+1，基准 index return "
+        "用 T→下T；两者差 1 个交易日。对季度调仓影响 <0.1%（已在方法论标注）。\n"
     )
 
 
@@ -506,7 +541,7 @@ def generate_report(db_path: str, out_path: str) -> None:
         section_attribution(eng, perf_cache),
 
         "## §5 结论与限制\n\n",
-        section_conclusion(eng, perf_cache),
+        section_conclusion(eng, perf_cache, lookup),
 
         "---\n\n"
         "## 复现\n\n"

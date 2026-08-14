@@ -105,16 +105,29 @@ def excess_series(strategy: Sequence[float], benchmark: Sequence[float]) -> List
 
 
 def run_significance(lookup, n_boot: int = 1000) -> List[List[str]]:
-    """跑 full 层 vs 全A基线 + 双基准的超额检验。"""
+    """跑 full 层 vs 全A基线 + 双基准的超额检验。
+
+    口径修复（T3 #126 H-1）：
+    - 双方都用 portfolio 层含分红收益（full vs base），
+      不再混用 engine 层纯价格收益。
+    - 按调仓日字典对齐（弃位置 zip），消除逐期错位。
+    """
     eng = run_backtest(lookup)
     pf = run_portfolio(lookup, eng)
 
-    strategy = _valid(pf["quarterly_returns"]["full"])
-    base = _valid(eng["quarterly_returns"]["base"])
+    # 按调仓日字典对齐（弃位置 zip），口径统一含分红
+    rebal = pf.get("rebalance_dates") or eng.get("rebalance_dates") or []
+    strat_ret = pf["quarterly_returns"]["full"]
+    base_ret = pf["quarterly_returns"].get("base")
+    if base_ret is None:
+        # portfolio 层可能无 base；回退 engine 层并标注
+        base_ret = eng["quarterly_returns"]["base"]
 
-    # 与基线等长对齐
-    min_len = min(len(strategy), len(base))
-    s, b = strategy[:min_len], base[:min_len]
+    date_to_strat = {d: r for d, r in zip(rebal, strat_ret) if r is not None}
+    date_to_base = {d: r for d, r in zip(rebal, base_ret) if r is not None}
+    common = sorted(set(date_to_strat) & set(date_to_base))
+    s = [date_to_strat[d] for d in common]
+    b = [date_to_base[d] for d in common]
     exc = excess_series(s, b)
 
     rows = []
@@ -130,6 +143,37 @@ def run_significance(lookup, n_boot: int = 1000) -> List[List[str]]:
         f"[{lo*100:+.2f}%, {hi*100:+.2f}%]" if lo is not None else "样本不足",
         "显著" if (p_val is not None and p_val < 0.05) else "不显著",
     ])
+
+    # T8 #133：逐层增量显著性（每层 vs 上一层）
+    layers = ["base", "l2", "l3", "l4", "full"]
+    for i in range(1, len(layers)):
+        cur, prev = layers[i], layers[i - 1]
+        cur_ret = pf["quarterly_returns"].get(cur) or eng["quarterly_returns"].get(cur)
+        prev_ret = pf["quarterly_returns"].get(prev) or eng["quarterly_returns"].get(prev)
+        if cur_ret is None or prev_ret is None:
+            continue
+        d_cur = {d: r for d, r in zip(rebal, cur_ret) if r is not None}
+        d_prev = {d: r for d, r in zip(rebal, prev_ret) if r is not None}
+        cdates = sorted(set(d_cur) & set(d_prev))
+        s2 = [d_cur[d] for d in cdates]
+        b2 = [d_prev[d] for d in cdates]
+        e2 = excess_series(s2, b2)
+        if len(e2) < 2:
+            continue
+        t2, p2 = t_test_mean(e2)
+        lo2, hi2 = block_bootstrap_ci(e2, n_boot=n_boot)
+        mean2 = sum(e2) / len(e2)
+        label = {"l2": "L2 高股息", "l3": "L3 低估", "l4": "L4 可持续", "full": "全漏斗"}[cur]
+        rows.append([
+            f"{label} vs {prev.upper()}",
+            f"{len(e2)}",
+            f"{mean2 * 100:+.2f}%",
+            f"{t2:.3f}" if t2 is not None else "N/A",
+            f"{p2:.4f}" if p2 is not None else "N/A",
+            f"[{lo2*100:+.2f}%, {hi2*100:+.2f}%]" if lo2 is not None else "样本不足",
+            "显著" if (p2 is not None and p2 < 0.05) else "不显著",
+        ])
+
     return rows
 
 

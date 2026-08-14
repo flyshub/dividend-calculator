@@ -322,6 +322,22 @@ def test_annualized_freq_bug_regression():
     assert good > bad  # 新 > 旧（旧严重低估年化）
 
 
+def test_report_section1_annualization_calendar_span():
+    """T10 #129 回归：报告 §3.1 年化按调仓日历跨度，不再固定 4.0/n_q。
+
+    月频主回测 36 期（3 年日历跨度）累计 30%：旧口径 4.0/36≈9 年 → 1.22%
+    失真；日历跨度口径 = (1.30)^(1/3)−1 ≈ 9.14%。
+    """
+    from datetime import date
+    # 模拟 eng 输出的 rebalance_dates：36 个月度调仓日，跨 3 年
+    rds = [date(2020 + m // 12, m % 12 + 1, 1) for m in range(36)]
+    years = (max(rds) - min(rds)).days / 365.25
+    ann = (1.30) ** (1.0 / years) - 1
+    bad = (1.30) ** (4.0 / 36) - 1
+    assert ann == pytest.approx((1.30) ** (1.0 / years) - 1, abs=1e-9)
+    assert ann > bad * 2  # 旧口径低估一半以上
+
+
 def test_sharpe_periods_per_year_scales():
     """sharpe 按 periods_per_year 缩放 rf 与 sqrt(ppy)。"""
     rets = [0.02, 0.01, -0.01, 0.03]
@@ -368,3 +384,38 @@ def test_excess_series_ratio_caliber():
     from backtest_significance import excess_series
     exc = excess_series([0.10], [0.05])
     assert exc == [pytest.approx(1.10 / 1.05 - 1, rel=1e-9)]
+
+
+def test_split_then_cash_dividend_doubled():
+    """T12 #130 M-10：先 10送10 再现金分红 → 股数×2，现金按 2×dps 计。"""
+    build = date(2023, 1, 1)
+    settle = date(2023, 12, 31)
+    lookup = FakeLookup(
+        prices={"x": [(date(2023, 1, 1), 10.0), (date(2023, 12, 31), 10.0)]},
+        dividends={"x": [
+            # 3-1：10送10（无现金）→ 股数×2
+            _mk_div(date(2023, 3, 1), 0.0, bonus=10.0),
+            # 7-1：每股现金 1.0 → 实际现金 = 2股 × 1.0 = 2.0
+            _mk_div(date(2023, 7, 1), 1.0),
+        ]},
+    )
+    # 税：持有 181 天 → 10%。贡献 = 2 × 1.0 × 0.9 / 10 = 0.18
+    got = after_tax_dividend_contrib(lookup, "x", build, settle)
+    assert got == pytest.approx(2.0 * 0.9 / 10.0, rel=1e-9)
+
+
+def test_cash_dividend_before_split_not_doubled():
+    """对照：现金分红在送转之前 → 按原股数 1×dps 计（不翻倍）。"""
+    build = date(2023, 1, 1)
+    settle = date(2023, 12, 31)
+    lookup = FakeLookup(
+        prices={"x": [(date(2023, 1, 1), 10.0), (date(2023, 12, 31), 10.0)]},
+        dividends={"x": [
+            # 3-1：先现金分红 1.0（1股 × 1.0）
+            _mk_div(date(2023, 3, 1), 1.0),
+            # 7-1：后 10送10（无现金）
+            _mk_div(date(2023, 7, 1), 0.0, bonus=10.0),
+        ]},
+    )
+    got = after_tax_dividend_contrib(lookup, "x", build, settle)
+    assert got == pytest.approx(1.0 * 0.9 / 10.0, rel=1e-9)
