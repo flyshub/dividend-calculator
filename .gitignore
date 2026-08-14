@@ -6,3 +6,6 @@
 
 # Agent skills（个人通用技能，放全局 ~/.claude/skills/，不入项目仓库）
 .agents/
+
+# 环境残留
+dividend-calculator/backtest_data.db
