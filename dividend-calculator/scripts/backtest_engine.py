@@ -207,13 +207,27 @@ class BacktestLookup:
         return self._latest(self.prices.get(code, []), asof)
 
     def roe_latest(self, code: str, asof: date) -> Optional[float]:
-        recs = [f for f in self._fin_recs.get(code, []) if f["year"] * 100 + 1231 <=
-                asof.year * 10000 + asof.month * 100 + asof.day]
+        """最新年报 ROE。T11 #116：优先按 notice_date 实际披露日过滤
+        （1-4 月年报未披露不超前），notice_date 缺失回退报告期 12-31。"""
+        recs = [f for f in self._fin_recs.get(code, [])
+                if self._fin_visible(f, asof)]
         if not recs:
             # 兜底：report_date ≤ asof 的 12-31 年报（finance 已只存 12-31）
             recs = [f for f in self._fin_recs.get(code, [])
                     if date(f["year"], 12, 31) <= asof]
         return recs[-1]["roe"] if recs else None
+
+    def _fin_visible(self, f: dict, asof: date) -> bool:
+        """T11 #116：财报对 asof 是否可见——优先按 notice_date 实际披露日，
+        notice_date 缺失/解析失败回退报告期 12-31。"""
+        nd = f.get("notice_date")
+        if nd:
+            try:
+                cutoff = _d(nd[:10]) if isinstance(nd, str) else nd
+                return cutoff <= asof
+            except Exception:
+                pass  # 解析失败 → 回退报告期
+        return date(f["year"], 12, 31) <= asof
 
     def finance(self, code: str, asof: date) -> Optional[dict]:
         """T11 #116：优先按 notice_date 实际披露日过滤，回退报告期 12-31。
@@ -221,22 +235,7 @@ class BacktestLookup:
         notice_date 为 None（未入库）时按报告期过滤（旧行为）。
         notice_date 为空字符串/无效时同样回退报告期。
         """
-        recs = []
-        for f in self._fin_recs.get(code, []):
-            nd = f.get("notice_date")
-            if nd:
-                try:
-                    cutoff = _d(nd[:10]) if isinstance(nd, str) else nd
-                    if cutoff <= asof:
-                        recs.append(f)
-                except Exception:
-                    # notice_date 解析失败 → 回退报告期判断
-                    if date(f["year"], 12, 31) <= asof:
-                        recs.append(f)
-            else:
-                # 无 notice_date → 按报告期 12-31 过滤（旧行为）
-                if date(f["year"], 12, 31) <= asof:
-                    recs.append(f)
+        recs = [f for f in self._fin_recs.get(code, []) if self._fin_visible(f, asof)]
         return recs[-1] if recs else None
 
     def price_change_1y(self, code: str, asof: date) -> Optional[float]:

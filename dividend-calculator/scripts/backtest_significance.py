@@ -63,25 +63,29 @@ def block_bootstrap_ci(
 ) -> Tuple[Optional[float], Optional[float]]:
     """block bootstrap 置信区间（保留时序自相关）。
 
-    block_size 默认 sqrt(n)（stationary bootstrap 经验值）。
-    返回 (lower, upper) 的均值置信区间。样本不足返回 (None, None)。
+    重叠块重采样：把序列切成 (n - block_size + 1) 个重叠块，
+    每次有放回抽取 ⌈n/block_size⌉ 块拼接成新序列，取均值。
+    block_size 默认 sqrt(n)。返回 (lower, upper) 均值置信区间。
+    样本不足返回 (None, None)。
     """
     n = len(samples)
     if n < 8:
         return None, None
     if block_size is None:
         block_size = max(1, int(math.sqrt(n)))
+    if block_size >= n:
+        block_size = max(1, n // 2)
     rng = random.Random(seed)
+    # 重叠块集合
+    blocks = [samples[i:i + block_size] for i in range(n - block_size + 1)]
+    n_blocks_per_sample = math.ceil(n / block_size)
     means = []
     for _ in range(n_boot):
-        total = 0.0
-        for _ in range(n):
-            start = rng.randint(0, n - 1)
-            idx = start + (rng.randint(0, block_size - 1) if block_size > 1 else 0)
-            if idx >= n:
-                idx = n - 1
-            total += samples[idx]
-        means.append(total / n)
+        picked = []
+        for _ in range(n_blocks_per_sample):
+            picked.extend(rng.choice(blocks))
+        picked = picked[:n]
+        means.append(sum(picked) / n)
     means.sort()
     lo_idx = int(alpha / 2 * n_boot)
     hi_idx = int((1 - alpha / 2) * n_boot)

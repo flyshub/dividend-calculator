@@ -19,7 +19,7 @@ import sqlite3
 from datetime import date, timedelta
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from backtest_engine import BacktestLookup, run_backtest
+from backtest_engine import BacktestLookup, run_backtest, _d
 from src.backtest_factors import ttm_dividend_yield
 
 DB_PATH = "data/backtest.db"
@@ -101,7 +101,21 @@ def portfolio_total_return(
         ps = lookup.price(code, settle_day)
         if not pb or not ps:
             continue
-        price_ret = ps / pb - 1.0
+        # T10 #115：累积持有期送转因子（与引擎 portfolio_return 同口径）
+        split_factor = 1.0
+        divs = getattr(lookup, "dividends", None)
+        if divs:
+            for rec in (divs(code, settle_day) or []):
+                ex = rec.get("ex_dividend_date")
+                if not ex:
+                    continue
+                ex_d = _d(ex) if isinstance(ex, str) else ex
+                if build_day < ex_d <= settle_day:
+                    br = rec.get("bonus_ratio") or 0.0
+                    tr = rec.get("trans_ratio") or 0.0
+                    if br or tr:
+                        split_factor *= (1.0 + (br + tr) / 10.0)
+        price_ret = split_factor * ps / pb - 1.0
         div_contrib = after_tax_dividend_contrib(
             lookup, code, build_day, settle_day, tax_override=tax_override)
         rets.append((1.0 + price_ret) * (1.0 + div_contrib) - 1.0)

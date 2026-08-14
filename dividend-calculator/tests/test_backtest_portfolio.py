@@ -49,12 +49,14 @@ class FakeLookup:
         return self._div.get(code, [])
 
 
-def _mk_div(ex_date, dps, report_date="2023-12-31"):
+def _mk_div(ex_date, dps, report_date="2023-12-31", bonus=0.0, trans=0.0):
     return {
         "announce_date": ex_date,
         "report_date": report_date,
         "ex_dividend_date": ex_date,
         "cash_div_per_share": dps,
+        "bonus_ratio": bonus,
+        "trans_ratio": trans,
     }
 
 
@@ -89,6 +91,32 @@ def test_dividend_outside_window_ignored():
                           _mk_div(date(2024, 6, 1), 1.0)]},  # 晚于结算
     )
     assert after_tax_dividend_contrib(lookup, "x", build, settle) == 0.0
+
+
+def test_portfolio_total_return_split_factor():
+    """T10 #115：组合层总收益也乘送转因子（双端口径一致，评审修复）。"""
+    build = date(2023, 1, 2)
+    settle = date(2023, 6, 30)
+    # 10送10：建仓 10 元 → 结算 5.5 元（除权后），送转因子 2.0
+    # 总收益 = 2 × 5.5/10 - 1 = +10%（若缺送转因子则 -45% 失真）
+    lookup = FakeLookup(
+        prices={"a": [(build, 10.0), (settle, 5.5)]},
+        dividends={"a": [_mk_div(date(2023, 3, 1), 0.0, bonus=10.0)]},
+    )
+    got = portfolio_total_return(lookup, ["a"], build, settle, cost=0.0)
+    assert got == pytest.approx(0.10, rel=1e-9)
+
+
+def test_portfolio_total_return_split_factor_no_cost_no_div():
+    """无送转时总收益 = 价格收益（向后兼容）。"""
+    build = date(2023, 1, 2)
+    settle = date(2023, 6, 30)
+    lookup = FakeLookup(
+        prices={"a": [(build, 10.0), (settle, 12.0)]},
+        dividends={"a": []},
+    )
+    got = portfolio_total_return(lookup, ["a"], build, settle, cost=0.0)
+    assert got == pytest.approx(0.20, rel=1e-9)
 
 
 def test_portfolio_total_return_price_plus_div_minus_cost():
