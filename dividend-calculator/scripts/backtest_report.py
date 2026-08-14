@@ -121,8 +121,7 @@ def section_layered_incremental(eng: dict) -> str:
         ("基线 全A 等权", "base"),
         ("+L2 股息率>5%", "l2"),
         ("+L3 PR≤1", "l3"),
-        ("+L4 可持续性", "l4"),
-        ("全漏斗", "full"),
+        ("+L4=全漏斗", "full"),
     ]
 
     # T10 #129：年化按调仓日历跨度（与 §3 / performance_metrics 一致），
@@ -188,7 +187,7 @@ def section_portfolio_perf(eng: dict, lookup: BacktestLookup, conn,
     base_m = None
     rows = []
     for key, label in [("base", "全A等权"), ("l2", "+L2"),
-                       ("l3", "+L3"), ("l4", "+L4"), ("full", "全漏斗")]:
+                       ("l3", "+L3"), ("full", "+L4=全漏斗")]:
         rets = port["quarterly_returns"].get(key, [])
         m = performance_metrics({key: rets}, rebalance_dates=rebalance)[key]
         if key == "base":
@@ -244,7 +243,7 @@ def section_hfq_comparison(eng: dict, lookup: BacktestLookup) -> str:
 
     rows = []
     for key, label in [("base", "全A等权"), ("l2", "+L2"),
-                       ("l3", "+L3"), ("l4", "+L4"), ("full", "全漏斗")]:
+                       ("l3", "+L3"), ("full", "+L4=全漏斗")]:
         after = port_after["quarterly_returns"].get(key, [])
         pretax = port_pretax["quarterly_returns"].get(key, [])
         m_a = performance_metrics({key: after}, rebalance_dates=rebalance)[key]
@@ -450,6 +449,10 @@ def section_conclusion(eng: dict, perf_cache: Optional[dict] = None, lookup=None
         "（361 退市股中 82 只无最后价，base 基准略偏乐观）；④ daily_pe 缺失 18 只"
         "=次新股/北交所/老股，影响小；⑤ industry 值域以「金融」开头——剔金融变体"
         "真实匹配。\n"
+        "- **标准近似**（回测通用假设，非本策略特有）：① 分红复投无佣金/无滑点"
+        "（与调仓成本 0.3% 口径不同）；② 不模拟涨跌停/停牌无法成交（按收盘价"
+        "全额成交）；③ 不模拟 ST/退市整理期流动性折价（退市终局损失已按 -100%"
+        "计提，见 #127）；④ 调仓日固定月末/季末后首个交易日，非实时择时。\n"
     )
 
 

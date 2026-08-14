@@ -76,7 +76,7 @@ def compute_n_factor(payout_ratio: Optional[float]) -> Optional[float]:
 def classify_valuation(pr: Optional[float]) -> str:
     """估值四档分类。
 
-    阈值基于 PR 历史回测（2016-2024 沪深300，见 docs/BACKTEST_REPORT.md）：
+    阈值基于 PR 历史回测（2016-2024 沪深300，见 docs/BACKTEST_REPORT_V3.md）：
     低估(≤0.5)与合理偏低(0.5-1)超额 +4%+，合理(1-3)接近中性，高估(>3)跑输 5%+。
     故 1.0~3.0 归合理，>3.0 才标高估；PR≤1 视为有超额的低估区间。
     """

@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """T2 历史回测数据库构建（issue #85）：全 A 四层漏斗回测数据管线（方案 V3）。
 
-产出 data/backtest.db，6 张表：
+产出 data/backtest.db，9 张表：
   stock_list       全 A（含退市，消除幸存者偏差）
   daily_price      日频不复权收盘价（腾讯 fqkline 分段拉取，2013-2026 两段）
   daily_pe         日频 PE_TTM（akshare 百度估值，列名 date/value）
   dividend_history 历史分红（东财 RPT_SHAREBONUS_DET，含公告日，回测无未来函数约束）
   finance_history  历史财务（东财 MAINFINADATA，仅保留 12-31 完整财年，month==12 规则）
   index_daily      基准指数（中证全收益 H00922/H00300）
+  total_shares     总股本（腾讯 Index 73 当前快照，近似时序值）
+  industry         行业分类（东财 datacenter，近似时序值）
   build_progress   断点续传标记（按 表×code 记录已完成，空结果也标记，避免重复请求）
 
 数据铁律：数据源不可用即记缺失（0 行 + 标记完成），绝不编造、推算补缺。
@@ -104,7 +106,7 @@ SCHEMA = {
             ex_dividend_date  TEXT,   -- EX_DIVIDEND_DATE 除权除息日
             cash_div_10shares REAL,   -- PRETAX_BONUS_RMB 每10股派息
             bonus_ratio       REAL,   -- BONUS_RATIO 每10股送股数（送股，除权因子）
-            trans_ratio       REAL,   -- TRAN_ADD_RATIO 每10股转增股数（转增，除权因子）
+            trans_ratio       REAL,   -- BONUS_IT_RATIO 每10股转增股数（转增，除权因子）
             PRIMARY KEY (code, report_date)
         )""",
     "finance_history": """

@@ -147,7 +147,7 @@ def main() -> None:
     print("\n== 分层增量超额（累计，各变体 vs 主回测）==")
     for r in results[1:]:
         print(f"  {r['name']:>16s}:", end="")
-        for k in ("l2_over_base", "l3_over_l2", "l4_over_l3", "full_over_l4"):
+        for k in ("l2_over_base", "l3_over_l2", "l4_over_l3"):
             v = r["incremental_excess"].get(k)
             print(f"  {k}={v*100 if v is not None else float('nan'):+.2f}%", end="")
         print()
@@ -156,9 +156,9 @@ def main() -> None:
     for i, start in enumerate(random_start_offsets()):
         res = run_backtest(lookup, start=start)
         full = res["cumulative_returns"]["full"]
-        inc = res["incremental_excess"].get("full_over_l4")
+        inc = res["incremental_excess"].get("full_over_base")
         print(f"  start={start}  全漏斗 {full*100:+6.2f}%  "
-              f"L4增量 {inc*100 if inc is not None else float('nan'):+.2f}%")
+              f"vs base {inc*100 if inc is not None else float('nan'):+.2f}%")
 
     # T9 #134：半年调仓最优（14.19%）仅 25 期样本 + 事后扫描——补 bootstrap 95% CI
     print("\n== 半年调仓 bootstrap 95% CI（block，T9 #134）==")

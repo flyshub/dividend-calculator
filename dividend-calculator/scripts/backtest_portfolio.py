@@ -5,7 +5,7 @@
 - 税后分红再投资：总收益 = 价格收益（不复权）+ Σ(税后分红 于除权日按当日价格再买入)
 - 三档税率按持仓时长判定（>1年 0% / 1月~1年 10% / <1月 20%）
 - 入选池等权 + TopN（按真实股息率降序）对比
-- 双边 0.3% 交易成本（季度调仓全换手，进出各 0.3%）
+- 双边 0.3% 交易成本（调仓全换手，进出各 0.3%）
 - 绩效指标：累计/年化收益、波动、最大回撤、夏普、卡玛、索提诺、胜率、换手
 - 基准对比：中证红利全收益（H00922）为主、沪深300全收益（H00300）次
 
@@ -72,7 +72,7 @@ def after_tax_dividend_contrib(
     shares = 1.0
     contrib = 0.0
     for ex_date, dps, rec in dated:
-        if not (build_day <= ex_date <= settle_day):
+        if not (build_day < ex_date <= settle_day):
             continue
         br = rec.get("bonus_ratio") or 0.0
         tr = rec.get("trans_ratio") or 0.0
