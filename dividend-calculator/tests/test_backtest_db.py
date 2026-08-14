@@ -54,7 +54,9 @@ class TestSchema:
     def test_finance_history_columns(self):
         cols = self._cols("finance_history")
         assert {"code", "report_date", "roe", "net_profit", "net_cash_operate",
-                "bps", "newcapitalader", "loan_provision_ratio"} <= cols
+                "bps", "newcapitalader", "loan_provision_ratio",
+                "total_assets", "total_liabilities", "net_profit_yoy",
+                "investing_cf", "capex"} <= cols
 
     def test_index_daily_columns(self):
         assert {"code", "date", "close"} == self._cols("index_daily")
@@ -100,7 +102,21 @@ class TestFinancialFyearFilter:
                  "PARENTNETPROFIT": 1000, "NETCASH_OPERATE_PK": 500,
                  "BPS": 20.0, "NEWCAPITALADER": 12.0, "LOAN_PROVISION_RATIO": 3.5}]
         out = self.mod.financial_rows_to_db("600036", rows)[0]
-        assert out == ("600036", "2025-12-31", 10.5, 1000, 500, 20.0, 12.0, 3.5, None)
+        assert out == ("600036", "2025-12-31", 10.5, 1000, 500, 20.0, 12.0, 3.5,
+                       None, None, None, None, None, None)
+
+    def test_l4_fields_mapped_from_pk_suffix(self):
+        """L4 字段映射（T2 #125）：东财实际字段名带 _PK 后缀 / DJD_DPNP_YOY / LIABILITY。"""
+        rows = [{"REPORT_DATE": "2025-12-31 00:00:00", "ROEJQ": 10.5,
+                 "PARENTNETPROFIT": 1000, "NETCASH_OPERATE_PK": 500,
+                 "TOTAL_ASSETS_PK": 100.0, "LIABILITY": 60.0,
+                 "DJD_DPNP_YOY": 5.5, "NETCASH_INVEST_PK": -20.0}]
+        out = self.mod.financial_rows_to_db("600036", rows)[0]
+        assert out[9] == 100.0   # total_assets
+        assert out[10] == 60.0   # total_liabilities
+        assert out[11] == 5.5    # net_profit_yoy
+        assert out[12] == -20.0  # investing_cf
+        assert out[13] is None   # capex 占位，由 build_finance 合并
 
     def test_roe_fallback_to_weighted_when_roejq_missing(self):
         """ROEJQ 为空时回退 ROE_WEIGHTED（东财该接口 ROE_WEIGHTED 实测全 None，双保险）。"""

@@ -118,6 +118,11 @@ SCHEMA = {
             newcapitalader      REAL,   -- NEWCAPITALADER 资本充足率（银行专项）
             loan_provision_ratio REAL,  -- LOAN_PROVISION_RATIO 拨备覆盖率（银行专项）
             notice_date         TEXT,   -- NOTICE_DATE 实际披露日（消除财报未来函数的关键，T2 #107）
+            total_assets        REAL,   -- TOTAL_ASSETS_PK 总资产（L4 资产负债表维度，T2 #125）
+            total_liabilities   REAL,   -- LIABILITY 总负债（L4 资产负债率推算）
+            net_profit_yoy      REAL,   -- DJD_DPNP_YOY 归母净利润同比（百分数，L4 盈利质量）
+            investing_cf        REAL,   -- NETCASH_INVEST_PK 投资活动现金流净额（L4 FCF 降级路径）
+            capex               REAL,   -- CONSTRUCT_LONG_ASSET 资本开支（GCASHFLOW 接口，银行股无此字段）
             PRIMARY KEY (code, report_date)
         )""",
     "index_daily": """
@@ -266,6 +271,12 @@ def financial_rows_to_db(code: str, rows: list) -> list:
             r.get("NETCASH_OPERATE_PK"), r.get("BPS"),
             r.get("NEWCAPITALADER"), r.get("LOAN_PROVISION_RATIO"),
             _d10(r.get("NOTICE_DATE")),
+            # L4 字段（T2 #125，东财字段名实测：_PK 后缀 / DJD_DPNP_YOY / LIABILITY）
+            r.get("TOTAL_ASSETS_PK"),
+            r.get("LIABILITY"),
+            r.get("DJD_DPNP_YOY"),
+            r.get("NETCASH_INVEST_PK"),
+            None,  # capex 占位，由 merge_capex 从 GCASHFLOW 接口合并（银行股无此字段）
         ))
     return out
 
@@ -406,8 +417,11 @@ def build_daily_pe(conn: sqlite3.Connection, codes: list) -> None:
             df = ak.stock_zh_valuation_baidu(symbol=code, indicator="市盈率(TTM)", period="全部")
             rows = [(code, str(r["date"]), float(r["value"])) for _, r in df.iterrows()]
         except Exception as e:
-            print(f"  [warn] {code} 百度估值拉取失败: {e}")
-            rows = []
+            # T6 #128 M-5：拉取异常不标记 done（下次重试），避免静默丢 PE。
+            # 真实无数据（df 空但无异常）仍会走到下面的 mark_done。
+            print(f"  [warn] {code} 百度估值拉取失败（不标记 done，下次重试）: {e}")
+            _pace()
+            continue
         if rows:
             conn.executemany(
                 "INSERT OR REPLACE INTO daily_pe (code, date, pe_ttm) VALUES (?, ?, ?)",
@@ -457,22 +471,42 @@ def build_dividend(conn: sqlite3.Connection, codes: list) -> None:
 
 
 def build_finance(conn: sqlite3.Connection, codes: list) -> None:
-    """历史财务：东财 MAINFINADATA（仅保留 12-31 完整财年）。"""
+    """历史财务：东财 MAINFINADATA（仅保留 12-31 完整财年）+ GCASHFLOW 资本开支合并。
+
+    capex（CONSTRUCT_LONG_ASSET）来自现金流量表接口，按报告期合并进财务行；
+    银行股 GCASHFLOW 无数据（无传统资本开支概念），capex 保持 None，
+    FCF 走 investing_cf 降级路径（与现网 sustainability.py merge_capex 一致）。
+    """
+    from src.eastmoney_fetcher import fetch_cashflow_rows
     n = 0
     for i, code in enumerate(codes):
         if _is_done(conn, "finance_history", code):
             continue
         try:
             rows = fetch_financial_rows(code)
+            cashflow_rows = fetch_cashflow_rows(code)
         except Exception as e:
             print(f"  [warn] {code} 财务拉取异常: {e}")
             continue
         db_rows = financial_rows_to_db(code, rows)
         if db_rows:
+            # capex 按报告期合并（与 sustainability.py merge_capex 同口径）
+            capex_by_report = {}
+            for cr in cashflow_rows:
+                rpt = _d10(cr.get("REPORT_DATE"))
+                if rpt and rpt.endswith("-12-31"):
+                    v = cr.get("CONSTRUCT_LONG_ASSET")
+                    if v is not None:
+                        capex_by_report[rpt] = capex_by_report.get(rpt, 0.0) + float(v)
+            db_rows = [tuple(
+                (r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8],
+                 r[9], r[10], r[11], r[12], capex_by_report.get(r[1]))
+            ) for r in db_rows]
             conn.executemany(
-                "INSERT OR REPLACE INTO finance_history (code, report_date, notice_date,"
-                " roe, net_profit, net_cash_operate, bps, newcapitalader,"
-                " loan_provision_ratio) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO finance_history (code, report_date, roe,"
+                " net_profit, net_cash_operate, bps, newcapitalader,"
+                " loan_provision_ratio, notice_date, total_assets, total_liabilities,"
+                " net_profit_yoy, investing_cf, capex) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 db_rows,
             )
             conn.commit()

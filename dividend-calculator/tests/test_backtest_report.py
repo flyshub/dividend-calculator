@@ -81,8 +81,9 @@ def _make_db(db_path: str):
                 d = f"{y}-{m:02d}-15"
                 c.execute("INSERT INTO daily_price VALUES (?,?,?)", (code, d, 10.0))
                 c.execute("INSERT INTO daily_pe VALUES (?,?,?)", (code, d, 5.0))
-        c.execute("INSERT INTO finance_history VALUES (?,?,?,?,?,?,?,?,?)",
-                  (code, "2023-12-31", 15.0, 1e9, 5e8, 10.0, None, None, None))
+        c.execute("INSERT INTO finance_history VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  (code, "2023-12-31", 15.0, 1e9, 5e8, 10.0, None, None, None,
+                   None, None, None, None, None))
         c.execute("INSERT INTO dividend_history VALUES (?,?,?,?,?,?,?)",
                   (code, "2023-06-01", "2022-12-31", "2023-07-01", 5.0, None, None))
 
