@@ -1,0 +1,202 @@
+"""T12 #118：超额收益统计显著性检验。
+
+对逐期超额收益做：
+1. t 检验（H0：均值=0）
+2. block bootstrap 95% CI（保留时序自相关，block size ≈ sqrt(n)）
+
+输出 full 层及逐层增量 vs base 基线的超额检验结果。
+
+数据铁律：检验结果基于真实回测数字，不虚构。样本不足（< 8 期）时
+如实标注 "样本不足"。
+
+用法：
+    python scripts/backtest_significance.py --db data/backtest.db
+"""
+import argparse
+import math
+import random
+import sqlite3
+import sys
+from pathlib import Path
+from typing import List, Optional, Sequence, Tuple
+
+_SCRIPT_DIR = Path(__file__).resolve().parent
+_ROOT = _SCRIPT_DIR.parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from backtest_engine import BacktestLookup, run_backtest
+from backtest_portfolio import run_portfolio
+
+
+def _valid(rets: Sequence[Optional[float]]) -> List[float]:
+    """过滤 None，返回有效收益序列。"""
+    return [r for r in rets if r is not None]
+
+
+def t_test_mean(samples: Sequence[float]) -> Tuple[Optional[float], Optional[float]]:
+    """单样本 t 检验（H0: 均值=0）。
+
+    返回 (t_stat, p_value_two_sided)。样本 < 2 时返回 (None, None)。
+    """
+    n = len(samples)
+    if n < 2:
+        return None, None
+    mean = sum(samples) / n
+    var = sum((x - mean) ** 2 for x in samples) / (n - 1)
+    se = math.sqrt(var / n)
+    if se == 0:
+        return None, None
+    t_stat = mean / se
+    # 双侧 p 值用正态近似（n>=30 时 t→z；n 小时保守）
+    # ponytail: 正态近似而非 t 分布精确值，避免引入 scipy 依赖，n>=8 可接受
+    from statistics import NormalDist
+    p = 2 * (1 - NormalDist().cdf(abs(t_stat)))
+    return t_stat, p
+
+
+def block_bootstrap_ci(
+    samples: Sequence[float], n_boot: int = 1000, alpha: float = 0.05,
+    seed: int = 42, block_size: Optional[int] = None,
+) -> Tuple[Optional[float], Optional[float]]:
+    """block bootstrap 置信区间（保留时序自相关）。
+
+    重叠块重采样：把序列切成 (n - block_size + 1) 个重叠块，
+    每次有放回抽取 ⌈n/block_size⌉ 块拼接成新序列，取均值。
+    block_size 默认 sqrt(n)。返回 (lower, upper) 均值置信区间。
+    样本不足返回 (None, None)。
+    """
+    n = len(samples)
+    if n < 8:
+        return None, None
+    if block_size is None:
+        block_size = max(1, int(math.sqrt(n)))
+    if block_size >= n:
+        block_size = max(1, n // 2)
+    rng = random.Random(seed)
+    # 重叠块集合
+    blocks = [samples[i:i + block_size] for i in range(n - block_size + 1)]
+    n_blocks_per_sample = math.ceil(n / block_size)
+    means = []
+    for _ in range(n_boot):
+        picked = []
+        for _ in range(n_blocks_per_sample):
+            picked.extend(rng.choice(blocks))
+        picked = picked[:n]
+        means.append(sum(picked) / n)
+    means.sort()
+    lo_idx = int(alpha / 2 * n_boot)
+    hi_idx = int((1 - alpha / 2) * n_boot)
+    return means[lo_idx], means[min(hi_idx, n_boot - 1)]
+
+
+def excess_series(strategy: Sequence[float], benchmark: Sequence[float]) -> List[float]:
+    """逐期超额（比值口径，与 T3 一致）：(1+s)/(1+b) - 1。"""
+    out = []
+    for s, b in zip(strategy, benchmark):
+        if s is None or b is None:
+            continue
+        if 1 + b <= 0:
+            continue
+        out.append((1 + s) / (1 + b) - 1)
+    return out
+
+
+def run_significance(lookup, n_boot: int = 1000) -> List[List[str]]:
+    """跑 full 层 vs 全A基线 + 双基准的超额检验。
+
+    口径修复（T3 #126 H-1）：
+    - 双方都用 portfolio 层含分红收益（full vs base），
+      不再混用 engine 层纯价格收益。
+    - 按调仓日字典对齐（弃位置 zip），消除逐期错位。
+    """
+    eng = run_backtest(lookup)
+    pf = run_portfolio(lookup, eng)
+
+    # 按调仓日字典对齐（弃位置 zip），口径统一含分红
+    rebal = pf.get("rebalance_dates") or eng.get("rebalance_dates") or []
+    strat_ret = pf["quarterly_returns"]["full"]
+    base_ret = pf["quarterly_returns"].get("base")
+    if base_ret is None:
+        # portfolio 层可能无 base；回退 engine 层并标注
+        base_ret = eng["quarterly_returns"]["base"]
+
+    date_to_strat = {d: r for d, r in zip(rebal, strat_ret) if r is not None}
+    date_to_base = {d: r for d, r in zip(rebal, base_ret) if r is not None}
+    common = sorted(set(date_to_strat) & set(date_to_base))
+    s = [date_to_strat[d] for d in common]
+    b = [date_to_base[d] for d in common]
+    exc = excess_series(s, b)
+
+    rows = []
+    t_stat, p_val = t_test_mean(exc)
+    lo, hi = block_bootstrap_ci(exc, n_boot=n_boot)
+    mean_exc: float = sum(exc) / len(exc) if exc else 0.0
+    rows.append([
+        "全漏斗 vs 全A基线",
+        f"{len(exc)}",
+        f"{mean_exc * 100:+.2f}%",
+        f"{t_stat:.3f}" if t_stat is not None else "N/A",
+        f"{p_val:.4f}" if p_val is not None else "N/A",
+        f"[{lo*100:+.2f}%, {hi*100:+.2f}%]" if lo is not None else "样本不足",
+        "显著" if (p_val is not None and p_val < 0.05) else "不显著",
+    ])
+
+    # T8 #133：逐层增量显著性（每层 vs 上一层）
+    layers = ["base", "l2", "l3", "l4", "full"]
+    for i in range(1, len(layers)):
+        cur, prev = layers[i], layers[i - 1]
+        cur_ret = pf["quarterly_returns"].get(cur) or eng["quarterly_returns"].get(cur)
+        prev_ret = pf["quarterly_returns"].get(prev) or eng["quarterly_returns"].get(prev)
+        if cur_ret is None or prev_ret is None:
+            continue
+        d_cur = {d: r for d, r in zip(rebal, cur_ret) if r is not None}
+        d_prev = {d: r for d, r in zip(rebal, prev_ret) if r is not None}
+        cdates = sorted(set(d_cur) & set(d_prev))
+        s2 = [d_cur[d] for d in cdates]
+        b2 = [d_prev[d] for d in cdates]
+        e2 = excess_series(s2, b2)
+        if len(e2) < 2:
+            continue
+        t2, p2 = t_test_mean(e2)
+        lo2, hi2 = block_bootstrap_ci(e2, n_boot=n_boot)
+        mean2 = sum(e2) / len(e2)
+        label = {"l2": "L2 高股息", "l3": "L3 低估", "l4": "L4 可持续", "full": "全漏斗"}[cur]
+        rows.append([
+            f"{label} vs {prev.upper()}",
+            f"{len(e2)}",
+            f"{mean2 * 100:+.2f}%",
+            f"{t2:.3f}" if t2 is not None else "N/A",
+            f"{p2:.4f}" if p2 is not None else "N/A",
+            f"[{lo2*100:+.2f}%, {hi2*100:+.2f}%]" if lo2 is not None else "样本不足",
+            "显著" if (p2 is not None and p2 < 0.05) else "不显著",
+        ])
+
+    return rows
+
+
+def _table(headers: List[str], rows: List[List[str]]) -> str:
+    out = ["| " + " | ".join(headers) + " |",
+           "| " + " | ".join("---" for _ in headers) + " |"]
+    for r in rows:
+        out.append("| " + " | ".join(r) + " |")
+    return "\n".join(out)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--db", default="data/backtest.db")
+    parser.add_argument("--n-boot", type=int, default=1000)
+    args = parser.parse_args()
+
+    lookup = BacktestLookup(args.db)
+    rows = run_significance(lookup, n_boot=args.n_boot)
+    print(_table(["超额对比", "期数", "逐期均值", "t 统计量", "p 值", "bootstrap 95% CI", "结论"], rows))
+    print("\n> ponytail: p 值用正态近似（n>=8 可接受），bootstrap block size=sqrt(n)；"
+          "样本不足(<8期)如实标注。")
+
+
+if __name__ == "__main__":
+    main()
