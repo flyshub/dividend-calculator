@@ -91,15 +91,16 @@ def section_data_scope(conn, lookup: BacktestLookup) -> str:
         ["股票池（stock_list，含退市）", str(stock_n), f"含退市 {delist_n} 只"],
         ["日频不复权价格（daily_price）", str(price_n), "全 A 覆盖"],
         ["日频 PE_TTM（daily_pe, 百度估值）", str(pe_n), "全 A 覆盖"],
-        ["历史分红（dividend_history, 东财）", str(div_n), "含公告日/除权日"],
+        ["历史分红（dividend_history, 东财）", str(div_n), "含公告日/除权日/送转"],
         ["历史财务（finance_history, 东财）", str(fin_n), "仅 12-31 完整财年"],
     ]
     out = _table(["数据项", "覆盖数", "口径"], rows)
     out += "\n\n**已知数据缺口（如实标注，不伪装结论）：**\n\n"
-    out += "- **total_shares**：DB 无股本表，引擎用每股口径（数学约分等价于总额法）。\n"
-    out += "  仅 sustainability 支付率维度受影响（标注近似）。\n"
+    out += "- **total_shares**：腾讯 Index 73 当前快照（非历史），回测期内增发/"
+    out += "分红送股会使历史市值失真（已标注近似）。\n"
     out += "- **top10_holding**：T2 未入库，一股独大红旗不触发。\n"
-    out += "- **行业（industry）**：剔金融变体用名称近似（含「银行/证券/保险/信托」）。\n"
+    out += "- **行业（industry）**：东财 EM2016 当前快照，回测期内行业变更"
+    out += "（如银行转金控）未反映。\n"
     out += "- **财务字段**：finance_history 覆盖 8 字段（ROE/净利润/经营现金流/净资产/"
     out += "资本充足率/拨贷比等），AnnualFinancial 其余维度降级处理。\n"
     return out + "\n"
@@ -135,7 +136,7 @@ def section_layered_incremental(eng: dict) -> str:
     out = (
         "**⚠️ 本段为纯价格收益（未含税后分红复投），仅用于验证分层筛选的方向性。**\n\n"
         "高股息策略分红占比高，纯价格收益严重低估真实全收益；"
-        "完整含分红的组合绩效见 §3（全漏斗真实累计远高于此处的 170%）。\n\n"
+        "完整含分红的组合绩效见 §3（全漏斗真实累计远高于本节纯价格口径）。\n\n"
     )
     out += _table(["组合", "累计收益", "年化"], rows) + "\n\n"
 
@@ -143,7 +144,6 @@ def section_layered_incremental(eng: dict) -> str:
         ("+L2 vs 基线", "l2_over_base"),
         ("+L3 vs +L2", "l3_over_l2"),
         ("+L4 vs +L3", "l4_over_l3"),
-        ("全漏斗 vs +L4", "full_over_l4"),
         ("全漏斗 vs 基线", "full_over_base"),
     ]
     inc_rows = [[label, _pct(inc.get(k)), _pct(_ann(inc.get(k)) if inc.get(k) is not None else None)]
@@ -360,8 +360,8 @@ def section_conclusion(eng: dict, perf_cache: Optional[dict] = None) -> str:
         "## 验证结论\n\n"
         "1. §3 含分红真实全收益才是可信 headline——全漏斗 4 段筛选 vs 三大基准均显著正超额。\n"
         "2. §2 纯价格收益仅作分层筛选的方向性验证（不含分红，高股息策略低估严重）。\n"
-        "3. 稳健性四变体结论：剔微盘/剔金融/延迟 T+5/随机起点 的累计收益见上表，"
-        "若与主回测方向一致则结论稳健。\n\n"
+        "3. 稳健性变体结论：剔微盘/剔金融/延迟 T+5 的累计收益见上表，"
+        "若与主回测方向一致则结论稳健；随机起点敏感性见 §3.2 下方说明。\n\n"
         "## 已知限制（不掩饰）\n\n"
         "- **§2 分层收益未含分红复投**：纯价格收益低估真实全收益（高股息策略尤甚），"
         "真实全收益见 §3（含税后分红复投的全口径）。\n"
@@ -372,10 +372,10 @@ def section_conclusion(eng: dict, perf_cache: Optional[dict] = None) -> str:
         "- **top10_holding 缺失**：一股独大红旗不触发，可持续性判定可能高估。\n"
         "- **财务字段覆盖有限**：interest_coverage / net_interest_margin / npl_ratio "
         "等未入库，部分维度降级。\n"
-        "- **PE_TTM 时间窗口与 ROE_latest 不一致**：PE 日频、ROE 按报告期 12-31，"
+        "- **PE_TTM 时间窗口与 ROE_latest 不一致**：PE 日频、ROE 按披露日过滤，"
         "已在因子层对齐项目口径（详见方案 V3 §1）。\n"
-        "- **分红按公告日过滤**（无未来函数），财报按报告期 ≤ T 过滤（轻微超前，"
-        "T2 未入库披露日，如实标注）。\n"
+        "- **分红按公告日过滤**（无未来函数），财报按披露日（NOTICE_DATE）过滤"
+        "（T11 已入库披露日，无超前）。\n"
     )
 
 

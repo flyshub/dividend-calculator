@@ -273,7 +273,7 @@ def financial_rows_to_db(code: str, rows: list) -> list:
 def dividend_rows_to_db(code: str, rows: list) -> list:
     """东财分红行 → dividend_history 元组（含公告日，无未来函数约束）。
 
-    送转字段：BONUS_RATIO=每10股送股数、TRAN_ADD_RATIO=每10股转增股数
+    送转字段：BONUS_RATIO=每10股送股数、BONUS_IT_RATIO=每10股转增股数
     （T1 #108，除权因子建模用；实测 600519 2014 年报 BONUS_RATIO=1 = 10送1）。
     """
     out = []
@@ -288,7 +288,7 @@ def dividend_rows_to_db(code: str, rows: list) -> list:
             _d10(r.get("EX_DIVIDEND_DATE")),
             r.get("PRETAX_BONUS_RMB"),
             r.get("BONUS_RATIO"),
-            r.get("TRAN_ADD_RATIO"),
+            r.get("BONUS_IT_RATIO"),
         ))
     return out
 
