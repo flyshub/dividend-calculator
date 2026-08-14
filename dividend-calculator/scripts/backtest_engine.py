@@ -208,32 +208,33 @@ class BacktestLookup:
 
     def roe_latest(self, code: str, asof: date) -> Optional[float]:
         """最新年报 ROE。T11 #116：优先按 notice_date 实际披露日过滤
-        （1-4 月年报未披露不超前），notice_date 缺失回退报告期 12-31。"""
+        （1-4 月年报未披露不超前），notice_date 缺失回退保守窗口。"""
         recs = [f for f in self._fin_recs.get(code, [])
                 if self._fin_visible(f, asof)]
         if not recs:
-            # 兜底：report_date ≤ asof 的 12-31 年报（finance 已只存 12-31）
+            # 兜底：报告期 +4 个月保守可见（T4 #131：缺失回退不再超前）
             recs = [f for f in self._fin_recs.get(code, [])
-                    if date(f["year"], 12, 31) <= asof]
+                    if date(f["year"] + 1, 4, 30) <= asof]
         return recs[-1]["roe"] if recs else None
 
     def _fin_visible(self, f: dict, asof: date) -> bool:
         """T11 #116：财报对 asof 是否可见——优先按 notice_date 实际披露日，
-        notice_date 缺失/解析失败回退报告期 12-31。"""
+        T4 #131：notice_date 缺失（实测 0.06%）回退报告期 +4 个月保守窗口
+        （A 股年报法定披露截止 4-30），不再按报告期当天可见。"""
         nd = f.get("notice_date")
         if nd:
             try:
                 cutoff = _d(nd[:10]) if isinstance(nd, str) else nd
                 return cutoff <= asof
             except Exception:
-                pass  # 解析失败 → 回退报告期
-        return date(f["year"], 12, 31) <= asof
+                pass  # 解析失败 → 回退保守窗口
+        return date(f["year"] + 1, 4, 30) <= asof
 
     def finance(self, code: str, asof: date) -> Optional[dict]:
-        """T11 #116：优先按 notice_date 实际披露日过滤，回退报告期 12-31。
+        """T11 #116：优先按 notice_date 实际披露日过滤，缺失回退 +4 月保守窗口。
 
-        notice_date 为 None（未入库）时按报告期过滤（旧行为）。
-        notice_date 为空字符串/无效时同样回退报告期。
+        notice_date 为 None（未入库）时按报告期 +4 个月保守可见（T4 #131）。
+        notice_date 为空字符串/无效时同样回退保守窗口。
         """
         recs = [f for f in self._fin_recs.get(code, []) if self._fin_visible(f, asof)]
         return recs[-1] if recs else None
@@ -345,32 +346,49 @@ def portfolio_return(codes: List[str], build_day: date, settle_day: date,
     T10 #115：送转除权因子建模。持有期内发生送转时，持仓股数按
     (1 + (bonus+trans)/10) 增加，收益 = 因子 × ps/pb - 1。
 
+    T5 #127 H-4：持有期内退市终局损失计提。build_day 时股票在交易（pb 可得），
+    但持有期内退市 → 结算价不可得（ps=None）。原实现跳过此类股，导致退市
+    损失未进入组合收益（系统性低估尾部风险）。修复：若 pb 可得但 ps 不可得
+    且 delist_date ∈ (build_day, settle_day]，按清算价值≈0 计提全损
+    (收益 = -1.0，仍扣 2×cost 双边成本)。这是保守上界（实际清算价值非零）。
+
     双边交易成本：每期全换手，买入 0.3% + 卖出 0.3% 从收益中扣除
     （季度调仓下换手 ≈ 100%，成本 = cost×2 计入单期）。
 
     无价格（停牌/退市）个股剔除；全部无价格 → None。
     """
     rets = []
+    delist_map = getattr(lookup, "delist", {}) or {}
     for code in codes:
         pb = lookup.price(code, build_day)
         ps = lookup.price(code, settle_day)
-        if pb and ps:
-            # T10 #115：累积持有期送转因子
-            split_factor = 1.0
-            divs = getattr(lookup, "dividends", None)
-            if divs:
-                for rec in (divs(code, settle_day) or []):
-                    ex = rec.get("ex_dividend_date")
-                    if not ex:
-                        continue
-                    ex_d = _d(ex) if isinstance(ex, str) else ex
-                    if build_day < ex_d <= settle_day:
-                        br = rec.get("bonus_ratio") or 0.0
-                        tr = rec.get("trans_ratio") or 0.0
-                        if br or tr:
-                            split_factor *= (1.0 + (br + tr) / 10.0)
-            gross = split_factor * ps / pb - 1.0
-            rets.append(gross - 2.0 * cost)
+        if not pb:
+            continue
+        # T5 #127 H-4：持有期内退市终局损失计提。退市后 _latest 仍返回
+        # 最后交易价（相当于按暂停前价格估值），从不按清算价值冲销——
+        # 这里强制按清算价值≈0 全损计提（保守上界）。
+        dd = delist_map.get(code)
+        if dd is not None and build_day < dd <= settle_day:
+            rets.append(-1.0 - 2.0 * cost)
+            continue
+        if not ps:
+            continue  # 停牌且未退市：无结算价，跳过
+        # T10 #115：累积持有期送转因子
+        split_factor = 1.0
+        divs = getattr(lookup, "dividends", None)
+        if divs:
+            for rec in (divs(code, settle_day) or []):
+                ex = rec.get("ex_dividend_date")
+                if not ex:
+                    continue
+                ex_d = _d(ex) if isinstance(ex, str) else ex
+                if build_day < ex_d <= settle_day:
+                    br = rec.get("bonus_ratio") or 0.0
+                    tr = rec.get("trans_ratio") or 0.0
+                    if br or tr:
+                        split_factor *= (1.0 + (br + tr) / 10.0)
+        gross = split_factor * ps / pb - 1.0
+        rets.append(gross - 2.0 * cost)
     if not rets:
         return None
     return sum(rets) / len(rets)

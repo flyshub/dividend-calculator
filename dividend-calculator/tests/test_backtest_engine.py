@@ -159,6 +159,48 @@ def test_portfolio_return_delisted_excluded():
                             cost=0.0) == pytest.approx(11 / 10 - 1.0)
 
 
+# T5 #127 H-4：持有期内退市终局损失计提
+def test_portfolio_return_holding_period_delist_loss():
+    """pb 可得但 ps 不可得，且持有期内退市 → 计提全损（-1.0）。
+
+    若不修：退市股被跳过，组合收益 = 正常股平均收益，退市损失未进入回测，
+    系统性低估尾部风险。修复后：组合收益 = (正常股收益 + (-1.0)) / 2。
+    """
+    prices = {
+        # a 正常：10→11，收益 10%
+        "a": [(date(2023, 1, 2), 10.0), (date(2023, 6, 30), 11.0)],
+        # dead 建仓日在价，但持有期内退市（2023-03-15），结算日已无价
+        "dead": [(date(2023, 1, 2), 10.0)],  # 只有 build_day 价，无 settle_day 价
+    }
+    lk = MockLookup(prices=prices)
+    lk.delist = {"dead": date(2023, 3, 15)}
+    # 持有期 1-2 ~ 6-30，delist_date 3-15 ∈ 期间 → dead 计提 -1.0
+    # 组合 = (0.10 + (-1.0)) / 2 = -0.45
+    ret = portfolio_return(["a", "dead"], date(2023, 1, 2), date(2023, 6, 30), lk,
+                           cost=0.0)
+    assert ret == pytest.approx((0.10 + (-1.0)) / 2)
+
+
+def test_portfolio_return_delist_outside_holding_period_no_impact():
+    """退市日不在持有期内（< build_day 或 > settle_day）→ 不计提，正常跳过。
+
+    build_day 前已退市：入选时就被 run_backtest 的 delist_date <= T 过滤掉，
+    根本不会进入 portfolio_return 的 codes。这里测试：即便传入，也无 ps 时
+    跳过（与原行为一致）。
+    """
+    prices = {
+        "a": [(date(2023, 1, 2), 10.0), (date(2023, 6, 30), 11.0)],
+        "out": [(date(2023, 1, 2), 5.0)],  # delist 在持有期之前或之后
+    }
+    lk = MockLookup(prices=prices)
+    # delist_date 2023-07-01（晚于 settle_day 6-30，不在持有期内）→ 不计提
+    lk.delist = {"out": date(2023, 7, 1)}
+    ret = portfolio_return(["a", "out"], date(2023, 1, 2), date(2023, 6, 30), lk,
+                           cost=0.0)
+    # out 退市日在持有期外 → 不计提全损；其 _latest 价恒为 5.0（买5卖5，收益0）
+    assert ret == pytest.approx((0.10 + 0.0) / 2)
+
+
 # ---------------------------------------------------------------------------
 # 无未来函数：asof 过滤
 # ---------------------------------------------------------------------------
@@ -544,4 +586,53 @@ def test_finance_filter_by_notice_date():
     # 2023-04-29（披露日当天）：可用
     assert lk.finance("X", date(2023, 4, 29)) is not None
     # 2023-06-30（披露后）：可用
+    assert lk.finance("X", date(2023, 6, 30)) is not None
+
+
+def test_finance_notice_date_missing_fallback_conservative_window():
+    """T4 #131：notice_date 缺失时按报告期 +4 月保守窗口（非当天可见）。"""
+    prices = {"X": [(date(2023, 3, 31), 10.0), (date(2023, 12, 31), 11.0)]}
+
+    class Lk(MockLookup):
+        def __init__(self, **kw):
+            super().__init__(**kw)
+            self._fin_recs_test = {
+                "X": [
+                    # 2022 年报，无 notice_date（缺失回退）
+                    {"year": 2022, "roe": 15.0, "notice_date": None},
+                ]
+            }
+
+        def dividends(self, code, asof):
+            return None
+
+        def pe_ttm(self, code, asof):
+            return None
+
+        def total_shares(self, code, asof):
+            return 1e9
+
+        def finance(self, code, asof):
+            recs = []
+            for f in self._fin_recs_test.get(code, []):
+                nd = f.get("notice_date")
+                if nd:
+                    from datetime import datetime
+                    cutoff = datetime.strptime(nd[:10], "%Y-%m-%d").date()
+                    if cutoff <= asof:
+                        recs.append(f)
+                else:
+                    # T4 #131：缺失回退 = 报告期 +4 月（2022 年报 → 2023-04-30 可见）
+                    if date(f["year"] + 1, 4, 30) <= asof:
+                        recs.append(f)
+            return recs[-1] if recs else None
+
+    lk = Lk(prices=prices)
+    # 2022-12-31（报告期当天）：旧逻辑超前可见，T4 收紧后不可见
+    assert lk.finance("X", date(2022, 12, 31)) is None
+    # 2023-04-29：保守窗口前一日，不可见
+    assert lk.finance("X", date(2023, 4, 29)) is None
+    # 2023-04-30：保守窗口日，可见
+    assert lk.finance("X", date(2023, 4, 30)) is not None
+    # 2023-06-30：窗口后，可见
     assert lk.finance("X", date(2023, 6, 30)) is not None
