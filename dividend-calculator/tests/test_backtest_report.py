@@ -68,7 +68,7 @@ def _make_db(db_path: str):
         c.execute("CREATE TABLE daily_price (code TEXT, date TEXT, close REAL)")
         c.execute("CREATE TABLE daily_pe (code TEXT, date TEXT, pe_ttm REAL)")
         c.execute("CREATE TABLE dividend_history (code TEXT, announce_date TEXT, report_date TEXT, ex_dividend_date TEXT, cash_div_10shares REAL, bonus_ratio REAL, trans_ratio REAL)")
-        c.execute("CREATE TABLE finance_history (code TEXT, report_date TEXT, roe REAL, net_profit REAL, net_cash_operate REAL, bps REAL, newcapitalader REAL, loan_provision_ratio REAL, notice_date TEXT)")
+        c.execute("CREATE TABLE finance_history (code TEXT, report_date TEXT, roe REAL, net_profit REAL, net_cash_operate REAL, bps REAL, newcapitalader REAL, loan_provision_ratio REAL, notice_date TEXT, total_assets REAL, total_liabilities REAL, net_profit_yoy REAL, investing_cf REAL, capex REAL)")
         c.execute("CREATE TABLE index_daily (code TEXT, date TEXT, close REAL)")
         c.execute("CREATE TABLE build_progress (table_name TEXT, code TEXT, UNIQUE(table_name, code))")
 

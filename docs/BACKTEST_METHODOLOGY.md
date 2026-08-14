@@ -261,7 +261,7 @@ full  = layer ≥ 4（与 l4 同池，恒等）
 - 对逐期超额收益做 **t 检验**（p 值正态近似，n≥8 可接受）。
 - **block bootstrap**（真重叠块重采样，T12 修复）：序列切成 n−block_size+1 个重叠块，有放回抽取 ⌈n/block_size⌉ 块拼接取均值，1000 次 → 均值 95% CI；block_size 默认 √n。
 - 样本不足（<8 期）如实标注，不强行给结论。
-- 当前结果（2026-08-14）：全漏斗 vs 全A基线 49 期逐期均值 +2.05%，t=0.904，p=0.366，95% CI [-1.62%, +7.42%] —— **未达统计显著**。
+- 当前结果（2026-08-14，L4 对齐现网后）：全漏斗 vs 全A基线逐期均值 -1.28%，t=-0.739，p=0.4599 —— **未达统计显著**（数字以 docs/BACKTEST_REPORT_V3.md 为准）。
 
 ---
 
@@ -294,7 +294,7 @@ python scripts/backtest_robustness.py
 python scripts/backtest_significance.py --db data/backtest.db
 
 # 生成报告
-python scripts/backtest_report.py --db data/backtest.db --out docs/BACKTEST_REPORT_V3.md
+python scripts/backtest_report.py --db data/backtest.db --out ../docs/BACKTEST_REPORT_V3.md
 
 # 全量测试
 python -m pytest tests/ -q

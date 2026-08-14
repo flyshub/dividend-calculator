@@ -360,7 +360,7 @@ def test_t_test_mean_significance():
     """t 检验：显著正收益序列 p<0.05。"""
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
     from backtest_significance import t_test_mean
-    t, p = t_test_mean([0.05] * 20)  # 恒正、零方差 → se=0 → None
+    t, p = t_test_mean([1.0] * 20)  # 恒正、零方差（1.0 精确可表示，跨 Python 版本稳定）→ se=0 → None
     assert t is None  # 零方差退化
     t, p = t_test_mean([0.01, 0.02, 0.03, 0.04, 0.05] * 4)
     assert t is not None and p is not None
