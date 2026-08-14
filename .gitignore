@@ -6,6 +6,3 @@
 
 # Agent skills（个人通用技能，放全局 ~/.claude/skills/，不入项目仓库）
 .agents/
-
-# Windows 下载标记（NTFS ADS 残留）
-*:Zone.Identifier
