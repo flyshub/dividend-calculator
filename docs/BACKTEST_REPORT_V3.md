@@ -1,5 +1,7 @@
 # 四层漏斗分层回测报告 V3
 
+> 本报告为四层漏斗策略回测；PR 单因子回测见 [BACKTEST_REPORT.md](./BACKTEST_REPORT.md)。
+
 > 生成日期：2026-08-14
 > 数据范围：2013-01-01 至 2026-08-10，季度调仓，T+1 建仓，双边 0.3% 成本
 > 税后分红复投（三档税率：>1年 0%，1月-1年 10%，<1月 20%）
@@ -180,7 +182,7 @@
 ## 复现
 
 ```bash
-python scripts/backtest_report.py --db /root/projects/dividend-calculator/dividend-calculator/data/backtest.db --out /root/projects/dividend-calculator/dividend-calculator/docs/BACKTEST_REPORT_V3.md
+python scripts/backtest_report.py --db data/backtest.db --out ../docs/BACKTEST_REPORT_V3.md
 ```
 
 全量数据由 `scripts/build_backtest_db.py` 构建（断点续传），重跑该脚本可复现 backtest.db。

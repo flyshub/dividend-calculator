@@ -6,13 +6,13 @@
 - T5 run_portfolio（组合绩效 vs 双基准）
 - T6 run_variant（四变体稳健性）
 
-产出 docs/BACKTEST_REPORT_V3.md（对齐 BACKTEST_REPORT.md 格式）。
+产出 ../docs/BACKTEST_REPORT_V3.md（git 根 docs/ 规范位置，对齐 BACKTEST_REPORT.md 格式）。
 
 可复现：重跑此脚本即重生成全量报告。
 数据缺口如实标注（铁律，不伪装结论）。
 
 Usage:
-    python scripts/backtest_report.py [--db data/backtest.db] [--out docs/BACKTEST_REPORT_V3.md]
+    python scripts/backtest_report.py [--db data/backtest.db] [--out ../docs/BACKTEST_REPORT_V3.md]
 """
 from __future__ import annotations
 
@@ -600,7 +600,7 @@ def generate_report(db_path: str, out_path: str) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(description="T7 回测报告生成器")
     p.add_argument("--db", default="data/backtest.db", help="backtest.db 路径")
-    p.add_argument("--out", default="docs/BACKTEST_REPORT_V3.md", help="输出报告路径")
+    p.add_argument("--out", default="../docs/BACKTEST_REPORT_V3.md", help="输出报告路径")
     args = p.parse_args()
 
     db = args.db if os.path.isabs(args.db) else str(_ROOT / args.db)

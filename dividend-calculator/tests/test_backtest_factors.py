@@ -1,8 +1,8 @@
 """T3 因子计算层（src/backtest_factors.py）纯函数测试。
 
 覆盖（离线注入快照，无网络）：
-- 口径一致性：与现网 src 逐字段一致 —— dividend._parse_fhps_detail（完整财年）、
-  utils.compute_ttm_dividend（TTM）、pr_calculator.compute_basic_pr / classify_industry（市赚率）、
+- 口径一致性：与现网 src 逐字段一致 —— dividend_records.summarize_dividend_rows（完整财年/TTM）、
+  pr_calculator.compute_basic_pr / classify_industry（市赚率）、
   sustainability_calculator.assess_sustainability（可持续性）
 - 无未来函数：分红公告日边界 / 财报报告期边界，asof 前后因子值必须不同
 - 银行 vs 非银行：银行走金融专项分支（低 ROE 不判弱）、非银行 ROE<10% 计 0 分
@@ -14,7 +14,6 @@ import sys
 from datetime import date
 from pathlib import Path
 
-import pandas as pd
 import pytest
 
 project_root = Path(__file__).resolve().parent.parent
@@ -27,8 +26,8 @@ from src.backtest_factors import (
     pr,
     sustainability,
 )
-from src.datasource.base import DividendRecord, StockInfo
-from src.dividend import _parse_fhps_detail
+from src.datasource.base import DividendRecord
+from src.dividend_records import summarize_dividend_rows
 from src.pr_calculator import classify_industry, compute_basic_pr
 from src.sustainability_calculator import (
     AnnualFinancial,
@@ -118,7 +117,7 @@ def _general_finance(**overrides):
 
 
 # ---------------------------------------------------------------------------
-# 口径一致性：real_dividend_yield vs dividend._parse_fhps_detail
+# 口径一致性：real_dividend_yield vs dividend_records.summarize_dividend_rows
 # ---------------------------------------------------------------------------
 
 class TestRealDividendYieldParity:
@@ -131,28 +130,28 @@ class TestRealDividendYieldParity:
         _rec("2025-04-28", "2024-12-31", dps=0.28),
     ]
 
-    def test_matches_parse_fhps_detail_field_by_field(self):
-        """同一输入快照：backtest 因子与现网 _parse_fhps_detail 结果逐字段一致。"""
+    def test_matches_summarize_dividend_rows_field_by_field(self):
+        """同一输入快照：backtest 因子与现网 summarize_dividend_rows 结果逐字段一致。"""
         T = date(2025, 5, 15)
         lookup = _lookup(self.RECORDS)
         fy_yield = real_dividend_yield("600000", T, lookup)
 
         # 现网口径：报告期 12-31 决定完整财年；2024 财年 = 中期分配 0.06 + 年报 0.28
-        df = pd.DataFrame([
-            {"报告期": "2023-06-30", "现金分红-现金分红比例": 0.5, "方案进度": "实施"},
-            {"报告期": "2023-12-31", "现金分红-现金分红比例": 2.4, "方案进度": "实施"},
-            {"报告期": "2024-06-30", "现金分红-现金分红比例": 0.6, "方案进度": "实施"},
-            {"报告期": "2024-12-31", "现金分红-现金分红比例": 2.8, "方案进度": "实施"},
-        ])
-        total_div, year, _, _ = _parse_fhps_detail(
-            df, StockInfo("600000", PRICE, SHARES)
-        )
+        rows = [
+            {"REPORT_DATE": r["report_date"],
+             "PRETAX_BONUS_RMB": r["cash_div_per_share"] * 10,
+             "ASSIGN_PROGRESS": "实施",
+             "EX_DIVIDEND_DATE": r["ex_dividend_date"],
+             "PLAN_NOTICE_DATE": r["announce_date"]}
+            for r in self.RECORDS
+        ]
+        summary = summarize_dividend_rows(rows, as_of_date=T)
         market_cap = PRICE * SHARES
-        expected_yield = total_div / market_cap * 100
+        expected_yield = summary.fiscal_total_per_10 * SHARES / 10 / market_cap * 100
 
         assert fy_yield == pytest.approx(expected_yield)
         assert fy_yield == pytest.approx(3.4)  # (0.06+0.28)*10e8 / 100e8 = 3.4%
-        assert year == "2024"
+        assert summary.latest_year == "2024"
 
     def test_interim_only_year_not_full_fiscal_year(self):
         """#37 M4：仅有中期分配（无 12-31 年报）的财年不构成完整财年，
