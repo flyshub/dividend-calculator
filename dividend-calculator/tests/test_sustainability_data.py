@@ -190,6 +190,56 @@ def test_aggregate_consecutive_breaks():
 
 
 # ---------------------------------------------------------------------------
+# 行股本（TOTAL_SHARES）优先折算（P1-1：股本变动公司历史失真修复）
+# ---------------------------------------------------------------------------
+
+def _sharebonus_rows_with_shares():
+    """600900 真实行股本：2021 行 22,741,859,230 / 2025 行 24,468,217,716（东财 RPT_SHAREBONUS_DET 实测）。"""
+    return [
+        {"REPORT_DATE": "2021-12-31", "PRETAX_BONUS_RMB": 5.0, "ASSIGN_PROGRESS": "实施",
+         "EX_DIVIDEND_DATE": "2022-07-01", "TOTAL_SHARES": 22_741_859_230},
+        {"REPORT_DATE": "2025-12-31", "PRETAX_BONUS_RMB": 5.0, "ASSIGN_PROGRESS": "实施",
+         "EX_DIVIDEND_DATE": "2026-07-01", "TOTAL_SHARES": 24_468_217_716},
+    ]
+
+
+def test_parse_dividend_rows_populates_total_shares():
+    """TOTAL_SHARES 行股本 → 记录自带各自值；缺失行 → None。"""
+    rows = _sharebonus_rows_with_shares() + [
+        # 无 TOTAL_SHARES（cninfo/mootdx 路径）→ None
+        {"REPORT_DATE": "2024-12-31", "PRETAX_BONUS_RMB": 5.0, "ASSIGN_PROGRESS": "实施",
+         "EX_DIVIDEND_DATE": "2025-07-01"},
+    ]
+    records, _ = parse_dividend_rows(rows)
+    by_time = {r.report_time: r for r in records}
+    assert by_time["2021年报"].total_shares == pytest.approx(22_741_859_230)
+    assert by_time["2025年报"].total_shares == pytest.approx(24_468_217_716)
+    assert by_time["2024年报"].total_shares is None
+
+
+def test_aggregate_uses_per_row_total_shares():
+    """各年总额用对应行股本折算（2021 年 = dp10/10 × 22.74B，而非 × 24.47B）。"""
+    records, _ = parse_dividend_rows(_sharebonus_rows_with_shares())
+    h = aggregate_dividend_history(records, "2025", 1e9)
+    # 最新年（2025）用行股本 24.47B，而非参数股本 1e9
+    assert h.latest_year_amount == pytest.approx(5.0 / 10 * 24_468_217_716)
+    # 历史均值（2021 年）用行股本 22.74B
+    assert h.history_mean_amount == pytest.approx(5.0 / 10 * 22_741_859_230)
+
+
+def test_aggregate_falls_back_to_param_shares():
+    """行股本缺失（None）→ 回退参数股本（保持既有行为）。"""
+    rows = [
+        {"REPORT_DATE": "2025-12-31", "PRETAX_BONUS_RMB": 5.0, "ASSIGN_PROGRESS": "实施",
+         "EX_DIVIDEND_DATE": "2026-07-01"},  # 无 TOTAL_SHARES
+    ]
+    records, _ = parse_dividend_rows(rows)
+    assert records[0].total_shares is None
+    h = aggregate_dividend_history(records, "2025", 1e9)
+    assert h.latest_year_amount == pytest.approx(5.0 / 10 * 1e9)
+
+
+# ---------------------------------------------------------------------------
 # parse_dividend_rows（东财分红明细 → DividendRecord + 最新财年）
 # ---------------------------------------------------------------------------
 
@@ -438,6 +488,7 @@ class _FakeResp:
 def test_fetch_price_change_1y_window_calculation(monkeypatch):
     """#40：用 rows[0]（窗口起点，约 1 年前）与 rows[-1]（最新）算 1 年变化率。"""
     import src.eastmoney_fetcher as emf
+    import src.tencent_quote as tq
 
     rows = [
         ["2025-08-07", "42.5", "42.424"],   # 窗口起点收盘 42.424
@@ -450,7 +501,7 @@ def test_fetch_price_change_1y_window_calculation(monkeypatch):
         assert "sh600036" in url
         return _FakeResp(payload)
 
-    monkeypatch.setattr(emf.requests, "get", fake_get)
+    monkeypatch.setattr(tq._SESSION, "get", fake_get)
     result = emf.fetch_price_change_1y("600036")
     assert result == pytest.approx((38.80 - 42.424) / 42.424)
 
@@ -458,15 +509,17 @@ def test_fetch_price_change_1y_window_calculation(monkeypatch):
 def test_fetch_price_change_1y_too_few_rows(monkeypatch):
     """K 线不足 2 根 → None（无窗口可算）。"""
     import src.eastmoney_fetcher as emf
+    import src.tencent_quote as tq
 
     payload = {"data": {"sh600036": {"qfqday": [["2026-08-07", "10", "10"]]}}}
-    monkeypatch.setattr(emf.requests, "get", lambda *a, **k: _FakeResp(payload))
+    monkeypatch.setattr(tq._SESSION, "get", lambda *a, **k: _FakeResp(payload))
     assert emf.fetch_price_change_1y("600036") is None
 
 
 def test_fetch_price_change_1y_bj_prefix(monkeypatch):
     """北交所代码 → bj 前缀（#40 复审：6→sh，8/4/92→bj，其余→sz）。"""
     import src.eastmoney_fetcher as emf
+    import src.tencent_quote as tq
 
     seen = {}
 
@@ -475,7 +528,7 @@ def test_fetch_price_change_1y_bj_prefix(monkeypatch):
         payload = {"data": {seen["key"]: {"qfqday": [["a", "10", "10"], ["b", "20", "20"]]}}}
         return _FakeResp(payload)
 
-    monkeypatch.setattr(emf.requests, "get", fake_get)
+    monkeypatch.setattr(tq._SESSION, "get", fake_get)
     assert emf.fetch_price_change_1y("830799") == pytest.approx(1.0)
     assert seen["key"] == "bj830799"
 

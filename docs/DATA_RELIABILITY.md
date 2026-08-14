@@ -97,15 +97,14 @@
 - **防错配**：财务只留 12-31 年报行；分红进度过滤（排除预案）；`_to_float` 空串防 0 污染
 - **双端对齐**：可持续性模块与 JS 静态版同源（东财 datacenter），`verify_js_vs_python.py` 逐字段校验
 - **已知字段坑已规避**：NON_PERFORMING_LOAN 是余额非比率、RISK_COVERAGE 恒 None、DEBT_ASSET_RATIO 不存在等（`_FIELD_MAP` 注释标注）
-- **财年判断**：`infer_fiscal_year` 10 个测试全覆盖；三套口径交叉校验见 `tests/test_fiscal_year_crosscheck.py`（#14）
+- **财年判断**：`infer_fiscal_year` 10 个测试全覆盖；两套口径交叉校验见 `tests/test_fiscal_year_crosscheck.py`（#14）
 
-**三套财年口径分工**（#14 固化，防静默破坏）：
+**两套财年口径分工**（#14 固化，防静默破坏；#100 后报告期口径收敛为单一实现 `sustainability.classify_fiscal_report`，`dividend_records` 各 adapter / `parse_dividend_rows` 均经它）：
 
 | 判定源 | 输入 | 语义 | 规则 |
 |--------|------|------|------|
 | `utils.infer_fiscal_year` | 除权月 | 财年归属 | 3-8月→上年年报；9-12月→当年中报；1-2月→上年中报 |
-| `sustainability.parse_dividend_rows` | 报告期月 | 报告期类型 | 12月→年报；3/6/9月→中期分配 |
-| `dividend._parse_fhps_detail` | 报告期月 | 报告期类型 | 同左（与 parse_dividend_rows 同规则） |
+| `sustainability.classify_fiscal_report`（经 `parse_dividend_rows` / `dividend_records`） | 报告期月 | 报告期类型 | 12月→年报；3/6/9月→中期分配 |
 
 已知不一致场景（结构性，非 bug）：跨年除权（除权日 1-2月 vs 报告期 12-31）、Q1 特别分红（报告期 3-31 vs 9-12 月除权）、年中特别分红（报告期 6-30 vs 次年 4 月除权）。差异来自输入信号不同（mootdx 只给除权日、东财只有报告期），不可强行统一。
 

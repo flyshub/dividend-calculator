@@ -22,9 +22,12 @@ def _mk_xdxr_df():
 
 class TestEastmoneyPrimary:
     # 注：_get_all_dividend_records 内部为函数级 import（from .eastmoney_fetcher import ...），
-    # 因此 patch 目标必须是源模块，而非 src.api 上的名字。
+    # 因此 patch 目标必须是源模块，而非 src.api 上的名字。issue #96 后东财主源改为
+    # dividend_records.summarize_dividend_rows，其内部解析走 dividend_records 模块级绑定的
+    # parse_dividend_rows（from .sustainability import ...），故 PARSE 必须 patch
+    # src.dividend_records.parse_dividend_rows（patch sustainability 上的名字不会生效）。
     FETCH = "src.eastmoney_fetcher.fetch_dividend_rows"
-    PARSE = "src.sustainability.parse_dividend_rows"
+    PARSE = "src.dividend_records.parse_dividend_rows"
     CLIENT = "src.datasource.mootdx_source.get_quotes_client"
 
     def test_eastmoney_success_returns_records_and_source(self):

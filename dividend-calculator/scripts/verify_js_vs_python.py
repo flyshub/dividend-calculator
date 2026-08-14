@@ -6,7 +6,8 @@
 而是与 JS 走同一批 HTTP 接口（腾讯行情 + 东财分红/财务/行业），
 把相同 rows 分别喂给:
   - JS:  node site/js/verify_raw.js <fixture.json>
-  - Python: 复用 src/dividend._parse_fhps_detail + src/pr_calculator 纯函数
+  - Python: 复用 src/dividend_records.summarize_dividend_rows（#99 对账对象，
+    财年判定单一实现 sustainability.classify_fiscal_report）+ src/pr_calculator 纯函数
 然后逐字段对比。
 
 用法:
@@ -155,10 +156,9 @@ def fetch_raw(code: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def compute_python(raw: dict) -> dict:
-    import pandas as pd
     sys.path.insert(0, str(PROJECT_ROOT))
-    from src.dividend import _parse_fhps_detail
-    from src.dividend import DividendDetail  # noqa: F401
+    from src.dividend_records import summarize_dividend_rows
+    from src.dividend import _summary_to_dividend
     from src.datasource.base import StockInfo
     from src.pr_calculator import (
         compute_basic_pr, compute_corrected_pr, compute_n_factor,
@@ -169,35 +169,29 @@ def compute_python(raw: dict) -> dict:
     total_shares = quote["total_shares"] or quote["a_shares"] or 0
     stock_info = StockInfo(stock_code=quote["stock_code"], current_price=quote["price"], total_shares=total_shares)
 
-    # 1. 分红：把东财行转成 _parse_fhps_detail 期望的 DataFrame
-    df = pd.DataFrame([
-        {
-            "报告期": r["REPORT_DATE"],
-            "现金分红-现金分红比例": r["PRETAX_BONUS_RMB"],
-            "方案进度": r["ASSIGN_PROGRESS"],
-        }
-        for r in raw["dividend_rows"]
-    ])
-    total_div, year, details, expl = _parse_fhps_detail(df, stock_info)
+    # 1. 分红（#99）：对账对象 = dividend_records 模块——东财行 → summarize_dividend_rows
+    #    （财年判定单一实现 classify_fiscal_report，month==12=年报）→ _summary_to_dividend
+    #    换算 total_div/year/details/explanation（旧 _parse_fhps_detail 已删除，#100）。
+    summary = summarize_dividend_rows(raw["dividend_rows"], source="东财")
+    if summary.latest_year and summary.fiscal_total_per_10 > 0:
+        total_div, year, details, expl = _summary_to_dividend(summary, stock_info)
+    else:
+        # 无完整财年（无年报）→ 与 JS parseDividendRecords 一致：year=None、总额 0、不回退
+        total_div, year, details, expl = 0.0, None, [], "无有效分红数据"
 
-    # 1b. TTM 口径（#19）：从东财行按除权日算近12个月派发，与 JS computeTtmDividend 同口径
-    from src.utils import compute_ttm_dividend
-    from src.datasource.base import DividendRecord as _DR
-    ttm_records = []
-    for r in raw["dividend_rows"]:
-        progress = str(r.get("ASSIGN_PROGRESS") or "")
-        if "实施" not in progress or "未实施" in progress:
-            continue
-        dp10 = r.get("PRETAX_BONUS_RMB")
-        if dp10 is None or dp10 <= 0:
-            continue
-        ex = str(r.get("EX_DIVIDEND_DATE") or "")
-        if not ex:
-            continue
-        ttm_records.append(_DR(ex_dividend_date=ex[:10], dividend_per_10=float(dp10), report_time=""))
-    ttm_total, ttm_start, ttm_end, ttm_count = compute_ttm_dividend(ttm_records, total_shares)
+    # 1b. TTM 口径（#19）：summary.ttm_total_per_10（与 utils.compute_ttm_dividend 同窗口，
+    #     已由 test_ttm_matches_compute_ttm_dividend 证明等价）；period 用窗口边界
+    #     now-365d ~ now，与 JS computeTtmDividend 的 fmt(cutoff)~fmt(now) 逐字一致。
+    #     ttm_total_per_10 == 0 ⟺ 窗口内无派息（dp10>0 过滤后）⟺ JS count==0 → 无。
+    from datetime import date, timedelta
+    if summary.ttm_total_per_10 > 0:
+        ttm_total = summary.ttm_total_per_10 / 10.0 * total_shares
+        today = date.today()
+        ttm_cutoff = today - timedelta(days=365)
+        ttm_period = f"{ttm_cutoff}~{today}"
+    else:
+        ttm_total, ttm_period = None, None
     ttm_yield = (ttm_total / (quote["price"] * total_shares) * 100) if ttm_total is not None and quote["price"] > 0 else None
-    ttm_period = f"{ttm_start}~{ttm_end}" if ttm_start else None
 
     # 2. 财务：从东财行计算 ROE / 净利润（与 JS parseFinancials 相同算法）
     fin = _parse_financials(raw["financial_rows"])

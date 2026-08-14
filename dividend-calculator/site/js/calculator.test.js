@@ -103,20 +103,6 @@ test('classifyIndustry 优先级科技>成长', () => {
   assert.ok(!r.warning.includes('成长行业'));
 });
 
-// ---- inferFiscalYear（对齐 tests/test_fiscal_year.py）----
-test('inferFiscalYear 3-8月除权→上年度年报', () => {
-  assert.deepEqual(Calc.inferFiscalYear(2024, 3), { year: 2023, isAnnual: true });
-  assert.deepEqual(Calc.inferFiscalYear(2024, 8), { year: 2023, isAnnual: true });
-});
-test('inferFiscalYear 9-12月除权→当年度中报', () => {
-  assert.deepEqual(Calc.inferFiscalYear(2024, 9), { year: 2024, isAnnual: false });
-  assert.deepEqual(Calc.inferFiscalYear(2024, 12), { year: 2024, isAnnual: false });
-});
-test('inferFiscalYear 1-2月除权→上年度中报', () => {
-  assert.deepEqual(Calc.inferFiscalYear(2024, 1), { year: 2023, isAnnual: false });
-  assert.deepEqual(Calc.inferFiscalYear(2024, 2), { year: 2023, isAnnual: false });
-});
-
 // ---- calculateDividendYield ----
 test('calculateDividendYield 三档税率', () => {
   const [a, b, c] = Calc.calculateDividendYield(100, 1000);
@@ -168,6 +154,74 @@ test('parseDividendRecords 无分红', () => {
   const r = Calc.parseDividendRecords([], 1000);
   assert.equal(r.totalDividend, 0);
   assert.equal(r.year, null);
+});
+test('parseDividendRecords 仅中期分配无年报 → 无完整财年，不回退 (#99)', () => {
+  // 对齐 Python dividend_records：latest_year=None → total=0、year=null（项目原则：
+  // 最新完整财年 > TTM，仅12月=年报；无年报公司 dividend_year 应为 None 而非退回最新有数据年份）
+  const rows = [
+    { REPORT_DATE: '2025-06-30 00:00:00', PRETAX_BONUS_RMB: 2, ASSIGN_PROGRESS: '实施分配' },
+    { REPORT_DATE: '2024-09-30 00:00:00', PRETAX_BONUS_RMB: 1.5, ASSIGN_PROGRESS: '实施分配' },
+  ];
+  const r = Calc.parseDividendRecords(rows, 1000);
+  assert.equal(r.totalDividend, 0);
+  assert.equal(r.year, null);
+  assert.equal(r.details.length, 0);
+  assert.equal(r.explanation, '无有效分红数据');
+});
+test('parseDividendRecords 明细按除权日升序 (#99)', () => {
+  // 对齐 Python dividend_records.summary.records（ex_dividend_date 升序，空串在前）
+  const rows = [
+    { REPORT_DATE: '2025-12-31 00:00:00', PRETAX_BONUS_RMB: 4, ASSIGN_PROGRESS: '实施分配', EX_DIVIDEND_DATE: '2026-07-15 00:00:00' },
+    { REPORT_DATE: '2025-06-30 00:00:00', PRETAX_BONUS_RMB: 2, ASSIGN_PROGRESS: '实施分配', EX_DIVIDEND_DATE: '2025-12-01 00:00:00' },
+  ];
+  const r = Calc.parseDividendRecords(rows, 1000);
+  assert.deepEqual(r.details.map(d => d.report_time), ['2025中期分配', '2025年报']);
+});
+test('parseDividendRecords 历史聚合各年用行股本 (P1-1)', () => {
+  // 东财 RPT_SHAREBONUS_DET 行自带 TOTAL_SHARES（历史股本）：600900 2021=22741859230、2025=24468217716
+  const rows = [
+    { REPORT_DATE: '2025-12-31 00:00:00', PRETAX_BONUS_RMB: 10, ASSIGN_PROGRESS: '实施分配', TOTAL_SHARES: 24468217716 },
+    { REPORT_DATE: '2021-12-31 00:00:00', PRETAX_BONUS_RMB: 10, ASSIGN_PROGRESS: '实施分配', TOTAL_SHARES: 22741859230 },
+  ];
+  const r = Calc.parseDividendRecords(rows, 1e9); // 参数股本 10 亿，应被行股本覆盖
+  // 最新财年股息率仍用参数股本（DPS/股价自洽，P1-1 不改）
+  assert.equal(r.totalDividend, (10 / 10) * 1e9);
+  const h = r.sustainabilityHistory;
+  assert.equal(h.latest_year_amount, (10 / 10) * 24468217716);  // 2025 行股本
+  assert.equal(h.history_mean_amount, (10 / 10) * 22741859230); // 2021 行股本
+  assert.equal(h.consecutive_years, 1); // 2025→2024 断档（无 2022-2024 数据）
+});
+test('parseDividendRecords 行股本缺失回退参数股本 (P1-1)', () => {
+  const rows = [
+    { REPORT_DATE: '2025-12-31 00:00:00', PRETAX_BONUS_RMB: 10, ASSIGN_PROGRESS: '实施分配' },
+    { REPORT_DATE: '2024-12-31 00:00:00', PRETAX_BONUS_RMB: 10, ASSIGN_PROGRESS: '实施分配' },
+  ];
+  const r = Calc.parseDividendRecords(rows, 5e9);
+  const h = r.sustainabilityHistory;
+  assert.equal(h.latest_year_amount, (10 / 10) * 5e9);
+  assert.equal(h.history_mean_amount, (10 / 10) * 5e9);
+});
+test('parseDividendRecords 行股本为0/NaN视为无效回退参数 (P1-1)', () => {
+  const rows = [
+    { REPORT_DATE: '2025-12-31 00:00:00', PRETAX_BONUS_RMB: 10, ASSIGN_PROGRESS: '实施分配', TOTAL_SHARES: 0 },
+    { REPORT_DATE: '2024-12-31 00:00:00', PRETAX_BONUS_RMB: 10, ASSIGN_PROGRESS: '实施分配', TOTAL_SHARES: 'abc' },
+  ];
+  const r = Calc.parseDividendRecords(rows, 5e9);
+  const h = r.sustainabilityHistory;
+  assert.equal(h.latest_year_amount, (10 / 10) * 5e9);
+  assert.equal(h.history_mean_amount, (10 / 10) * 5e9);
+});
+test('parseDividendRecords 同年多笔分红各用各行股本 (P1-1)', () => {
+  // 同一财年中期分配与年报实施时股本不同（增发/转送）→ 逐笔折算，与 Python 逐记录一致
+  const rows = [
+    { REPORT_DATE: '2025-12-31 00:00:00', PRETAX_BONUS_RMB: 80, ASSIGN_PROGRESS: '实施分配', TOTAL_SHARES: 24468217716 },
+    { REPORT_DATE: '2025-09-30 00:00:00', PRETAX_BONUS_RMB: 30, ASSIGN_PROGRESS: '实施分配', TOTAL_SHARES: 22741859230 },
+  ];
+  const r = Calc.parseDividendRecords(rows, 1e9);
+  const h = r.sustainabilityHistory;
+  const perRecord = (30 / 10) * 22741859230 + (80 / 10) * 24468217716;
+  assert.equal(h.latest_year_amount, perRecord);
+  assert.equal(h.history_mean_amount, null); // 仅一年数据，无历史年
 });
 
 // ---- parseFinancials（TTM = 最新累计 + 上年全年 - 上年同期）----

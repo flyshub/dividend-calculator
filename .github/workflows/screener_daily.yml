@@ -68,7 +68,7 @@ jobs:
             git push
           fi
 
-      # 导出 JSON 供 Pages 展示（读 data/screener/*.csv → site/screener/ + src/static/screener/，纯标准库）
+      # 导出 JSON 供 Pages 展示（读 data/screener/*.csv → site/screener/，纯标准库；单一页面来源）
       - name: Export screener JSON
         if: steps.run_screener.outcome == 'success'
         id: export_json
@@ -76,14 +76,14 @@ jobs:
         continue-on-error: true
         run: python scripts/export_screener_json.py
 
-      # 提交 JSON（site/ 与 src/static/ 均不被 gitignore，正常 add）
+      # 提交 JSON（site/ 不被 gitignore，正常 add）
       - name: Commit & push screener JSON
         id: commit_json
         if: steps.export_json.outcome == 'success'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add dividend-calculator/site/screener/ dividend-calculator/src/static/screener/
+          git add dividend-calculator/site/screener/
           if git diff --cached --quiet; then
             echo "No screener JSON changes"
             echo "changed=false" >> "$GITHUB_OUTPUT"

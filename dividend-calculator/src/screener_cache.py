@@ -11,7 +11,7 @@
 PR 不建表（由 quote.pe_ttm + finance.roe_latest 派生，筛选时实时算）。
 """
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -52,6 +52,8 @@ class FinanceSnapshot:
     roe_period: Optional[str]          # 报告期
     net_profit_annual: Optional[float]
     payout_ratio: Optional[float]
+    roe_5y_median: Optional[float] = None   # 5 年 ROE 中位数（周期股 PR 用，对齐 pr.py）
+    is_cyclical: Optional[bool] = None      # 是否周期行业（industry_cache → classify_industry）
     finance_source: str = ""           # 财务数据来源（铁律）
     updated_at: str = field(default_factory=lambda: date.today().isoformat())
 
@@ -99,7 +101,8 @@ class ScreenerCache:
 
     CREATE TABLE IF NOT EXISTS finance_snapshot (
         code TEXT PRIMARY KEY, roe_latest REAL, roe_period TEXT,
-        net_profit_annual REAL, payout_ratio REAL, finance_source TEXT, updated_at TEXT);
+        net_profit_annual REAL, payout_ratio REAL, roe_5y_median REAL,
+        is_cyclical INTEGER, finance_source TEXT, updated_at TEXT);
 
     CREATE TABLE IF NOT EXISTS sustainability_snapshot (
         code TEXT PRIMARY KEY, financial_rows TEXT, cashflow_rows TEXT,
@@ -117,7 +120,8 @@ class ScreenerCache:
     def _migrate(self, conn: sqlite3.Connection):
         """增量迁移：为旧 DB 补新列（ALTER TABLE ADD COLUMN）。
 
-        修复股息率实时化后，旧 dividend_snapshot 缺 total_dividend/ttm_dividend 列，
+        修复股息率实时化后，旧 dividend_snapshot 缺 total_dividend/ttm_dividend 列；
+        周期股 PR 改造后，旧 finance_snapshot 缺 roe_5y_median/is_cyclical 列。
         其他机器/CI 用旧 DB 会报 no such column。此处幂等补齐。
         """
         cols = {r[1] for r in conn.execute("PRAGMA table_info(dividend_snapshot)").fetchall()}
@@ -125,6 +129,11 @@ class ScreenerCache:
             conn.execute("ALTER TABLE dividend_snapshot ADD COLUMN total_dividend REAL")
         if "ttm_dividend" not in cols:
             conn.execute("ALTER TABLE dividend_snapshot ADD COLUMN ttm_dividend REAL")
+        fcols = {r[1] for r in conn.execute("PRAGMA table_info(finance_snapshot)").fetchall()}
+        if "roe_5y_median" not in fcols:
+            conn.execute("ALTER TABLE finance_snapshot ADD COLUMN roe_5y_median REAL")
+        if "is_cyclical" not in fcols:
+            conn.execute("ALTER TABLE finance_snapshot ADD COLUMN is_cyclical INTEGER")
         conn.commit()
 
     def _conn(self) -> sqlite3.Connection:
@@ -146,6 +155,39 @@ class ScreenerCache:
                 "VALUES (?, ?, ?, ?)",
                 [(i.code, i.name, i.market, i.updated_at) for i in items],
             )
+
+    def get_stock_codes(self) -> List[str]:
+        """全 A 股票代码（升序）。"""
+        with self._conn() as conn:
+            rows = conn.execute("SELECT code FROM stock_list ORDER BY code").fetchall()
+        return [r[0] for r in rows]
+
+    def get_dividend_codes(
+        self,
+        *,
+        require_real_yield: bool = False,
+        real_yield_min: Optional[float] = None,
+        ttm_yield_min: Optional[float] = None,
+    ) -> List[str]:
+        """有股息快照的股票代码（升序），可按下限过滤（严格 >，NULL 自然排除）。
+
+        require_real_yield: 仅保留 real_yield IS NOT NULL 的行（如预拉全量场景）。
+        """
+        conds: List[str] = []
+        params: List[float] = []
+        if require_real_yield:
+            conds.append("real_yield IS NOT NULL")
+        if real_yield_min is not None:
+            conds.append("real_yield > ?")
+            params.append(real_yield_min)
+        if ttm_yield_min is not None:
+            conds.append("ttm_yield > ?")
+            params.append(ttm_yield_min)
+        where = f" WHERE {' AND '.join(conds)}" if conds else ""
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT code FROM dividend_snapshot{where} ORDER BY code", params).fetchall()
+        return [r[0] for r in rows]
 
     # ---- quote_snapshot ----
 
@@ -200,23 +242,36 @@ class ScreenerCache:
 
     # ---- finance_snapshot ----
 
+    _FINANCE_SELECT = (
+        "SELECT code, roe_latest, roe_period, net_profit_annual, payout_ratio, "
+        "roe_5y_median, is_cyclical, finance_source, updated_at "
+    )
+
+    @staticmethod
+    def _finance_from_row(row) -> FinanceSnapshot:
+        f = FinanceSnapshot(*row)
+        if f.is_cyclical is not None:  # SQLite INTEGER → bool（保持 dataclass 契约）
+            f = replace(f, is_cyclical=bool(f.is_cyclical))
+        return f
+
     def upsert_finance(self, f: FinanceSnapshot):
         with self._conn() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO finance_snapshot "
-                "(code, roe_latest, roe_period, net_profit_annual, payout_ratio, finance_source, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "(code, roe_latest, roe_period, net_profit_annual, payout_ratio, "
+                " roe_5y_median, is_cyclical, finance_source, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (f.code, f.roe_latest, f.roe_period, f.net_profit_annual,
-                 f.payout_ratio, f.finance_source, f.updated_at),
+                 f.payout_ratio, f.roe_5y_median, f.is_cyclical,
+                 f.finance_source, f.updated_at),
             )
 
     def get_finance(self, code: str) -> Optional[FinanceSnapshot]:
         with self._conn() as conn:
             row = conn.execute(
-                "SELECT code, roe_latest, roe_period, net_profit_annual, payout_ratio, finance_source, updated_at "
-                "FROM finance_snapshot WHERE code=?", (code,)
+                self._FINANCE_SELECT + "FROM finance_snapshot WHERE code=?", (code,)
             ).fetchone()
-        return FinanceSnapshot(*row) if row else None
+        return self._finance_from_row(row) if row else None
 
     def is_finance_stale(self, code: str, max_age_days: int = 30) -> bool:
         return self._is_stale("finance_snapshot", code, max_age_days)
@@ -242,10 +297,8 @@ class ScreenerCache:
     def get_all_finance(self) -> Dict[str, FinanceSnapshot]:
         """一次读全表财务 → {code: FinanceSnapshot}。"""
         with self._conn() as conn:
-            rows = conn.execute(
-                "SELECT code, roe_latest, roe_period, net_profit_annual, payout_ratio, finance_source, updated_at "
-                "FROM finance_snapshot").fetchall()
-        return {r[0]: FinanceSnapshot(*r) for r in rows}
+            rows = conn.execute(self._FINANCE_SELECT + "FROM finance_snapshot").fetchall()
+        return {r[0]: self._finance_from_row(r) for r in rows}
 
     def get_all_sustainability(self) -> Dict[str, SustainabilitySnapshot]:
         """一次读全表可持续性快照 → {code: SustainabilitySnapshot}。"""
@@ -317,3 +370,10 @@ class ScreenerCache:
                 total += cur.rowcount
             conn.commit()
         return total
+
+    def stats(self) -> dict:
+        """各快照表行数（供初始化/运维脚本统计）。"""
+        tables = ("stock_list", "quote_snapshot", "dividend_snapshot",
+                  "finance_snapshot", "sustainability_snapshot")
+        with self._conn() as conn:
+            return {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in tables}

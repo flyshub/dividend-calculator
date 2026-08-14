@@ -14,6 +14,7 @@ select_latest_annual / aggregate_dividend_history）与编排入口
 字段名来自对 600900/600036 的实地验证，单位均为元、比率为百分数。严禁虚构数据。
 """
 import dataclasses
+import json
 import logging
 import re
 from datetime import datetime
@@ -28,6 +29,8 @@ from .eastmoney_fetcher import (
     fetch_price_change_1y,
     fetch_top10_holding,
 )
+from .screener_cache import SustainabilitySnapshot
+from .screener_rate_limit import batch_wait
 from .sustainability_calculator import (
     AnnualFinancial,
     CUT_WINDOW_YEARS,
@@ -127,6 +130,21 @@ def _is_implemented(progress: str) -> bool:
     return "实施" in progress and "未实施" not in progress
 
 
+def classify_fiscal_report(year: int, month: int) -> Tuple[bool, str]:
+    """财年判定**单一实现**（#37 M4）：仅 12 月报告期是完整财年年报。
+
+    其余月份（3/4 月 Q1、6/9 月半年报）均为中期分配，不构成完整财年；
+    季度分红监管扩散下防御性收紧为 month == 12（与 JS calculator.js 同步）。
+    本模块 parse_dividend_rows 与 dividend_records 各源 adapter 均调用此函数，
+    不允许在其他位置重复实现 is_annual = (m == 12)。
+
+    Returns:
+        (is_annual, label)，label 为 "YYYY年报" / "YYYY中期分配"（NOT "半年报"）
+    """
+    is_annual = month == 12
+    return is_annual, f"{year}年报" if is_annual else f"{year}中期分配"
+
+
 def parse_dividend_rows(rows: List[dict]) -> Tuple[List[DividendRecord], Optional[str]]:
     """解析东财分红明细行 → DividendRecord 列表 + 最新有年报的财年字符串。
 
@@ -154,10 +172,8 @@ def parse_dividend_rows(rows: List[dict]) -> Tuple[List[DividendRecord], Optiona
             continue
         year = int(m.group(1))
         month = int(m.group(2))
-        # 与 JS 一致（#37 M4）：仅 12 月报告期是完整财年年报；3/6/9 月为中期分配
-        # （季度分红监管扩散，3/4 月 Q1 分红不构成完整财年）
-        is_annual = month == 12
-        label = f"{year}年报" if is_annual else f"{year}中期分配"
+        # 财年判定单一实现（classify_fiscal_report，见模块内定义与 dividend_records 复用）
+        is_annual, label = classify_fiscal_report(year, month)
 
         ex_date = str(row.get("EX_DIVIDEND_DATE") or "")[:10]
         # 预案公告日：该财年股息「生效」的起点（走势图按此归因，非除权日）。
@@ -168,6 +184,7 @@ def parse_dividend_rows(rows: List[dict]) -> Tuple[List[DividendRecord], Optiona
             dividend_per_10=dp10,
             report_time=label,
             plan_notice_date=plan_date,
+            total_shares=_to_float(row.get("TOTAL_SHARES")),
         ))
 
         if year not in yearly:
@@ -211,7 +228,10 @@ def aggregate_dividend_history(records: List[DividendRecord],
         if not ym:
             continue
         year = ym.group(1)
-        amount = rec.dividend_per_10 / 10.0 * total_shares
+        # 行股本优先（东财 RPT_SHAREBONUS_DET 每行自带历史 TOTAL_SHARES，股本变动公司
+        # 各年总额用各自行股本折算）；缺失（cninfo/mootdx 路径）回退参数股本
+        shares = rec.total_shares if rec.total_shares else total_shares
+        amount = rec.dividend_per_10 / 10.0 * shares
         year_amount[year] = year_amount.get(year, 0.0) + amount
         # 仅年报记录参与削减比较（#39 M6）。排除"半年报"子串：旧 label「半年报」
         # 含「年报」子串，遗留数据会被误判为年报——与 JS（indexOf('半年报') === -1）完全一致
@@ -378,13 +398,17 @@ def assess_with_auto_fetch(stock_code: str,
                           financial_rows: Optional[List[dict]] = None,
                           cashflow_rows: Optional[List[dict]] = None,
                           price_change_1y: Optional[float] = None,
-                          top10_holding: Optional[float] = None) -> SustainabilityResult:
+                          top10_holding: Optional[float] = None,
+                          dividend_fetch_failed: bool = False) -> SustainabilityResult:
     """全自取数版编排：财务/分红/行业/近1年涨跌/股东集中度全走 HTTP 取数。
 
     供 analysis.py 调用 —— 可持续性模块自洽，无需 pr.py 的 mootdx 行业、
     也无需 dividend.py 的 mootdx 分红记录。
     price_change_1y / top10_holding / cashflow_rows 可选注入（测试/预缓存用），
     默认 None 现场自取；网络失败返回 None 不阻塞评估（#40 B1）。
+    dividend_fetch_failed（#95 透传）：调用方已知分红取数失败时可置 True 强制走
+    失败分支（history=None + 失败 note）；默认 False 由本函数按
+    `dividend_rows is None` 自动判定（#38 M5），行为与透传前完全一致。
     """
     if not industry or industry in ("未知行业", "无", ""):
         # 上游（pr.py 走 mootdx）行业不可用时，走东财重取，保证银行/周期判定准确
@@ -411,11 +435,142 @@ def assess_with_auto_fetch(stock_code: str,
         latest_dividend_year=div_year,
         industry=industry,
         dividend_records=records,
-        dividend_fetch_failed=dividend_rows is None,  # 仅取数失败置位；records=[]（真无分红）不置
+        dividend_fetch_failed=dividend_fetch_failed or dividend_rows is None,
         financial_rows=financial_rows,
         cashflow_rows=cashflow_rows,
         price_change_1y=price_change_1y,
         top10_holding=top10_holding,
+    )
+
+
+# ---------------------------------------------------------------------------
+# 缓存序列化契约（#95）
+#
+# SustainabilitySnapshot 的行数据列（financial/cashflow/dividend_rows）以 JSON
+# 字符串存 SQLite，但 JSON 的写/读（json.dumps/loads）只发生在本模块：
+#   - 写入：_dict_to_snapshot（prefetch_and_cache 内部）
+#   - 读取：_snapshot_to_dict（assess_from_cache 内部）
+# 调用方（scripts/prefetch_sustainability.py、src/screener_sustainability.py）
+# 不接触快照列名、不 import json。
+# 新增评估输入字段时，只需改本模块：_dict_to_snapshot / _snapshot_to_dict
+# 两个序列化函数 + assess_from_cache 的 assess_with_auto_fetch 调用，调用方零改动。
+# ---------------------------------------------------------------------------
+
+def _rows_to_json(rows) -> Optional[str]:
+    """原始行数据 → JSON 字符串（None=取数失败，原样保留，不序列化）。"""
+    return json.dumps(rows, ensure_ascii=False) if rows is not None else None
+
+
+def _json_to_rows(s: Optional[str]):
+    """快照 JSON 字符串 → 原始行数据（None/空串 → None）。"""
+    return json.loads(s) if s else None
+
+
+def _snapshot_to_dict(snap: SustainabilitySnapshot) -> dict:
+    """SustainabilitySnapshot → 原始数据 dict（行数据反序列化为列表）。
+
+    仅 sustainability.py 内部使用（#95 序列化契约：JSON 读写不跨模块暴露）。
+    """
+    return {
+        "code": snap.code,
+        "financial_rows": _json_to_rows(snap.financial_rows),
+        "cashflow_rows": _json_to_rows(snap.cashflow_rows),
+        "dividend_rows": _json_to_rows(snap.dividend_rows),
+        "industry": snap.industry,
+        "price_change_1y": snap.price_change_1y,
+        "top10_holding": snap.top10_holding,
+    }
+
+
+def _dict_to_snapshot(code: str, data: dict, *, source: str) -> SustainabilitySnapshot:
+    """原始数据 dict → SustainabilitySnapshot（行数据 JSON 序列化）。
+
+    仅 sustainability.py 内部使用（#95 序列化契约：JSON 读写不跨模块暴露）。
+    """
+    return SustainabilitySnapshot(
+        code=code,
+        financial_rows=_rows_to_json(data.get("financial_rows")),
+        cashflow_rows=_rows_to_json(data.get("cashflow_rows")),
+        dividend_rows=_rows_to_json(data.get("dividend_rows")),
+        industry=data.get("industry"),
+        price_change_1y=data.get("price_change_1y"),
+        top10_holding=data.get("top10_holding"),
+        source=source,
+    )
+
+
+def prefetch_and_cache(cache, code: str) -> Optional[SustainabilitySnapshot]:
+    """预取 6 类数据 + 限流 + 写缓存，一次调用完成。返回写入的快照。
+
+    S2 完整性检查：financial/cashflow 同时为空数组视为拉取失败（正常公司必有
+    财报），此时**不写缓存**（避免空数据投毒导致假阴性 verdict，数据铁律：
+    不缓存失败数据），直接返回 None。
+    限流：与 scripts/prefetch_sustainability.py 一致，内部先 batch_wait()。
+    """
+    batch_wait()  # 限流
+    financial = fetch_financial_rows(code)
+    cashflow = fetch_cashflow_rows(code)
+    dividend = fetch_dividend_rows(code)
+    industry = fetch_industry(code)
+    price_change = fetch_price_change_1y(code)
+    top10 = fetch_top10_holding(code)
+    # S2：财务/现金流同时为空 → 拉取失败（正常公司必有财报），标记不缓存
+    if (financial is not None and len(financial) == 0
+            and cashflow is not None and len(cashflow) == 0):
+        logger.warning("[%s] 财务/现金流同时为空，判为拉取失败，不缓存", code)
+        return None
+    snap = _dict_to_snapshot(code, {
+        "financial_rows": financial,
+        "cashflow_rows": cashflow,
+        "dividend_rows": dividend,
+        "industry": industry,
+        "price_change_1y": price_change,
+        "top10_holding": top10,
+    }, source="东财预拉")
+    cache.upsert_sustainability(snap)
+    return snap
+
+
+def assess_from_cache(cache, code: str,
+                      total_shares: float,
+                      dividend_total: Optional[float],
+                      dividend_yield_before_tax: Optional[float],
+                      latest_dividend_year: Optional[str],
+                      industry: Optional[str],
+                      dividend_fetch_failed: bool = False) -> SustainabilityResult:
+    """读缓存快照 → 内部反序列化 → assess_with_auto_fetch。
+
+    缓存命中（未过期）时注入预拉数据（零网络，行业优先用快照值）；
+    未命中/过期时按需取数（与既有 _assess_and_cache 一致——限流由调用方在
+    评估前统一处理，如 make_sustainability_evaluator 未命中时先 batch_wait()）。
+    调用方不接触快照 JSON 列（序列化契约见本模块 #95 注释）。
+    """
+    snap = cache.get_sustainability(code)
+    if snap is not None and not cache.is_sustainability_stale(code):
+        data = _snapshot_to_dict(snap)
+        return assess_with_auto_fetch(
+            stock_code=code,
+            total_shares=total_shares,
+            dividend_total=dividend_total,
+            dividend_yield_before_tax=dividend_yield_before_tax,
+            latest_dividend_year=latest_dividend_year,
+            industry=data["industry"] or industry,  # 快照行业优先
+            financial_rows=data["financial_rows"],
+            cashflow_rows=data["cashflow_rows"],
+            dividend_rows=data["dividend_rows"],
+            price_change_1y=data["price_change_1y"],
+            top10_holding=data["top10_holding"],
+            dividend_fetch_failed=dividend_fetch_failed,
+        )
+    # 缓存未命中/过期 → 按需补拉（限流行为与既有路径一致）
+    return assess_with_auto_fetch(
+        stock_code=code,
+        total_shares=total_shares,
+        dividend_total=dividend_total,
+        dividend_yield_before_tax=dividend_yield_before_tax,
+        latest_dividend_year=latest_dividend_year,
+        industry=industry,
+        dividend_fetch_failed=dividend_fetch_failed,
     )
 
 
@@ -427,5 +582,7 @@ __all__ = [
     "merge_capex",
     "assess_for_stock",
     "assess_with_auto_fetch",
+    "prefetch_and_cache",
+    "assess_from_cache",
 ]
 

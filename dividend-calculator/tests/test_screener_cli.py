@@ -1,10 +1,10 @@
 """选股器 CLI/编排测试（spec #67，工单 #74）。
 
-覆盖四级漏斗编排 + CSV 输出，全部注入/替换模块级函数，不碰网络：
-- run_screener：各层串联、漏斗递减
-- _build_output_rows：字段汇总 + 排序
+覆盖 run_screener 编排 + CSV 输出，全部注入/替换模块级函数，不碰网络：
+- run_screener：四级漏斗串联、漏斗递减、返回 FunnelResult
 - write_csv：stdout 与文件两种模式
 
+判定语义由 test_screening.py（漏斗级）覆盖；此处验证编排层接线与 CLI 契约。
 先例：tests/test_screener_*.py（各层）、tests/test_web.py（CLI 冒烟）。
 """
 import io
@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.screener import _build_output_rows, run_screener, write_csv
+from src.screener import run_screener, write_csv
 from src.screener_cache import (
     DividendSnapshot,
     FinanceSnapshot,
@@ -45,8 +45,8 @@ def _seed_cache(cache):
 class TestRunScreener:
     @patch("src.screener._load_stock_list", return_value=["600900", "600987", "600919"])
     @patch("src.screener_quotes.fetch_all_quotes")
-    @patch("src.screener.evaluate_pr_batch")
-    def test_four_funnel_pipeline(self, mock_pr, mock_fetch, mock_list, tmp_path):
+    @patch("src.screener_sustainability.make_sustainability_evaluator")
+    def test_four_funnel_pipeline(self, mock_sus, mock_fetch, mock_list, tmp_path, capsys):
         cache = ScreenerCache(tmp_path / "s.db")
         _seed_cache(cache)
 
@@ -54,25 +54,21 @@ class TestRunScreener:
             return [cache.get_quote(c) for c in codes if cache.get_quote(c) is not None]
 
         mock_fetch.side_effect = fake_fetch
-        # 股息从缓存读（run_screener 用批量缓存，_seed_cache 已预填）
-        # PR 评估注入：600900/600987 通过（低估），其余拒绝
-        def fake_pr(codes, cache, **kw):
-            return [{"code": c, "pr": 0.5, "valuation_zone": "低估",
-                     "pass_pr": c in ("600900", "600987"),
-                     "industry": "电力", "roe_latest": 16.0} for c in codes]
-        mock_pr.side_effect = fake_pr
-        # 可持续性评估注入：全通过
-        with patch("src.screener.evaluate_sustainability_batch") as mock_sus:
-            mock_sus.side_effect = lambda stocks, cache, **kw: [
-                {"code": s["code"], "verdict": "可持续", "pass_sus": True} for s in stocks
-            ]
-            final = run_screener(cache, min_ttm=5.0, min_real=5.0)
-            assert mock_sus.called, "evaluate_sustainability_batch 应被调用"
+        # 可持续性评估注入：全通过（判定语义由 test_screening.py 覆盖）
+        mock_sus.return_value = lambda candidate: "可持续"
+        result = run_screener(cache, min_ttm=5.0, min_real=5.0)
+        assert mock_sus.called, "make_sustainability_evaluator 应被调用"
         # 漏斗② 拒掉 600919（低股息），应剩 2 只
-        codes = {f["code"] for f in final}
+        codes = {c.code for c in result.candidates}
         assert "600900" in codes, f"应含 600900, 实际 {codes}"
         assert "600987" in codes
         assert "600919" not in codes
+        assert result.stage_counts == [3, 2, 2, 2]
+        # 编排层打印各层计数（stderr）
+        err = capsys.readouterr().err
+        assert "漏斗① 行情可用: 3 只" in err
+        assert "漏斗② 真实股息率>5.0%: 2 只" in err
+        assert "漏斗④ 可持续性" in err
 
     def test_limit_caps_codes(self, tmp_path):
         cache = ScreenerCache(tmp_path / "s.db")
@@ -83,34 +79,6 @@ class TestRunScreener:
                 # 传入 fetch_all_quotes 的 codes 应被裁剪到 10
                 called_codes = m.call_args[0][0]
                 assert len(called_codes) == 10
-
-
-class TestBuildOutputRows:
-    def test_rows_sorted_by_real_yield(self, tmp_path):
-        cache = ScreenerCache(tmp_path / "s.db")
-        _seed_cache(cache)
-        final = [
-            {"code": "600900", "verdict": "可持续"},
-            {"code": "600987", "verdict": "可持续"},
-        ]
-        rows = _build_output_rows(cache, final)
-        # 按真实股息率降序：600987(6.5) > 600900(6.0)
-        assert rows[0]["真实股息率%"] == 6.5
-        assert rows[1]["真实股息率%"] == 6.0
-        assert rows[0]["名称"] == "航民股份"
-
-    def test_fields_present(self, tmp_path):
-        cache = ScreenerCache(tmp_path / "s.db")
-        _seed_cache(cache)
-        rows = _build_output_rows(cache, [{
-            "code": "600900", "verdict": "可持续",
-            "valuation_zone": "低估", "pr": 0.5, "industry": "电力",
-        }])
-        r = rows[0]
-        assert r["估值区间"] == "低估"
-        assert r["可持续性"] == "可持续"
-        assert r["行业"] == "电力"
-        assert r["数据来源"]
 
 
 class TestWriteCsv:

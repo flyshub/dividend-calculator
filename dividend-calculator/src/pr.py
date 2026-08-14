@@ -7,12 +7,13 @@
   PB-PR   = PB / ROE² × 100       （周期股参考；ROE 为百分数）
 
 数据来源（多源降级）：
-  PE-TTM / PB: 腾讯行情 [主] → akshare 同花顺 EPS 推算 → 东方财富 push2 [备]
+  PE-TTM / PB: 腾讯行情 [主] → akshare 同花顺 EPS 推算 → 东方财富 push2 [备]（f164=PE-TTM、f167=PB，实测对照腾讯吻合）
   ROE / 净利润: mootdx F10 [主] → akshare 同花顺 [备]
   行业分类:     mootdx F10 → 东方财富 datacenter(RPT_F10_BASIC_ORGINFO) → 降级为 "未知行业"
 """
 import logging
 import re
+import statistics
 from dataclasses import dataclass, field
 from typing import Optional, List, Tuple
 
@@ -49,7 +50,7 @@ class PRResult:
     pr_corrected: Optional[float]        # 修正PR = N × PE_TTM / ROE
     pr_pb: Optional[float]               # PB-PR = PB / ROE² × 100
 
-    # 估值档位（基于基础PR或修正PR，取两者较低值）
+    # 估值档位（优先用修正PR；N≥1 故修正PR≥基础PR，判定更保守；无修正PR时回退基础PR）
     valuation_zone: str                   # 低估 / 合理偏低 / 合理 / 高估
 
     # 中间计算数据
@@ -101,12 +102,18 @@ def _get_pe_pb_tencent(stock_code: str) -> Tuple[Optional[float], Optional[float
 
 
 def _get_pe_pb_eastmoney(stock_code: str) -> Tuple[Optional[float], Optional[float]]:
-    """从东方财富 push2 接口获取 PE 和 PB（备选）"""
+    """从东方财富 push2 接口获取 PE-TTM 和 PB（备选）
+
+    字段实测（2026-08，600900/600036 对照腾讯行情）：
+      f164 = PE-TTM（与腾讯 f39 逐位吻合：19.15/6.49）
+      f167 = PB（fltt=2 时与腾讯 f46 吻合：3.31/0.88；不带 fltt=2 会返回 ×100 缩放值）
+      f9（动态PE）/ f115（PE-TTM）在本接口均不返回有效值（f9 缺失、f115=0），弃用
+    """
     try:
         market = "1" if stock_code.startswith("6") else "0"
         url = (
             f"https://push2.eastmoney.com/api/qt/stock/get"
-            f"?secid={market}.{stock_code}&fields=f9,f167"
+            f"?secid={market}.{stock_code}&fields=f164,f167&fltt=2"
         )
         headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://quote.eastmoney.com/"}
         resp = requests.get(url, headers=headers, timeout=10)
@@ -120,7 +127,7 @@ def _get_pe_pb_eastmoney(stock_code: str) -> Tuple[Optional[float], Optional[flo
 
         pe_ttm = None
         try:
-            val = float(d.get("f9", 0))
+            val = float(d.get("f164", 0))
             if val > 0:
                 pe_ttm = val
         except (ValueError, TypeError):
@@ -240,7 +247,7 @@ def _get_financial_ths(stock_code: str) -> Tuple[
         roe_5y_vals = [
             _pct_to_float(v) for v in df_annual.loc[last5_mask, "净资产收益率"]
         ]
-        roe_5y_median = float(sorted(roe_5y_vals)[len(roe_5y_vals) // 2]) if roe_5y_vals else None
+        roe_5y_median = float(statistics.median(roe_5y_vals)) if roe_5y_vals else None
 
         # 最新报告期累计净利润（非 TTM；仅展示）：对齐 JS 真 TTM 算法
         # TTM = 最新累计 + 上年全年 − 上年同期（最新为年报时 TTM=全年）
@@ -319,8 +326,8 @@ def _get_financial(stock_code: str) -> Tuple[
                 roe_latest = roe_history[years[0]]
             last5 = sorted(roe_history.items(), reverse=True)[:5]
             if last5:
-                vals = sorted([v for _, v in last5])
-                roe_5y_median = float(vals[len(vals) // 2])
+                vals = [v for _, v in last5]
+                roe_5y_median = float(statistics.median(vals))
 
         # 净利润（年报）
         np_history = source.get_net_profit_annual(stock_code)

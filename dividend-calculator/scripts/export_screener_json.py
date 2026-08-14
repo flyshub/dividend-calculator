@@ -6,8 +6,8 @@
 - history.json：所有历史日期索引 [{date, file}]（按日期聚合，同日多批次取最新）
 - screener_<date>.json：每个历史日期的独立文件（供历史切换读取）
 
-同一份产物同时写入 site/screener/（GitHub Pages）与 src/static/screener/
-（本地 Web 服务版，src/web.py 只 serve src/static/），保证双端一致。
+产物只写 site/screener/（单一页面来源：src/web.py 直接 serve site/，
+GitHub Pages 与本地同构，无双端双写）。
 
 用法:
     python scripts/export_screener_json.py
@@ -20,18 +20,20 @@ from datetime import date, timedelta
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+# 11 列契约单点化（ADR-0001）：与 src.screening.FIELDS 同源，防止选股器输出列漂移
+from src.screening import FIELDS  # noqa: E402
+
 CSV_DIR = PROJECT_ROOT / "data" / "screener"
 SITE_DIR = PROJECT_ROOT / "site" / "screener"
-STATIC_SITE_DIR = PROJECT_ROOT / "src" / "static" / "screener"
 
 # 保留策略：仅保留最近 RETENTION_DAYS 天的 CSV / 按日 JSON（history.json 由重扫天然截断）。
 # 90 天覆盖一个完整财报季；git 历史可回滚更早数据。--retention-days 可覆盖。
 RETENTION_DAYS = 90
 
-# CSV 11 列 → JSON 字段（数字列转 float）。两处均与 site/screener.html 的列定义同步
+# CSV 11 列 → JSON 字段（数字列转 float）。列定义来自 src.screening.FIELDS，
 # （screener_daily.yml 每日跑本脚本时，export 会校验 CSV 表头与 FIELDS 一致，防漂移）。
-FIELDS = ["代码", "名称", "TTM股息率%", "真实股息率%", "估值区间", "市赚率PR",
-          "行业", "可持续性", "ROE%", "总市值(亿)", "数据来源"]
 NUMERIC = {"TTM股息率%", "真实股息率%", "市赚率PR", "ROE%", "总市值(亿)"}
 
 
@@ -156,15 +158,10 @@ def main(argv: list = None):
         print("✘ 无法解析日期", file=sys.stderr)
         return 1
 
-    # 两个输出目录写同一份产物（GitHub Pages + 本地 Web 版）
+    # 单一产物目录（GitHub Pages 与本地 Web 共用 site/）
     history = write_json_files(SITE_DIR, by_date)
-    history_static = write_json_files(STATIC_SITE_DIR, by_date)
 
-    if history != history_static:
-        print(f"✘ 双目录输出不一致: {SITE_DIR} vs {STATIC_SITE_DIR}", file=sys.stderr)
-        return 1
-
-    print(f"✓ 导出 {len(history)} 个日期到 {SITE_DIR} + {STATIC_SITE_DIR}")
+    print(f"✓ 导出 {len(history)} 个日期到 {SITE_DIR}")
     print(f"  latest: {history[-1]['date']}（{history[-1]['count']} 只）")
     for h in history:
         print(f"  {h['date']}: {h['count']} 只")

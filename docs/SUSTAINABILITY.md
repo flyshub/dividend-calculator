@@ -174,7 +174,7 @@ N. 优势项：{强维度（≤2 条）} ← 偏弱/可持续时列出，带支�
 | 文件 | 职责 |
 |------|------|
 | `src/sustainability_calculator.py` | **纯评估器**（无 IO/网络）：`AnnualFinancial` / `DividendHistory` / `SustainabilityResult` dataclass + 衍生指标计算 + 致命红旗 + 维度评分 + 情境红旗 + `assess_sustainability` 主入口。所有阈值/权重常量在此。 |
-| `src/sustainability.py` | **数据获取层**：东财接口 fetch（财务/现金流量表/分红/行业）+ 解析纯函数（`parse_financial_rows` / `merge_capex` / `parse_dividend_rows` / `aggregate_dividend_history`）+ 编排入口（`assess_for_stock` / `assess_with_auto_fetch`）。 |
+| `src/sustainability.py` | **数据获取层**：东财接口 fetch（财务/现金流量表/分红/行业）+ 解析纯函数（`parse_financial_rows` / `merge_capex` / `parse_dividend_rows` / `aggregate_dividend_history`）+ 财年判定单一实现 `classify_fiscal_report`（month==12 → 年报，其余 → 中期分配）+ 编排入口（`assess_for_stock` / `assess_with_auto_fetch`）+ 高层缓存接口 `prefetch_and_cache` / `assess_from_cache`（快照 JSON 序列化收在模块内部）。 |
 | `src/analysis.py` | 主编排：`run_stock_analysis` 第 4 步，股息率 > 阈值时调 `assess_with_auto_fetch`，结果挂到 `StockAnalysisResult.sustainability`。 |
 | `src/web.py` | `/api/pr` 序列化 `sustainability` 字段。 |
 | `calc_pr.py` | CLI 打印可持续性结论段。 |
@@ -190,7 +190,7 @@ N. 优势项：{强维度（≤2 条）} ← 偏弱/可持续时列出，带支�
 
 ### 一致性校验
 
-`scripts/verify_js_vs_python.py`：取同一批东财 fixture，分别喂给 JS `computeFromRaw` 和 Python `assess_for_stock` 纯函数，逐字段对比（容差 1e-9）。可持续性字段：`sustainability_triggered`、`sustainability_verdict`、`sustainability_score`。
+`scripts/verify_js_vs_python.py`：取同一批东财 fixture，分别喂给 JS `computeFromRaw` 和 Python 侧，逐字段对比（容差 1e-9）。分红对账对象为 `dividend_records.summarize_dividend_rows`（#99 起），可持续性对账对象为 `assess_for_stock` 纯函数。可持续性字段：`sustainability_triggered`、`sustainability_verdict`、`sustainability_score`。
 
 ---
 
@@ -241,7 +241,7 @@ WARN_HIGH_PAYOUT = 0.80            # 高派息门槛
 3. **行业字段上游口径（已解决）**：`/api/pr` 的 `industry` 在 mootdx F10 不可用时，回退东财 datacenter `RPT_F10_BASIC_ORGINFO`（EM2016，与 JS 端/sustainability 模块同源），不再显示"未知行业"；mootdx 可用时仍优先使用 mootdx F10 口径（国内体验不变）。
 4. **阈值为主观经验值**：六维阈值、权重、三档分界参考 CFA Institute / Investopedia / S&P DJI 等业界共识设定，并非绝对，可按实际案例调参。
 5. **银行专项数据**：资本充足率（NEWCAPITALADER）/净息差（NET_INTEREST_MARGIN）/不良率（NONPERLOAN）/拨贷比（LOAN_PROVISION_RATIO）达自东财主表（普通股这些字段为空，银行股有值），已实测 600036 确认全部可达。注：东财无"拨备覆盖率"字段，用拨贷比近似。
-6. **A+H 股总市值口径**：当前用 `A股股价 × 总股本(含H股)`，对 A+H 股（如中国银行 H 股占 34.6%、中国神华 24%）会用 A 股价给 H 股估值，若 A 股溢价则高估市值、低估股息率。正确口径应为 `A股股价×A股股本 + H股股价×H股股本`，需额外接入港股行情接口。此为股息率本身的口径问题（非可持续性功能范围），暂以 A 股价近似，后续接入港股行情后修正。
+6. **A+H 股总市值口径**：股息率口径本身正确——总额法下 真实股息率 = 分红总额/总市值 = (DPS×总股本)/(A股股价×总股本) = DPS/A股股价，恰等于 A 股持有人真实股息率，不受 A/H 价差影响。仅"总市值"展示值用 `A股股价 × 总股本(含H股)`，对 A+H 股（如中国银行 H 股占 34.6%、中国神华 24%）会把 H 股按 A 股价计，A 股溢价时展示市值偏高。如需精确总市值需接入港股行情（`A股股价×A股股本 + H股股价×H股股本`），但对股息率无影响，优先级低。
 
 ---
 

@@ -4,23 +4,25 @@
 逻辑漂移导致静默错误。全部 @pytest.mark.unit，CI 的 -m 'not integration'
 已覆盖，无网络。
 
-五部分：
+四部分：
 1. 股息率快照（长江电力 + 招商银行 A+H，DI 注入）
-2. 财年分组快照（_parse_fhps_detail：年报/半年报/特殊月份归类）
-3. PR 真实画像（茅台/银行/亏损股）
-4. 可持续性快照（长江电力画像 → verdict）
-5. 东财字段映射快照（字段名变更立即炸）
+2. PR 真实画像（茅台/银行/亏损股）
+3. 可持续性快照（长江电力画像 → verdict）
+4. 东财字段映射快照（字段名变更立即炸）
+
+注：原「2. 财年分组快照」随 _parse_fhps_detail 退役删除（#100）——财年判定
+由 sustainability.parse_dividend_rows（单一实现 classify_fiscal_report）覆盖，
+见 tests/test_dividend_records.py 与 tests/test_fiscal_year_crosscheck.py。
 """
 import sys
 from pathlib import Path
 
-import pandas as pd
 import pytest
 
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.dividend import _parse_fhps_detail, calculate_true_dividend_yield
+from src.dividend import calculate_true_dividend_yield
 from src.utils import compute_ttm_dividend
 from src.pr_calculator import (
     compute_basic_pr, compute_pb_pr, classify_valuation,
@@ -84,72 +86,6 @@ class TestDividendYieldSnapshot:
         # 用总股本（252.2亿）而非 A 股股本 —— A+H 正确口径
         assert result.total_shares == 2.522e10
         assert result.total_dividend == pytest.approx(0.1972 * 2.522e10)
-
-
-# ---------------------------------------------------------------------------
-# 2. 财年分组快照（_parse_fhps_detail）
-# ---------------------------------------------------------------------------
-
-class TestFiscalYearGroupingSnapshot:
-    def _info(self):
-        return StockInfo(stock_code="600900", current_price=26.56, total_shares=1e9)
-
-    def test_annual_halfyear_grouping(self):
-        """2024-12-31 年报 + 2025-06-30 半年报 → 目标财年选 2024（优先有年报）。"""
-        df = pd.DataFrame([
-            {"报告期": "2024-12-31", "方案进度": "实施", "现金分红-现金分红比例": 5.0},
-            {"报告期": "2025-06-30", "方案进度": "实施", "现金分红-现金分红比例": 2.0},
-        ])
-        total, year, details, _ = _parse_fhps_detail(df, self._info())
-        assert year == "2024"  # 优先选有年报的财年
-        assert len(details) == 1
-        assert details[0].report_time == "2024年报"
-        assert details[0].dividend_per_10 == 5.0
-
-    def test_special_month_grouped_as_interim(self):
-        """特殊月份（3月）报告期分红 → 归中期分配（#37 M4：仅 12 月为完整财年年报）。"""
-        df = pd.DataFrame([
-            {"报告期": "2025-03-31", "方案进度": "实施", "现金分红-现金分红比例": 3.0},
-        ])
-        total, year, details, _ = _parse_fhps_detail(df, self._info())
-        assert year == "2025"  # 无年报时回退到最新有数据的财年
-        assert details[0].report_time == "2025中期分配"  # 3 月归中期分配，非年报
-
-    def test_quarterly_accumulated_grouping(self):
-        """Q1+中报+Q3 同财年累加：2024-03-31 + 2024-06-30 + 2024-09-30 归 2024 财年。"""
-        df = pd.DataFrame([
-            {"报告期": "2024-03-31", "方案进度": "实施", "现金分红-现金分红比例": 1.0},
-            {"报告期": "2024-06-30", "方案进度": "实施", "现金分红-现金分红比例": 2.0},
-            {"报告期": "2024-09-30", "方案进度": "实施", "现金分红-现金分红比例": 1.5},
-        ])
-        total, year, details, _ = _parse_fhps_detail(df, self._info())
-        assert year == "2024"
-        # 3条明细，同财年累加；均为中期分配（非年报）
-        assert len(details) == 3
-        assert all(d.report_time == "2024中期分配" for d in details)
-        assert sum(d.dividend_per_10 for d in details) == pytest.approx(4.5)
-
-    def test_unimplemented_proposal_filtered(self):
-        """未实施预案（股东大会决议通过）被过滤，只保留已实施（对齐 JS T5）。"""
-        df = pd.DataFrame([
-            # 已实施（保留）
-            {"报告期": "2024-12-31", "方案进度": "实施分配", "现金分红-现金分红比例": 5.0},
-            # 未实施（决议通过，应排除）
-            {"报告期": "2025-12-31", "方案进度": "股东大会决议通过", "现金分红-现金分红比例": 8.0},
-        ])
-        total, year, details, _ = _parse_fhps_detail(df, self._info())
-        assert year == "2024"  # 未实施的 2025 预案被排除，仍选 2024
-        assert len(details) == 1
-        assert details[0].dividend_per_10 == 5.0
-
-    def test_unimplemented_string_filtered(self):
-        """方案进度含「未实施」字样的记录被排除。"""
-        df = pd.DataFrame([
-            {"报告期": "2025-12-31", "方案进度": "实施分配（未实施）", "现金分红-现金分红比例": 6.0},
-        ])
-        total, year, details, _ = _parse_fhps_detail(df, self._info())
-        assert total == 0.0  # 全部被过滤
-        assert year is None
 
 
 # ---------------------------------------------------------------------------

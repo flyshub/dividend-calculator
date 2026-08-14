@@ -3,7 +3,7 @@ pr_calculator 纯计算模块测试
 """
 from unittest.mock import patch
 
-from src.pr import _get_industry
+from src.pr import _get_industry, _get_pe_pb_eastmoney
 from src.pr_calculator import (
     compute_basic_pr,
     compute_corrected_pr,
@@ -238,3 +238,46 @@ class TestCalculatePrCyclicalPBRoe:
         # 周期股但无 5 年中位数 → 回退最新 ROE
         r = self._run("煤炭", 5.0, None)
         assert r.pr_pb == 16.0
+
+
+# ---- _get_pe_pb_eastmoney push2 字段解析（P2-1 实测：f164=PE-TTM、f167=PB、fltt=2）----
+
+class TestGetPePbEastmoney:
+    """push2 备选源字段解析：f164=PE-TTM、f167=PB（fltt=2 非缩放），f9/f115 弃用。"""
+
+    def _mock_get(self, payload):
+        class FakeResp:
+            status_code = 200
+
+            def json(self):
+                return payload
+
+        return patch("src.pr.requests.get", return_value=FakeResp())
+
+    def test_parses_f164_and_f167(self):
+        # 实测 600900 返回形状（fltt=2）：f164=19.15 与腾讯 f39 吻合，f167=3.31 与腾讯 f46 吻合
+        with self._mock_get({"data": {"f164": 19.15, "f167": 3.31}}):
+            pe, pb = _get_pe_pb_eastmoney("600900")
+        assert pe == 19.15
+        assert pb == 3.31
+
+    def test_requests_fltt2_and_f164(self):
+        with patch("src.pr.requests.get") as mock_get:
+            mock_get.return_value.status_code = 200
+            mock_get.return_value.json.return_value = {"data": {"f164": 6.49, "f167": 0.88}}
+            _get_pe_pb_eastmoney("600036")
+        url = mock_get.call_args[0][0]
+        assert "fields=f164,f167" in url
+        assert "fltt=2" in url
+        assert "secid=1.600036" in url
+
+    def test_zero_fields_return_none(self):
+        # f164/f167 为 0（数据缺失）→ 返回 None，不编造
+        with self._mock_get({"data": {"f164": 0, "f167": 0}}):
+            pe, pb = _get_pe_pb_eastmoney("600900")
+        assert (pe, pb) == (None, None)
+
+    def test_no_data_returns_none(self):
+        with self._mock_get({"data": None}):
+            pe, pb = _get_pe_pb_eastmoney("600900")
+        assert (pe, pb) == (None, None)

@@ -8,8 +8,6 @@ import logging
 import math
 from typing import Optional, Tuple
 
-import requests
-
 from .datasource.base import StockInfo, MonthlyPrice, DividendRecord, HistoricalData
 from .datasource import get_data_source_manager
 from .datasource.validation import check_stock_info
@@ -84,26 +82,8 @@ def _get_monthly_prices_mootdx(stock_code: str) -> list:
 def _get_monthly_prices_tencent(stock_code: str) -> list:
     """通过腾讯 K 线接口获取月度收盘价（前复权），不依赖东方财富，全球可用"""
     try:
-        prefix = "sh" if stock_code.startswith("6") else "sz"
-        url = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
-        params = {"param": f"{prefix}{stock_code},month,,,120,qfq"}
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-            "Referer": "https://gu.qq.com/",
-        }
-        resp = requests.get(url, params=params, headers=headers, timeout=10)
-        if resp.status_code != 200:
-            logger.warning("腾讯K线接口返回非200: %s", resp.status_code)
-            return []
-
-        data = resp.json()
-        if data.get("code") != 0:
-            logger.warning("腾讯K线接口返回错误: %s", data.get("msg", ""))
-            return []
-
-        key = f"{prefix}{stock_code}"
-        stock_data = data.get("data", {}).get(key, {})
-        rows = stock_data.get("qfqmonth", [])
+        from .tencent_quote import fetch_kline_rows
+        rows = fetch_kline_rows(stock_code, period="month", count=120)
         if not rows:
             logger.warning("腾讯K线接口无 qfqmonth 数据: %s", stock_code)
             return []
@@ -146,17 +126,17 @@ def _get_all_dividend_records(stock_code: str) -> Tuple[list, str]:
     返回 (records, source)，source 为实际数据来源（"东财" / "mootdx xdxr" / "无"），
     供调用方如实标注（数据铁律：来源可追溯）。
 
-    主：东财分红明细（RPT_SHAREBONUS_DET，报告期口径，与 site/js datasources.js 同源，
-    财年按报告期判定 month==12）；mootdx xdxr 兜底（仅含已除权记录，fenhong 浮点 round(4)）。
-    issue #77：TTM 主源切换后东财升主。
+    主：东财分红明细（fetch_dividend_rows → dividend_records.summarize_dividend_rows，
+    与主股息率/TTM 链路同一解析口径，issue #96）；mootdx xdxr 兜底（仅含已除权记录，
+    fenhong 浮点 round(4)）。issue #77：TTM 主源切换后东财升主。
 
-    注意：此链路服务于走势图数据链路（historical-data）与 TTM 股息率，复用 sustainability 模块的
-    东财取数能力，本身不属于股息可持续性功能的 spec 范围，属独立的健壮性增强。
+    注意：此链路服务于走势图数据链路（historical-data），与 TTM 股息率共用
+    dividend_records 解析口径，本身不属于股息可持续性功能的 spec 范围，属独立的健壮性增强。
     """
     # 主：东财分红明细（与 site/js datasources.js 同源，浏览器可直连）
     try:
         from .eastmoney_fetcher import fetch_dividend_rows
-        from .sustainability import parse_dividend_rows
+        from .dividend_records import summarize_dividend_rows
         rows = fetch_dividend_rows(stock_code)
         if rows is None:
             # 网络/HTTP 取数失败（#38 M5 语义），不短路，落入 mootdx 兜底
@@ -164,14 +144,22 @@ def _get_all_dividend_records(stock_code: str) -> Tuple[list, str]:
         if not rows:
             # 请求成功但真无分红——直接返回，无需兜底（避免把无分红公司误判为取数失败）
             return [], "东财"
-        records, _ = parse_dividend_rows(rows)
-        records.sort(key=lambda r: r.ex_dividend_date or "")
-        logger.debug("通过东财获取分红记录 %s: %d 条", stock_code, len(records))
-        return records, "东财"
+        summary = summarize_dividend_rows(rows, source="东财")  # 全量 records（含除权日），已按除权日升序
+        logger.debug("通过东财获取分红记录 %s: %d 条", stock_code, len(summary.records))
+        return summary.records, summary.source
     except Exception as e:
         logger.warning("东财获取分红记录失败 %s: %s", stock_code, e)
 
     # 兜底：mootdx xdxr（通达信协议，仅含已除权记录）
+    return _get_xdxr_records(stock_code)
+
+
+def _get_xdxr_records(stock_code: str) -> Tuple[list, str]:
+    """mootdx xdxr 兜底取数（仅含已除权记录，fenhong 浮点 round(4) + NaN 防护）。
+
+    走势图链路（_get_all_dividend_records 兜底）与 dividend.get_ttm_dividend 兜底
+    共用此实现。返回 (records, source)，source 为 "mootdx xdxr" / "无"。
+    """
     try:
         from .datasource.mootdx_source import get_quotes_client
         client = get_quotes_client()
