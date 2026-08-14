@@ -338,7 +338,8 @@ def section_sensitivity(lookup: BacktestLookup, eng: dict) -> str:
         scan_freq, scan_holdings, scan_pr_threshold, scan_weighting,
         scan_yield_threshold, _table,
     )
-    out = ["参数敏感性扫描（其他维度固定为 baseline）：\n\n"]
+    out = ["参数敏感性扫描（其他维度固定为 baseline）。**口径**：股息率/PR/调仓频率表"
+           "用 §3 含分红口径（与 headline 一致），持仓/加权表为含分红口径。\n\n"]
     out.append(_table(["股息率阈值", "累计", "年化", "夏普", "回撤", "期数"],
                       scan_yield_threshold(lookup)))
     out.append("\n")
@@ -354,8 +355,7 @@ def section_sensitivity(lookup: BacktestLookup, eng: dict) -> str:
     out.append(_table(["加权", "累计", "年化", "夏普", "回撤", "期数"],
                       scan_weighting(lookup, eng)))
     out.append("\n")
-    out.append("> 备注：full 层样本小（每季度 5-7 只），Top10/Top20 退化为全池；")
-    out.append("市值加权用真实总股本（腾讯 Index 73）× 当日价格。\n")
+    out.append("> 备注：市值加权用真实总股本（腾讯 Index 73）× 当日价格。\n")
     return "".join(out)
 
 
@@ -441,6 +441,15 @@ def section_conclusion(eng: dict, perf_cache: Optional[dict] = None, lookup=None
         "「吃老本高分红」股（FCF 不足仍高分红）会进入回测 L4 池但被现网排除。"
         "修复后 L4 判定与现网 assess_sustainability 对齐，L4/full 池构成与收益"
         "数字较修复前变化，修复后数字更接近真实策略表现。\n"
+        "- **胜率排除空仓期**（#135 M-11）：`win_rate` 只统计非空收益期，"
+        "空仓期（quarterly_returns=None，如调仓序列尾部）不计入——胜率口径"
+        "为「有持仓期中正收益占比」，而非「全部调仓期」。数值偏高，方向已知。\n"
+        "- **数据完整性审计结论**（#124 T1）：① notice_date 缺失 0.06%"
+        "（56/98910，2013 起几乎 100%）——披露日过滤有效；② announce_date 缺失 "
+        "0.00%——分红 asof 过滤无前视偏差；③ 82 只无日K 全是退市股"
+        "（361 退市股中 82 只无最后价，base 基准略偏乐观）；④ daily_pe 缺失 18 只"
+        "=次新股/北交所/老股，影响小；⑤ industry 值域以「金融」开头——剔金融变体"
+        "真实匹配。\n"
     )
 
 

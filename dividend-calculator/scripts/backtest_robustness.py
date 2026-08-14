@@ -120,6 +120,11 @@ def main() -> None:
     lookup = BacktestLookup(DB_PATH)
     conn = sqlite3.connect(DB_PATH)
     names = load_names(conn)
+    # T11 #135：与报告 4.1 入口统一——加载 industry 表（剔金融用真实分类）
+    try:
+        industries = dict(conn.execute("SELECT code, industry FROM industry").fetchall())
+    except sqlite3.OperationalError:
+        industries = {}
 
     results = [run_variant(lookup, "主回测 (T+1)")]
     results.append(run_variant(
@@ -127,7 +132,7 @@ def main() -> None:
         filter_fn=lambda cs, T: filter_small_cap(lookup, cs, T)))
     results.append(run_variant(
         lookup, "剔金融",
-        filter_fn=lambda cs, T: filter_financial(cs, names)))
+        filter_fn=lambda cs, T: filter_financial(cs, names, industries)))
     results.append(run_variant(lookup, "延迟 T+5", build_offset=5))
 
     print("== 稳健性检验：各变体全漏斗累计收益 ==")
