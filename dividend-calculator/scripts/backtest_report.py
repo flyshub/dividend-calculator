@@ -295,15 +295,36 @@ def section_robustness(lookup: BacktestLookup, conn) -> str:
             m = performance_metrics({"v": rets},
                                     rebalance_dates=res.get("rebalance_dates"))["v"] if rets else {}
             cum = res.get("cumulative_returns", {}).get("full")
+            pf_cum = res.get("pf_full_cum")    # T9 #134：含分红口径
             excess = (cum - base_cum) if (cum is not None and base_cum is not None
                                           and name != "主回测 T+1") else None
-            rows.append([name, _pct(cum), _pct(m.get("annualized")),
+            rows.append([name, _pct(cum), _pct(pf_cum), _pct(m.get("annualized")),
                          _pct(m.get("max_drawdown")), _num(m.get("sharpe")),
                          _pct(excess), str(res.get("n_quarters", "N/A"))])
         except Exception as e:
-            rows.append([name, "运行失败", "—", "—", "—", "—", str(e)[:40]])
+            rows.append([name, "运行失败", "—", "—", "—", "—", "—", str(e)[:40]])
 
-    body = _table(["变体", "累计", "年化", "回撤", "夏普", "超额(vs主)", "季度数"], rows) + "\n"
+    body = _table(["变体", "累计(纯价格)", "累计(含分红)", "年化", "回撤", "夏普",
+                   "超额(vs主)", "季度数"], rows) + "\n"
+    # T9 #134：半年调仓 bootstrap 95% CI（含分红口径）
+    try:
+        from backtest_portfolio import run_portfolio
+        from backtest_significance import block_bootstrap_ci
+        from backtest_engine import run_backtest as _rb
+        half_res = _rb(lookup, freq="semiannual")
+        half_pf = run_portfolio(lookup, half_res)
+        half_q = [r for r in half_pf["quarterly_returns"]["full"] if r is not None]
+        lo, hi = block_bootstrap_ci(half_q)
+        if lo is not None and hi is not None:
+            verdict = ("CI 下界 > 0，正收益结论在 block bootstrap 下成立" if lo > 0
+                       else "CI 含 0，正收益未达统计显著——半年调仓更优仅是提示而非结论")
+            body += (
+                f"\n*半年调仓（含分红口径，n={len(half_q)}期）逐期均值 "
+                f"{sum(half_q)/len(half_q)*100:+.2f}%，block bootstrap 95% CI "
+                f"[{lo*100:+.2f}%, {hi*100:+.2f}%]：{verdict}。*\n\n"
+            )
+    except Exception:
+        pass
     body += (
         "\n*剔微盘变体用真实总股本（腾讯 Index 73 当前快照，全 A 99.9% 覆盖）"
         "× 当日价格算市值；股本历史不可得，市值会因增发/分红后股本变动而失真。*\n\n"
@@ -414,6 +435,12 @@ def section_conclusion(eng: dict, perf_cache: Optional[dict] = None, lookup=None
         "策略层相对超额被低估约 0.07%/年，方向已知）。\n"
         "- **调仓时点差 1 日**（#130 M-12）：组合 build_day = T+1，基准 index return "
         "用 T→下T；两者差 1 个交易日。对季度调仓影响 <0.1%（已在方法论标注）。\n"
+        "- **L4 可持续性口径修复**（#132 H-2）：本次修复前 BacktestLookup 把 "
+        "investing_cf/capex/total_assets 等 5 字段硬编码为 None，导致 FCF 致命红旗"
+        "一票否决永不触发、资产负债表维度恒 0 分——回测 L4 比现网选股器宽松，"
+        "「吃老本高分红」股（FCF 不足仍高分红）会进入回测 L4 池但被现网排除。"
+        "修复后 L4 判定与现网 assess_sustainability 对齐，L4/full 池构成与收益"
+        "数字较修复前变化，修复后数字更接近真实策略表现。\n"
     )
 
 

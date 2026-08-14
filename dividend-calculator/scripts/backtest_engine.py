@@ -116,9 +116,10 @@ class BacktestLookup:
                 "bonus_ratio": br or 0.0,    # 每10股送股
                 "trans_ratio": tr or 0.0,    # 每10股转增
             })
-        for code, rep, roe, np_, oc, bps, car, lpr, nd in c.execute(
+        for code, rep, roe, np_, oc, bps, car, lpr, nd, ta, tl, npy, icf, capex in c.execute(
             "SELECT code, report_date, roe, net_profit, net_cash_operate, "
-            "bps, newcapitalader, loan_provision_ratio, notice_date "
+            "bps, newcapitalader, loan_provision_ratio, notice_date, "
+            "total_assets, total_liabilities, net_profit_yoy, investing_cf, capex "
             "FROM finance_history ORDER BY report_date"
         ):
             self._fin_recs[code].append({
@@ -129,18 +130,19 @@ class BacktestLookup:
                 "bps": bps,
                 "capital_adequacy_ratio": car,
                 "provision_coverage": lpr,
-                "notice_date": nd,    # T11 #116：实际披露日（None=未入库，回退报告期）
-                # 缺口字段（T2 未入库 → None，可持续性降级计分，报告标注）
-                "net_profit_yoy": None,
-                "investing_cf": None,
-                "total_assets": None,
-                "total_liabilities": None,
+                "notice_date": nd,    # T11 #116：实际披露日（None=未入库，回退+4月）
+                # T7 #132：5 字段从 DB 加载（T2 #125 补拉），FCF 红旗/资产维度恢复
+                "net_profit_yoy": npy,
+                "investing_cf": icf,
+                "total_assets": ta,
+                "total_liabilities": tl,
+                "capex": capex,
+                "debt_ratio": (tl / ta * 100.0) if (ta and tl and ta > 0) else None,  # 百分数（与 debt_ratio_decimal 语义一致）
+                # 仍未入库字段（T2 未覆盖），sustainability 降级处理
                 "interest_debt_ratio": None,
                 "interest_coverage": None,
                 "net_interest_margin": None,
                 "npl_ratio": None,
-                "capex": None,
-                "debt_ratio": None,
             })
         # 交易日历：用 H00922 全收益指数的交易日（2013-2026 完整覆盖）
         self.trading_days = [

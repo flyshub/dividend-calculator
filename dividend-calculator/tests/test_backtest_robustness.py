@@ -174,6 +174,9 @@ def test_run_variant_filter_in_pipeline(monkeypatch):
         def total_shares(self, code, asof):
             return self._shares.get(code)
 
+        def dividends(self, code, asof):
+            return []    # T9：run_variant 现在也跑 run_portfolio（含分红）
+
     lookup = TestLookup()
 
     main = run_variant(lookup, "主回测")

@@ -636,3 +636,48 @@ def test_finance_notice_date_missing_fallback_conservative_window():
     assert lk.finance("X", date(2023, 4, 30)) is not None
     # 2023-06-30：窗口后，可见
     assert lk.finance("X", date(2023, 6, 30)) is not None
+
+
+# T7 #132：BacktestLookup._load 加载 L4 财务字段（不再硬编码 None）
+def test_backtest_lookup_loads_l4_finance_fields(tmp_path, monkeypatch):
+    """_load 从 finance_history 读 5 个新字段 + 推算 debt_ratio（百分数）。"""
+    import sqlite3
+    db = tmp_path / "t.db"
+    c = sqlite3.connect(str(db))
+    c.executescript("""
+        CREATE TABLE finance_history (
+            code TEXT, report_date TEXT, roe REAL, net_profit REAL,
+            net_cash_operate REAL, bps REAL, newcapitalader REAL,
+            loan_provision_ratio REAL, notice_date TEXT,
+            total_assets REAL, total_liabilities REAL, net_profit_yoy REAL,
+            investing_cf REAL, capex REAL);
+        CREATE TABLE daily_price (code TEXT, date TEXT, close REAL);
+        CREATE TABLE daily_pe (code TEXT, date TEXT, pe_ttm REAL);
+        CREATE TABLE dividend_history (code TEXT, announce_date TEXT,
+            report_date TEXT, ex_dividend_date TEXT, cash_div_10shares REAL,
+            bonus_ratio REAL, trans_ratio REAL);
+        CREATE TABLE stock_list (code TEXT, delist_date TEXT, list_date TEXT);
+        CREATE TABLE index_daily (code TEXT, date TEXT);
+        INSERT INTO index_daily VALUES ('H00922', '2024-12-31');
+        INSERT INTO finance_history VALUES
+            ('X', '2024-12-31', 15.0, 50e8, 80e8, 10.0, NULL, NULL, '2025-03-30',
+             100e8, 60e8, 12.0, -20e8, 30e8);
+    """)
+    c.commit()
+    c.close()
+
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    from scripts.backtest_engine import BacktestLookup
+
+    lk = BacktestLookup(str(db))
+    fin = lk.finance("X", date(2025, 12, 31))
+    assert fin is not None
+    # 5 个 L4 字段从 DB 加载（不再硬编码 None）
+    assert fin["total_assets"] == 100e8
+    assert fin["total_liabilities"] == 60e8
+    assert fin["net_profit_yoy"] == 12.0
+    assert fin["investing_cf"] == -20e8
+    assert fin["capex"] == 30e8
+    # debt_ratio 推算为百分数（60/100=60.0），匹配 debt_ratio_decimal() 语义
+    assert fin["debt_ratio"] == pytest.approx(60.0)

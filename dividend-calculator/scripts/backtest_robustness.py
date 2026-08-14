@@ -23,7 +23,8 @@ from datetime import date
 from typing import Dict, List, Optional, Sequence
 
 from backtest_engine import BacktestLookup, run_backtest, quarterly_rebalance_dates
-from backtest_portfolio import performance_metrics, cum
+from backtest_portfolio import performance_metrics, cum, run_portfolio
+from backtest_significance import block_bootstrap_ci
 
 DB_PATH = "data/backtest.db"
 SMALL_CAP_FLOOR = 50e8  # 50 亿元
@@ -101,12 +102,17 @@ def run_variant(lookup, name: str, build_offset: int = 1,
     （收益已按未过滤池算完，过滤不影响结果）。
     """
     res = run_backtest(lookup, build_offset=build_offset, filter_fn=filter_fn)
+    # T9 #134：full 层含分红（portfolio_total_return）口径——headline 稳健性
+    pf = run_portfolio(lookup, res)
+    pf_full = pf["quarterly_returns"]["full"]
     return {
         "name": name,
         "incremental_excess": res["incremental_excess"],
         "cumulative_returns": res["cumulative_returns"],
         "quarterly_returns": res["quarterly_returns"],
         "n_quarters": len(res["rebalance_dates"]),
+        "pf_full_cum": cum(pf_full),
+        "pf_full_quarterly": pf_full,
     }
 
 
@@ -128,8 +134,10 @@ def main() -> None:
     base = results[0]["cumulative_returns"]["full"]
     for r in results:
         full = r["cumulative_returns"]["full"]
-        print(f"  {r['name']:>16s}  累计 {full*100:+6.2f}%  "
-              f"(vs 主回测 {full-base:+.2f}pp)")
+        pf_full = r.get("pf_full_cum")
+        pf_str = f"  含分红 {pf_full*100:+6.2f}%" if pf_full is not None else ""
+        print(f"  {r['name']:>16s}  纯价格 {full*100:+6.2f}%  "
+              f"(vs 主回测 {full-base:+.2f}pp){pf_str}")
 
     print("\n== 分层增量超额（累计，各变体 vs 主回测）==")
     for r in results[1:]:
@@ -146,6 +154,24 @@ def main() -> None:
         inc = res["incremental_excess"].get("full_over_l4")
         print(f"  start={start}  全漏斗 {full*100:+6.2f}%  "
               f"L4增量 {inc*100 if inc is not None else float('nan'):+.2f}%")
+
+    # T9 #134：半年调仓最优（14.19%）仅 25 期样本 + 事后扫描——补 bootstrap 95% CI
+    print("\n== 半年调仓 bootstrap 95% CI（block，T9 #134）==")
+    half_res = run_backtest(lookup, freq="semiannual")
+    half_pf = run_portfolio(lookup, half_res)
+    half_q = [r for r in half_pf["quarterly_returns"]["full"] if r is not None]
+    ci = block_bootstrap_ci(half_q)
+    lo, hi = ci
+    if lo is not None and hi is not None:
+        mean_r = sum(half_q) / len(half_q) if half_q else 0.0
+        print(f"  半年调仓逐期收益 mean={mean_r*100:+.2f}%  "
+              f"95% CI [{lo*100:+.2f}%, {hi*100:+.2f}%]  n={len(half_q)}")
+        if lo > 0:
+            print("  CI 下界 > 0：正收益结论在 block bootstrap 下成立")
+        else:
+            print("  CI 含 0：正收益结论未达统计显著，只能作为提示而非结论")
+    else:
+        print("  样本不足，无法计算 CI")
 
     print(json.dumps(
         {r["name"]: {"full": r["cumulative_returns"]["full"]} for r in results},
