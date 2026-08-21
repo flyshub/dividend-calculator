@@ -48,5 +48,10 @@
     "date": "2026-08-20",
     "file": "screener_2026-08-20.json",
     "count": 31
+  },
+  {
+    "date": "2026-08-21",
+    "file": "screener_2026-08-21.json",
+    "count": 33
   }
 ]
