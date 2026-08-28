@@ -134,10 +134,13 @@ def _summary_to_dividend(
     """
     year = summary.latest_year
     total_per_10 = summary.fiscal_total_per_10
+    # 明细/文案只含现金分红行：排除纯送转锚点行（per10=0，走势图股本锚点用）——
+    # 与 JS parseDividendRecords 的 explanation 逐字一致（东财链 records 已含锚点行，
+    # fhps/cninfo 链路靠前置过滤天然不含，此处统一兜底不依赖调用方）
     year_details = [
         DividendDetail(r.report_time, r.dividend_per_10)
         for r in summary.records
-        if (r.report_time or "").startswith(year)
+        if (r.report_time or "").startswith(year) and r.dividend_per_10 > 0
     ]
     dps = total_per_10 / 10.0
     total_shares = stock_info.total_shares

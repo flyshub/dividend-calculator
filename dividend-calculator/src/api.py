@@ -238,9 +238,9 @@ def get_historical_data(stock_input: str) -> Optional[HistoricalData]:
 
     月度价格为双口径（close 前复权画图 / close_nominal 不复权算股息率总额法），
     分红记录含登记股本（total_shares）与送转比例（transfer_per_10）供前端锚定
-    历史股本。已知限制：parse_dividend_rows 按金额过滤会丢纯送转行（无现金分红的
-    10转X），若未来有消费方做走势图股息率，需补纯送转锚点事件（浏览器端
-    site/index.html fetchChartData 已放宽该过滤，双端口径以 JS 为准）。"""
+    历史股本；纯送转行（dividend_per_10=0，transfer_per_10>0）保留进 records
+    作股本锚点事件——与浏览器端 calculator.js toChartDividendRecords 双端口径
+    一致。mootdx xdxr 兜底链路无股本字段，该源下走势图股息率为 null（宁缺毋假）。"""
     stock_code = normalize_stock_code(stock_input)
     if not (stock_code.isdigit() and len(stock_code) == 6):
         logger.error("无效的股票代码: %s", stock_code)

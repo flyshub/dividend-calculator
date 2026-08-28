@@ -405,3 +405,32 @@ def test_compute_ttm_dividend_skips_zero_per10():
     total, start, end, count = compute_ttm_dividend(records, 1.0e8, as_of_date=date(2026, 3, 1))
     assert total is None
     assert count == 0
+
+
+def test_summary_to_dividend_excludes_pure_transfer():
+    """主链路明细/文案排除纯送转锚点行（per10=0）：不出现「10派0.0元」，
+    与 JS parseDividendRecords 的 explanation 逐字一致（双端口径）。"""
+    from src.datasource.base import StockInfo
+    from src.dividend import _summary_to_dividend
+    from src.dividend_records import DividendSummary
+
+    summary = DividendSummary(
+        records=[
+            DividendRecord(ex_dividend_date="2022-06-10", dividend_per_10=5.0,
+                           report_time="2021年报", total_shares=2.0e8),
+            DividendRecord(ex_dividend_date="2021-12-20", dividend_per_10=0.0,
+                           report_time="2021年报", total_shares=1.0e8, transfer_per_10=10),
+        ],
+        latest_year="2021",
+        fiscal_total_per_10=5.0,
+        ttm_total_per_10=5.0,
+        source="东财",
+    )
+    info = StockInfo(stock_code="600900", current_price=20.0, total_shares=2.0e8)
+    total_div, year, details, expl = _summary_to_dividend(summary, info)
+
+    assert year == "2021"
+    assert total_div == pytest.approx(0.5 * 2.0e8)
+    assert len(details) == 1  # 锚点行不进明细
+    assert details[0].dividend_per_10 == 5.0
+    assert "10派0" not in expl

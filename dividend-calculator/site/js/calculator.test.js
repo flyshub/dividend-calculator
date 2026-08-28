@@ -156,6 +156,51 @@ test('parseDividendRecords 无分红', () => {
   assert.equal(r.year, null);
 });
 
+// ---- isImplemented / toChartDividendRecords（走势图映射单一实现）----
+test('isImplemented T5 判定（对齐 Python _is_implemented）', () => {
+  assert.equal(Calc.isImplemented('实施分配'), true);
+  assert.equal(Calc.isImplemented('董事会决议通过'), false);
+  assert.equal(Calc.isImplemented('未实施'), false);
+  assert.equal(Calc.isImplemented(''), false);
+  assert.equal(Calc.isImplemented(null), false);
+});
+
+test('toChartDividendRecords 现金行映射 + 实施过滤 + 预披露排除', () => {
+  const rows = [
+    { REPORT_DATE: '2024-12-31 00:00:00', PRETAX_BONUS_RMB: 7.9, IT_RATIO: null,
+      ASSIGN_PROGRESS: '实施分配', EX_DIVIDEND_DATE: '2025-07-10 00:00:00',
+      PLAN_NOTICE_DATE: '2025-04-25 00:00:00', TOTAL_SHARES: 2.4468e10 },
+    { REPORT_DATE: '2025-12-31 00:00:00', PRETAX_BONUS_RMB: 8,
+      ASSIGN_PROGRESS: '预披露', EX_DIVIDEND_DATE: '2026-07-10 00:00:00' },
+    { REPORT_DATE: '2025-06-30 00:00:00', PRETAX_BONUS_RMB: 2.1,
+      ASSIGN_PROGRESS: '实施分配', EX_DIVIDEND_DATE: '2026-02-12 00:00:00' },
+  ];
+  const out = Calc.toChartDividendRecords(rows);
+  assert.equal(out.length, 2);  // 预披露排除
+  const annual = out.find(r => r.report_time === '2024年报');
+  assert.equal(annual.dividend_per_10, 7.9);
+  assert.equal(annual.plan_notice_date, '2025-04-25');
+  assert.equal(annual.total_shares, 2.4468e10);
+  const interim = out.find(r => r.report_time === '2025中期分配');
+  assert.equal(interim.ex_dividend_date, '2026-02-12');
+  assert.equal(interim.total_shares, null);
+});
+
+test('toChartDividendRecords 纯送转行保留（per10=0，仅锚点）', () => {
+  const rows = [
+    { REPORT_DATE: '2021-12-31 00:00:00', PRETAX_BONUS_RMB: null, IT_RATIO: 10,
+      ASSIGN_PROGRESS: '实施分配', EX_DIVIDEND_DATE: '2021-12-20 00:00:00',
+      TOTAL_SHARES: 1.0e8 },
+    { REPORT_DATE: '2021-12-31 00:00:00', PRETAX_BONUS_RMB: 0, IT_RATIO: 0,
+      ASSIGN_PROGRESS: '实施分配', EX_DIVIDEND_DATE: '2022-01-20 00:00:00' },
+  ];
+  const out = Calc.toChartDividendRecords(rows);
+  assert.equal(out.length, 1);  // 无现金无送转 → 丢弃
+  assert.equal(out[0].dividend_per_10, 0);
+  assert.equal(out[0].transfer_per_10, 10);
+  assert.equal(out[0].total_shares, 1.0e8);
+});
+
 // ---- computeDividendYields（走势图总额法）----
 /* 回归案例（嘉友国际 603871，2026-08 实测东财/腾讯数据）：
  * 高送转公司，旧每股法（每股分红÷前复权价）曾把 2021/01 显示为 45.77%。
