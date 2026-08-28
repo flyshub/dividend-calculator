@@ -350,3 +350,58 @@ def test_dividend_fixes_file_loadable_and_verified():
         assert f["corrected_per_10"] > 0
         assert f["verified_by"]
         assert f["verified_at"]
+
+
+def test_parse_dividend_rows_keeps_pure_transfer_as_anchor():
+    """纯送转行（无现金分红，IT_RATIO>0）保留进 records 供走势图锚定股本（对齐
+    浏览器端 fetchChartData 口径，/api/historical-data 消费方不再静默偏差），
+    但不进分子与年报判定（latest_year/fiscal_total 不受影响）。"""
+    rows = [
+        {"REPORT_DATE": "2020-12-31 00:00:00", "PRETAX_BONUS_RMB": 5,
+         "ASSIGN_PROGRESS": "实施分配", "EX_DIVIDEND_DATE": "2021-06-10 00:00:00",
+         "TOTAL_SHARES": 1.0e8},
+        {"REPORT_DATE": "2021-12-31 00:00:00", "PRETAX_BONUS_RMB": None,
+         "IT_RATIO": 10, "ASSIGN_PROGRESS": "实施分配",
+         "EX_DIVIDEND_DATE": "2021-12-20 00:00:00", "TOTAL_SHARES": 1.0e8},
+        {"REPORT_DATE": "2021-12-31 00:00:00", "PRETAX_BONUS_RMB": 5,
+         "ASSIGN_PROGRESS": "实施分配", "EX_DIVIDEND_DATE": "2022-06-10 00:00:00",
+         "TOTAL_SHARES": 2.0e8},
+    ]
+    records, latest_year = parse_dividend_rows(rows)
+
+    by_ex = {r.ex_dividend_date: r for r in records}
+    # 纯送转行保留：per10=0、送转比例透传、登记股本透传
+    assert "2021-12-20" in by_ex
+    anchor = by_ex["2021-12-20"]
+    assert anchor.dividend_per_10 == 0
+    assert anchor.transfer_per_10 == 10
+    assert anchor.total_shares == 1.0e8
+    # 年报判定不受纯送转行影响：2020/2021 均有年报（2021 来自现金分红行）
+    assert latest_year == "2021"
+    # 分子不受影响：records 中现金行 per10 正常
+    assert by_ex["2022-06-10"].dividend_per_10 == 5
+
+
+def test_parse_dividend_rows_transfer_without_it_ratio_dropped():
+    """无现金且无送转比例的行（如空行/异常行）仍丢弃，不产生垃圾锚点。"""
+    rows = [
+        {"REPORT_DATE": "2021-12-31 00:00:00", "PRETAX_BONUS_RMB": 0,
+         "ASSIGN_PROGRESS": "实施分配", "EX_DIVIDEND_DATE": "2022-01-10 00:00:00"},
+    ]
+    records, latest_year = parse_dividend_rows(rows)
+    assert records == []
+    assert latest_year is None
+
+
+def test_compute_ttm_dividend_skips_zero_per10():
+    """TTM 窗口内仅纯送转行（per10=0）→ 不算派息（None），count 不虚增。"""
+    from src.datasource.base import DividendRecord
+    from src.utils import compute_ttm_dividend
+
+    records = [
+        DividendRecord(ex_dividend_date="2026-01-10", dividend_per_10=0.0,
+                       report_time="2025年报", transfer_per_10=10),
+    ]
+    total, start, end, count = compute_ttm_dividend(records, 1.0e8, as_of_date=date(2026, 3, 1))
+    assert total is None
+    assert count == 0

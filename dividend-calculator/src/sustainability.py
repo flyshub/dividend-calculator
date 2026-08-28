@@ -150,7 +150,9 @@ def parse_dividend_rows(rows: List[dict]) -> Tuple[List[DividendRecord], Optiona
 
     纯函数，与 JS calculator.parseDividendRecords 同口径：
       - 仅保留已实施分红（_is_implemented，T5）
-      - 仅保留 PRETAX_BONUS_RMB > 0 的现金分红
+      - 现金分红（PRETAX_BONUS_RMB > 0）进分子与财年分组；
+        纯送转行（无现金但 IT_RATIO > 0）保留进 records（走势图股本锚点），
+        不进分子与年报判定
       - report_time 取报告期年份 + '年报'/'半年报'
     返回: (records, latest_year_str)
     """
@@ -164,7 +166,13 @@ def parse_dividend_rows(rows: List[dict]) -> Tuple[List[DividendRecord], Optiona
         if not _is_implemented(progress):
             continue
         dp10 = _to_float(row.get("PRETAX_BONUS_RMB"))
-        if dp10 is None or dp10 <= 0:
+        transfer = _to_float(row.get("IT_RATIO"))
+        has_cash = dp10 is not None and dp10 > 0
+        has_transfer = transfer is not None and transfer > 0
+        # 纯送转行（无现金但 IT_RATIO>0）不进分子，保留进 records 供走势图锚定
+        # 股本（对齐浏览器端 fetchChartData 口径，/api/historical-data 不再静默偏差）；
+        # 无现金也无送转 → 丢弃
+        if not has_cash and not has_transfer:
             continue
         report_date = str(row.get("REPORT_DATE") or "")
         m = date_re.match(report_date)
@@ -181,12 +189,15 @@ def parse_dividend_rows(rows: List[dict]) -> Tuple[List[DividendRecord], Optiona
         plan_date = str(row.get("PLAN_NOTICE_DATE") or "")[:10]
         records.append(DividendRecord(
             ex_dividend_date=ex_date,
-            dividend_per_10=dp10,
+            dividend_per_10=dp10 if has_cash else 0.0,
             report_time=label,
             plan_notice_date=plan_date,
             total_shares=_to_float(row.get("TOTAL_SHARES")),
-            transfer_per_10=_to_float(row.get("IT_RATIO")),
+            transfer_per_10=transfer,
         ))
+        if not has_cash:
+            # 纯送转行不参与财年分组（分子与年报判定不受影响）
+            continue
 
         if year not in yearly:
             yearly[year] = {"total": 0.0, "has_annual": False}
@@ -225,6 +236,10 @@ def aggregate_dividend_history(records: List[DividendRecord],
     # 避免半年报 3 元 vs 上年年报 8 元被误判为削减
     annual_amount: dict = {}
     for rec in records:
+        # 纯送转锚点行（per10=0，走势图股本锚点用）不算分红年——
+        # 不参与总额/连续年数/削减判定（分红 = 现金分红）
+        if not (rec.dividend_per_10 > 0):
+            continue
         ym = re.match(r"(\d{4})", rec.report_time or "")
         if not ym:
             continue

@@ -81,3 +81,43 @@ def test_historical_data_name_none():
         dividend_records=[],
     )
     assert hd.stock_name is None
+
+
+def test_xdxr_records_transfer_extraction(monkeypatch):
+    """mootdx xdxr 兜底链路的送转比例提取：字段映射实地验证（数据铁律）——
+    songzhuangu 正确透传为 transfer_per_10；无送转行/NaN 行不炸、正确降级。"""
+    import pandas as pd
+    from unittest.mock import MagicMock
+
+    df = pd.DataFrame([
+        # 正常：10派2.1 + 10送转4
+        {"year": 2021, "month": 6, "day": 15, "category": 1,
+         "fenhong": 2.1, "songzhuangu": 4.0, "peigu": 0},
+        # 无送转（0）→ transfer_per_10=None
+        {"year": 2022, "month": 6, "day": 9, "category": 1,
+         "fenhong": 5.0, "songzhuangu": 0.0, "peigu": 0},
+        # songzhuangu 缺失（列 NaN）→ 不炸，transfer_per_10=None
+        {"year": 2023, "month": 6, "day": 21, "category": 1,
+         "fenhong": 5.0, "songzhuangu": float("nan"), "peigu": 0},
+        # fenhong NaN → 整行跳过（#34 M1 NaN 防护）
+        {"year": 2024, "month": 6, "day": 18, "category": 1,
+         "fenhong": float("nan"), "songzhuangu": 4.0, "peigu": 0},
+        # 非除权类目（category != 1）→ 跳过
+        {"year": 2025, "month": 1, "day": 10, "category": 7,
+         "fenhong": 1.0, "songzhuangu": 0.0, "peigu": 0},
+    ])
+    mock_client = MagicMock()
+    mock_client.xdxr.return_value = df
+    monkeypatch.setattr("src.datasource.mootdx_source.get_quotes_client", lambda: mock_client)
+
+    from src.api import _get_xdxr_records
+    records, source = _get_xdxr_records("603871")
+
+    assert source == "mootdx xdxr"
+    by_ex = {r.ex_dividend_date: r for r in records}
+    assert set(by_ex) == {"2021-06-15", "2022-06-09", "2023-06-21"}
+    assert by_ex["2021-06-15"].dividend_per_10 == 2.1
+    assert by_ex["2021-06-15"].transfer_per_10 == 4.0
+    assert by_ex["2022-06-09"].transfer_per_10 is None
+    assert by_ex["2023-06-21"].transfer_per_10 is None
+    assert by_ex["2023-06-21"].dividend_per_10 == 5.0

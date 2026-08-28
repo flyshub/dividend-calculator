@@ -624,3 +624,22 @@ def test_assess_with_auto_fetch_failure_marks_note(monkeypatch):
     )
     assert result.triggered is True
     assert any("分红历史数据获取失败" in n for n in result.notes)
+
+
+def test_aggregate_skips_pure_transfer_records():
+    """纯送转锚点行（per10=0，走势图股本锚点用）不算分红年——连续年数/削减判定
+    只看现金分红（verify_js_vs_python 伊利 600887 回归：JS=15 vs PY=16 差异源）。"""
+    from src.sustainability import aggregate_dividend_history
+    from src.datasource.base import DividendRecord
+
+    records = [
+        DividendRecord(ex_dividend_date="2025-07-10", dividend_per_10=7.0,
+                       report_time="2024年报", total_shares=1.0e9),
+        # 2023 年仅有纯送转（无现金）→ 不构成 2023 分红年 → 连续年数应断在 1
+        DividendRecord(ex_dividend_date="2023-12-20", dividend_per_10=0.0,
+                       report_time="2023年报", total_shares=1.0e9, transfer_per_10=10),
+        DividendRecord(ex_dividend_date="2022-07-10", dividend_per_10=6.0,
+                       report_time="2021年报", total_shares=1.0e9),
+    ]
+    hist = aggregate_dividend_history(records, "2024", 1.0e9)
+    assert hist.consecutive_years == 1

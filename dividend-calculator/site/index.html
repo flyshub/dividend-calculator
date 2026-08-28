@@ -1269,43 +1269,18 @@
       };
     }
 
-    /* 浏览器端历史数据：腾讯月度K线 + 东财分红（含除权日），组装为图表期望的形态 */
+    /* 浏览器端历史数据：腾讯月度K线 + 东财分红（含除权日），组装为图表期望的形态
+     * 过滤/映射已提取到 calculator.js toChartDividendRecords（单一实现，node 可测） */
     function fetchChartData(stockCode, stockName, totalSharesNow) {
       return Promise.all([
         DataSources.fetchMonthlyPrices(stockCode, 120),
         DataSources.fetchDividendRecords(stockCode),
       ]).then(function (results) {
-        var monthlyPrices = results[0];
-        var dividendRecords = results[1].filter(function (r) {
-          if (!r.EX_DIVIDEND_DATE) return false;
-          /* T5：仅保留已实施（对齐 Python parse_dividend_rows），排除预案/预披露 */
-          var p = String(r.ASSIGN_PROGRESS || '');
-          if (p.indexOf('实施') === -1 || p.indexOf('未实施') !== -1) return false;
-          /* 现金分红行进分子；纯送转行（PRETAX 无效但 IT_RATIO>0）保留——
-           * 仅作走势图股本锚点事件，calculator.js 端 per10=0 不进分子 */
-          var hasCash = Number(r.PRETAX_BONUS_RMB) > 0;
-          var hasTransfer = Number(r.IT_RATIO) > 0;
-          return hasCash || hasTransfer;
-        }).map(function (r) {
-          var y = r.REPORT_DATE ? r.REPORT_DATE.slice(0, 4) : '';
-          var m = r.REPORT_DATE ? r.REPORT_DATE.slice(5, 7) : '';
-          var isAnnual = (m === '12'); /* 对齐 calculator.js：仅 12 月报告期为年报，6/9/3 月为中期分配 */
-          return {
-            ex_dividend_date: r.EX_DIVIDEND_DATE.slice(0, 10),
-            dividend_per_10: Number(r.PRETAX_BONUS_RMB) > 0 ? r.PRETAX_BONUS_RMB : 0,
-            report_time: y + (isAnnual ? '年报' : '中期分配'),
-            /* 预案公告日：财年股息生效起点（走势图按此归因，非除权日）；无则空串回退除权日 */
-            plan_notice_date: r.PLAN_NOTICE_DATE ? r.PLAN_NOTICE_DATE.slice(0, 10) : '',
-            /* 登记股本（除权前）+ 送转比例：走势图总额法的股本锚点（无则该段股息率 null） */
-            total_shares: r.TOTAL_SHARES > 0 ? Number(r.TOTAL_SHARES) : null,
-            transfer_per_10: r.IT_RATIO != null ? Number(r.IT_RATIO) : null,
-          };
-        });
         return {
           stock_code: stockCode,
           stock_name: stockName,
-          monthly_prices: monthlyPrices,
-          dividend_records: dividendRecords,
+          monthly_prices: results[0],
+          dividend_records: Calculator.toChartDividendRecords(results[1]),
           total_shares_now: totalSharesNow > 0 ? totalSharesNow : null,
           data_date: new Date().toISOString().slice(0, 10),
         };

@@ -43,8 +43,38 @@
    * RPT_SHAREBONUS_DET 行）──
    * 行字段: REPORT_DATE (YYYY-MM-DD ...), PRETAX_BONUS_RMB (每10股派息), EX_DIVIDEND_DATE
    * 财年判定单一实现（Python sustainability.classify_fiscal_report）：仅12月=年报。
-   * 返回: { totalDividend, year, details:[{report_time, dividend_per_10, ex_dividend_date}], explanation }
-   */
+   * 返回: { totalDividend, year, details:[{report_time, dividend_per_10, ex_dividend_date}], explanation } */
+  /* T5「已实施」判定单一实现（对齐 Python sustainability._is_implemented）：
+   * 含「实施」且不含「未实施」（排除预案/预披露/批准等未落地状态）。
+   * parseDividendRecords / computeTtmDividend / toChartDividendRecords 共用。 */
+  function isImplemented(progress) {
+    var p = String(progress || '');
+    return p.indexOf('实施') !== -1 && p.indexOf('未实施') === -1;
+  }
+
+  /* 东财分红行 → 走势图记录（走势图数据链路映射单一实现，与 Python
+   * parse_dividend_rows 纯送转口径一致：现金行进分子，纯送转行保留作股本锚点） */
+  function toChartDividendRecords(rows) {
+    return (rows || []).filter(function (r) {
+      return r.EX_DIVIDEND_DATE && isImplemented(r.ASSIGN_PROGRESS) &&
+        (Number(r.PRETAX_BONUS_RMB) > 0 || Number(r.IT_RATIO) > 0);
+    }).map(function (r) {
+      var y = r.REPORT_DATE ? r.REPORT_DATE.slice(0, 4) : '';
+      var m = r.REPORT_DATE ? r.REPORT_DATE.slice(5, 7) : '';
+      var isAnnual = (m === '12'); /* 仅 12 月报告期为年报（classify_fiscal_report 同口径） */
+      return {
+        ex_dividend_date: r.EX_DIVIDEND_DATE.slice(0, 10),
+        dividend_per_10: Number(r.PRETAX_BONUS_RMB) > 0 ? r.PRETAX_BONUS_RMB : 0,
+        report_time: y + (isAnnual ? '年报' : '中期分配'),
+        /* 预案公告日：财年股息生效起点（走势图按此归因，非除权日）；无则空串回退除权日 */
+        plan_notice_date: r.PLAN_NOTICE_DATE ? r.PLAN_NOTICE_DATE.slice(0, 10) : '',
+        /* 登记股本（除权前）+ 送转比例：走势图总额法的股本锚点（无则该段股息率 null） */
+        total_shares: r.TOTAL_SHARES > 0 ? Number(r.TOTAL_SHARES) : null,
+        transfer_per_10: r.IT_RATIO != null ? Number(r.IT_RATIO) : null,
+      };
+    });
+  }
+
   function parseDividendRecords(rows, totalShares) {
     var yearly = {};
     var reportDate = /^(\d{4})-(\d{2})/;
@@ -52,8 +82,7 @@
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i];
       /* T5：仅保留已实施分红（含'实施'且不含'未实施'，排除预案/预披露/批准等）*/
-      var progress = String(row.ASSIGN_PROGRESS || '');
-      if (progress.indexOf('实施') === -1 || progress.indexOf('未实施') !== -1) continue;
+      if (!isImplemented(row.ASSIGN_PROGRESS)) continue;
       var dp10 = Number(row.PRETAX_BONUS_RMB);
       if (!(dp10 > 0)) continue;
       var m = reportDate.exec(row.REPORT_DATE || '');
@@ -245,8 +274,7 @@
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i];
       /* T5：仅保留已实施分红（对齐 parseDividendRecords），排除预案/预披露 */
-      var progress = String(row.ASSIGN_PROGRESS || '');
-      if (progress.indexOf('实施') === -1 || progress.indexOf('未实施') !== -1) continue;
+      if (!isImplemented(row.ASSIGN_PROGRESS)) continue;
       var dp10 = Number(row.PRETAX_BONUS_RMB);
       if (!(dp10 > 0)) continue;
       var ex = row.EX_DIVIDEND_DATE || row.ex_dividend_date;
@@ -1092,6 +1120,8 @@
   return {
     reportTime: reportTime,
     calculateDividendYield: calculateDividendYield,
+    isImplemented: isImplemented,
+    toChartDividendRecords: toChartDividendRecords,
     parseDividendRecords: parseDividendRecords,
     computeDividendYields: computeDividendYields,
     computeTtmDividend: computeTtmDividend,

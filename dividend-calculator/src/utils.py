@@ -193,6 +193,9 @@ def compute_ttm_dividend(
         ex_date = getattr(rec, "ex_dividend_date", None)
         if not ex_date:
             continue
+        # 纯送转锚点行（per10=0，走势图股本锚点用）不算派息，count 不虚增
+        if not (float(rec.dividend_per_10) > 0):
+            continue
         try:
             d = date.fromisoformat(str(ex_date)[:10])
         except ValueError:

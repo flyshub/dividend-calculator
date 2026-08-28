@@ -22,6 +22,8 @@ from pathlib import Path
 import requests
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# 模块级注入（fetch_dividend_rows 出口修正与 compute_python 均依赖 src 包）
+sys.path.insert(0, str(PROJECT_ROOT))
 
 TOLERANCE = 1e-9  # 相同输入 → 结果应完全一致（仅容忍浮点精度）
 FIELDS_NUMERIC = [
@@ -106,7 +108,11 @@ def fetch_dividend_rows(code: str) -> list:
            f'&filter=(SECURITY_CODE%3D%22{code}%22)')
     r = _get(url)
     d = r.json()
-    return (d.get("result") or {}).get("data") or []
+    rows = (d.get("result") or {}).get("data") or []
+    # 与浏览器 datasources.js fetchDividendRecords 同构：出口应用修正表
+    # （site/data/dividend_fixes.json，东财已知错误行多源验证修正）
+    from src.eastmoney_fetcher import _apply_dividend_fixes
+    return _apply_dividend_fixes(rows, code)
 
 
 def fetch_financial_rows(code: str) -> list:
@@ -416,6 +422,18 @@ def main():
         if not raw["financial_rows"]:
             print(f"[{code}] 财务数据为空，verify 结果不可信")
             return 2
+
+        # 修正表出口校验（CI 防护）：东财已知错误行（如长电 2015 年度 10派1.2946→4）
+        # 必须在取数出口被替换，防止修正表/应用逻辑回归
+        for fix_key, expected in [(("600900", "2015-12-31"), 4.0)]:
+            if code != fix_key[0]:
+                continue
+            hit = next((r for r in raw["dividend_rows"]
+                        if str(r.get("REPORT_DATE") or "").startswith(fix_key[1])), None)
+            if hit is None or abs(float(hit.get("PRETAX_BONUS_RMB") or 0) - expected) > 1e-9:
+                print(f"[{code}] 修正表出口校验失败：{fix_key[1]} 应为 10派{expected}")
+                return 2
+            print(f"[{code}] 修正表出口校验 OK（{fix_key[1]} 已修正为 10派{expected}）")
 
     # Windows 默认用 GBK 写文件会损坏中文，强制 UTF-8
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, dir="/tmp", encoding="utf-8") as f:
