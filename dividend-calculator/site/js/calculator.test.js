@@ -155,6 +155,123 @@ test('parseDividendRecords 无分红', () => {
   assert.equal(r.totalDividend, 0);
   assert.equal(r.year, null);
 });
+
+// ---- computeDividendYields（走势图总额法）----
+/* 回归案例（嘉友国际 603871，2026-08 实测东财/腾讯数据）：
+ * 高送转公司，旧每股法（每股分红÷前复权价）曾把 2021/01 显示为 45.77%。
+ * 真实数字：2019年度 10派10（除权 2020-06-15，登记股本 1.568 亿股 = 除权前），
+ * 2021-01-29 名义收盘价 19.17 元（前复权价仅 2.185，口径错配 ~8.8 倍）；
+ * 2021-01 时点股本 2.195 亿股（2020-06 的 10转4 已生效）→ 真实股息率 3.73%。 */
+function jyRecords() {
+  return [
+    { ex_dividend_date: '2019-06-05', dividend_per_10: 5, report_time: '2018年报',
+      plan_notice_date: '2019-04-16', total_shares: 1.120e8, transfer_per_10: 4 },
+    { ex_dividend_date: '2020-06-15', dividend_per_10: 10, report_time: '2019年报',
+      plan_notice_date: '2020-04-28', total_shares: 1.568e8, transfer_per_10: 4 },
+    { ex_dividend_date: '2021-06-15', dividend_per_10: 10, report_time: '2020年报',
+      plan_notice_date: '2021-04-23', total_shares: 2.195e8, transfer_per_10: 3 },
+  ];
+}
+
+test('computeDividendYields 高送转公司总额法（嘉友 603871 回归）', () => {
+  const prices = [
+    { date: '2021-01-29', close: 2.185, close_nominal: 19.17 },
+  ];
+  const out = Calc.computeDividendYields(prices, jyRecords());
+  // 分子 1元/股×1.568亿（2019年度除权前登记股本）
+  // 分母 19.17 × 2.195亿（2021-01 时点股本，2020-06 送转已生效）
+  assert.equal(out[0].yield, round2(1.568e8 / (19.17 * 2.195e8) * 100));
+  assert.equal(out[0].fiscalYear, 2019);
+  assert.equal(out[0].price, 2.185);
+});
+
+test('computeDividendYields 财年归因：2021/05 切换到 2020 年度', () => {
+  const prices = [
+    { date: '2021-05-31', close: 3.06, close_nominal: 26.85 },  // 2020年报预案 2021-04-23 已公告
+    { date: '2021-01-29', close: 2.185, close_nominal: 19.17 },
+  ];
+  const out = Calc.computeDividendYields(prices, jyRecords());
+  // 2021-05：分子 2020 年度 1元×2.195亿（其登记股本），分母 26.85×2.195亿（送转未发生）
+  assert.equal(out[0].fiscalYear, 2020);
+  assert.equal(out[0].yield, round2(2.195e8 / (26.85 * 2.195e8) * 100));
+  assert.equal(out[1].fiscalYear, 2019);
+});
+
+test('computeDividendYields 晚于全部除权：优先当前总股本（与主卡自洽）', () => {
+  const prices = [{ date: '2022-01-28', close: 2.8, close_nominal: 24.5 }];
+  const out = Calc.computeDividendYields(prices, jyRecords(), 3.170e8);
+  // 2022-01：分子 2020 年度 2.195亿，分母 24.5 × 3.17亿（当前总股本）
+  assert.equal(out[0].yield, round2(2.195e8 / (24.5 * 3.170e8) * 100));
+});
+
+test('computeDividendYields 晚于全部除权且无当前股本：末条送转因子回退', () => {
+  const prices = [{ date: '2022-01-28', close: 2.8, close_nominal: 24.5 }];
+  const out = Calc.computeDividendYields(prices, jyRecords());
+  // 末条 2021-06-15 登记 2.195亿 × (10+3)/10（10转3）
+  assert.equal(out[0].yield, round2(2.195e8 / (24.5 * 2.195e8 * 1.3) * 100));
+});
+
+test('computeDividendYields 无送转时与每股法一致（等价性）', () => {
+  // 股本恒定 S：总额法 = Σdps×S ÷ (P×S) = Σdps/P
+  const S = 5.0e9;
+  const recs = [
+    { ex_dividend_date: '2025-07-10', dividend_per_10: 8, report_time: '2024年报',
+      plan_notice_date: '2025-04-30', total_shares: S },
+    { ex_dividend_date: '2024-07-10', dividend_per_10: 7.5, report_time: '2023年报',
+      plan_notice_date: '2024-04-30', total_shares: S },
+  ];
+  const prices = [{ date: '2025-08-29', close: 25.0, close_nominal: 25.0 }];
+  const out = Calc.computeDividendYields(prices, recs, S);
+  assert.equal(out[0].yield, round2(0.8 / 25.0 * 100));
+});
+
+test('computeDividendYields 股本缺失 → null（宁缺毋假）', () => {
+  const recs = [
+    { ex_dividend_date: '2024-07-10', dividend_per_10: 5, report_time: '2023年报',
+      plan_notice_date: '2024-04-30', total_shares: null },  // mootdx 兜底无股本
+  ];
+  const prices = [{ date: '2024-08-30', close: 10.0, close_nominal: 10.0 }];
+  const out = Calc.computeDividendYields(prices, recs);
+  assert.equal(out[0].yield, null);
+  assert.equal(out[0].fiscalYear, 2023);
+});
+
+test('computeDividendYields 名义价缺失 → null', () => {
+  const prices = [{ date: '2021-01-29', close: 2.185, close_nominal: null }];
+  const out = Calc.computeDividendYields(prices, jyRecords());
+  assert.equal(out[0].yield, null);
+});
+
+test('computeDividendYields 早于首笔分红 → 无归因财年 yield=null', () => {
+  const prices = [{ date: '2017-12-29', close: 15.0, close_nominal: 30.0 }];
+  const out = Calc.computeDividendYields(prices, jyRecords());
+  assert.equal(out[0].fiscalYear, null);
+  assert.equal(out[0].yield, null);
+});
+
+test('computeDividendYields 纯送转行进股本锚点链，不进分子（H1 回归）', () => {
+  /* 1 亿股：2020 年度 10派5（登记 1 亿）；2021-12 纯 10转10（无现金，登记仍 1 亿）；
+   * 2021 年度 10派5（登记 2 亿，除权 2022-06）。若纯送转行被金额过滤丢弃，
+   * 2021-09 的锚点会错到送转后的 2 亿 → 股息率 2.50%（错一倍且无提示）。 */
+  const recs = [
+    { ex_dividend_date: '2021-06-10', dividend_per_10: 5, report_time: '2020年报',
+      plan_notice_date: '2021-04-20', total_shares: 1.0e8 },
+    { ex_dividend_date: '2021-12-20', dividend_per_10: 0, report_time: '2021年报',
+      plan_notice_date: '', total_shares: 1.0e8, transfer_per_10: 10 },
+    { ex_dividend_date: '2022-06-10', dividend_per_10: 5, report_time: '2021年报',
+      plan_notice_date: '2022-04-20', total_shares: 2.0e8 },
+  ];
+  const prices = [
+    { date: '2021-09-30', close: 10.0, close_nominal: 10.0 },  // 送转前：股本 1 亿
+    { date: '2022-01-31', close: 5.0, close_nominal: 5.0 },    // 送转后：股本 2 亿
+  ];
+  const out = Calc.computeDividendYields(prices, recs);
+  // 2021-09：锚定纯送转行登记股本 1 亿；归因 2020 年度（2021 年报未公告）
+  assert.equal(out[0].yield, round2(0.5e8 / (10.0 * 1.0e8) * 100));  // 5.00，非 2.50
+  // 2022-01：送转后锚定下一分红登记股本 2 亿；仍归因 2020 年度
+  assert.equal(out[1].yield, round2(0.5e8 / (5.0 * 2.0e8) * 100));
+});
+
 test('parseDividendRecords 仅中期分配无年报 → 无完整财年，不回退 (#99)', () => {
   // 对齐 Python dividend_records：latest_year=None → total=0、year=null（项目原则：
   // 最新完整财年 > TTM，仅12月=年报；无年报公司 dividend_year 应为 None 而非退回最新有数据年份）

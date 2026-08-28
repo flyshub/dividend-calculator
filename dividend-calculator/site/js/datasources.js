@@ -50,20 +50,34 @@
     });
   }
 
-  /* ── 腾讯月度K线（web.ifzq.gtimg.cn，前复权）──
-   * 返回 [{date:'YYYY-MM-DD', close, price}] 升序 */
+  /* ── 腾讯月度K线（web.ifzq.gtimg.cn）──
+   * 双取：前复权（close，画股价走势）+ 不复权（close_nominal，走势图股息率总额法
+   * 的分母口径——名义价与名义每股分红同口径；前复权价在高送转公司被回溯调整，
+   * 与除权时点名义分红直接相除会口径错配）。不复权请求失败时 close_nominal=null
+   * （股息率该段断线，价格线仍可画，宁缺毋假）。
+   * 返回 [{date:'YYYY-MM-DD', close, close_nominal}] 升序 */
   function fetchMonthlyPrices(stockCode, months) {
     months = months || 120;
     var prefix = stockCode[0] === '6' ? 'sh' : 'sz';
-    var url = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=' + prefix + stockCode +
+    var key = prefix + stockCode;
+    var qfqUrl = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=' + key +
       ',month,,,' + months + ',qfq';
-    return jsonFetch(url).then(function (d) {
-      var data = d.data || {};
-      var key = prefix + stockCode;
-      var node = data[key] || {};
-      var rows = node.qfqmonth || node.month || [];
-      return rows.map(function (r) {
-        return { date: String(r[0]), close: Number(r[2]) };
+    var nominalUrl = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=' + key +
+      ',month,,,' + months + ',';
+    return Promise.all([
+      jsonFetch(qfqUrl),
+      jsonFetch(nominalUrl).catch(function () { return null; }),
+    ]).then(function (results) {
+      var qfqNode = (results[0].data || {})[key] || {};
+      var qfqRows = qfqNode.qfqmonth || qfqNode.month || [];
+      var nominalNode = results[1] ? ((results[1].data || {})[key] || {}) : {};
+      var nominalMap = {};
+      (nominalNode.month || []).forEach(function (r) {
+        nominalMap[String(r[0])] = Number(r[2]);
+      });
+      return qfqRows.map(function (r) {
+        var date = String(r[0]);
+        return { date: date, close: Number(r[2]), close_nominal: nominalMap[date] != null ? nominalMap[date] : null };
       });
     });
   }

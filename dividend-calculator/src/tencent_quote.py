@@ -27,7 +27,6 @@ _FIELD_TOTAL_SHARES = 73 # 总股本（含A+H等全部股份）
 _QUOTE_URL = "https://qt.gtimg.cn/q="
 _KLINE_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
 _BATCH_SIZE = 800        # 研究 #63：900 上限，800 安全裕量
-_KLINE_FQ = "qfq"        # 前复权（当前所有 K 线调用均使用）
 _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 _SESSION = requests.Session()
@@ -158,20 +157,23 @@ def fetch_kline_rows(
     stock_code: str,
     period: str = "month",
     count: int = 120,
+    fq: str = "qfq",
 ) -> Optional[List[list]]:
-    """腾讯 fqkline 前复权 K 线原始行（每行 [date, open, close, ...]）。
+    """腾讯 fqkline K 线原始行（每行 [date, open, close, ...]）。
 
-    取数语义与既有实现一致：data[<prefix><code>][f"qfq{period}"]（qfqmonth/qfqday/qfqweek）。
+    fq="qfq" 前复权（默认，走势图画图用）；fq="" 不复权（走势图股息率总额法的
+    名义价口径——前复权价在高送转公司被回溯调整，与除权时点名义分红口径错配）。
+    取数语义：data[<prefix><code>][f"{fq}{period}"]（qfqmonth / month）。
     请求失败返回 None；请求成功但无数据返回 []。
     """
     try:
         prefix = _market_prefix(stock_code)
-        url = f"{_KLINE_URL}?param={prefix}{stock_code},{period},,,{count},{_KLINE_FQ}"
+        url = f"{_KLINE_URL}?param={prefix}{stock_code},{period},,,{count},{fq}"
         resp = _SESSION.get(url, timeout=15)
         resp.raise_for_status()
         data = resp.json()
         key = f"{prefix}{stock_code}"
-        rows = (data.get("data") or {}).get(key, {}).get(f"qfq{period}") or []
+        rows = (data.get("data") or {}).get(key, {}).get(f"{fq}{period}") or []
         return rows
     except Exception as e:
         logger.debug("腾讯K线获取失败 %s: %s", stock_code, e)

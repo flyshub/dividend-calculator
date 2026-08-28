@@ -205,15 +205,19 @@ class DividendRequestHandler(BaseHTTPRequestHandler):
                 "stock_name": data.stock_name,
                 "data_date": datetime.now().strftime("%Y-%m-%d"),
                 "monthly_prices": [
-                    {"date": p.date, "close": round(p.close, 2)}
+                    {"date": p.date, "close": round(p.close, 2),
+                     "close_nominal": round(p.close_nominal, 2) if p.close_nominal is not None else None}
                     for p in data.monthly_prices
                 ],
+                "total_shares_now": data.total_shares_now,
                 "dividend_records": [
                     {
                         "ex_dividend_date": d.ex_dividend_date,
                         "dividend_per_10": d.dividend_per_10,
                         "report_time": d.report_time,
                         "plan_notice_date": d.plan_notice_date,
+                        "total_shares": d.total_shares,
+                        "transfer_per_10": d.transfer_per_10,
                     }
                     for d in data.dividend_records
                 ],

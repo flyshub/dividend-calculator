@@ -52,7 +52,10 @@ def get_stock_info(stock_input: str) -> Optional[StockInfo]:
 # ────────────────────────────────────────────────────────────────
 
 def _get_monthly_prices_mootdx(stock_code: str) -> list:
-    """通过 mootdx 通达信协议获取月度收盘价（前复权），全球可用"""
+    """通过 mootdx 通达信协议获取月度收盘价，全球可用。
+
+    mootdx bars 为不复权原始价：close 与 close_nominal 同值（兜底降级链路，
+    价格走势含除权跳空，股息率总额法口径不受影响）。"""
     try:
         from .datasource.mootdx_source import get_quotes_client
         client = get_quotes_client()
@@ -67,7 +70,7 @@ def _get_monthly_prices_mootdx(stock_code: str) -> list:
                 close = float(row['close'])
                 if close <= 0:
                     continue
-                results.append(MonthlyPrice(date=date_str, close=close))
+                results.append(MonthlyPrice(date=date_str, close=close, close_nominal=close))
             except (ValueError, KeyError, TypeError):
                 continue
 
@@ -80,7 +83,10 @@ def _get_monthly_prices_mootdx(stock_code: str) -> list:
 
 
 def _get_monthly_prices_tencent(stock_code: str) -> list:
-    """通过腾讯 K 线接口获取月度收盘价（前复权），不依赖东方财富，全球可用"""
+    """通过腾讯 K 线接口获取月度收盘价，双口径：前复权（close，画图）+ 不复权
+    （close_nominal，走势图股息率总额法的名义价口径——前复权价在高送转公司被
+    回溯调整，与除权时点名义分红直接相除口径错配）。
+    不复权请求失败仅 close_nominal=None（该段股息率 null，价格线仍可画）。"""
     try:
         from .tencent_quote import fetch_kline_rows
         rows = fetch_kline_rows(stock_code, period="month", count=120)
@@ -88,10 +94,25 @@ def _get_monthly_prices_tencent(stock_code: str) -> list:
             logger.warning("腾讯K线接口无 qfqmonth 数据: %s", stock_code)
             return []
 
+        # 不复权序列按日期建索引（仅失败/空时降级为空映射）；逐行防护——
+        # 单行脏数据（长度不足/非数字）只丢该行，不破坏前复权主链路
+        nominal_rows = fetch_kline_rows(stock_code, period="month", count=120, fq="") or []
+        nominal_map = {}
+        for row in nominal_rows:
+            try:
+                nominal_map[row[0]] = float(row[2])
+            except (ValueError, IndexError, TypeError):
+                continue
+
         results = []
         for row in rows:
             try:
-                results.append(MonthlyPrice(date=row[0], close=float(row[2])))
+                date_str = row[0]
+                results.append(MonthlyPrice(
+                    date=date_str,
+                    close=float(row[2]),
+                    close_nominal=nominal_map.get(date_str),
+                ))
             except (ValueError, IndexError, TypeError):
                 continue
 
@@ -179,6 +200,15 @@ def _get_xdxr_records(stock_code: str) -> Tuple[list, str]:
                     if math.isnan(fenhong) or fenhong <= 0:
                         continue
 
+                    # 送转比例（10送转X）：走势图股本锚点回退用；NaN/缺失 → None
+                    songzhuan = row.get('songzhuangu', 0) or 0
+                    try:
+                        transfer = round(float(songzhuan), 4)
+                        if math.isnan(transfer) or transfer <= 0:
+                            transfer = None
+                    except (TypeError, ValueError):
+                        transfer = None
+
                     ex_div_date = f"{y:04d}-{m:02d}-{d:02d}"
                     result = infer_fiscal_year(y, m)
                     report_time = result.report_time
@@ -186,6 +216,7 @@ def _get_xdxr_records(stock_code: str) -> Tuple[list, str]:
                         ex_dividend_date=ex_div_date,
                         dividend_per_10=fenhong,
                         report_time=report_time,
+                        transfer_per_10=transfer,
                     ))
 
                 if results:
@@ -203,7 +234,13 @@ def _get_xdxr_records(stock_code: str) -> Tuple[list, str]:
 # ────────────────────────────────────────────────────────────────
 
 def get_historical_data(stock_input: str) -> Optional[HistoricalData]:
-    """获取历史走势数据（月度收盘价 + 分红记录）"""
+    """获取历史走势数据（月度收盘价 + 分红记录）。
+
+    月度价格为双口径（close 前复权画图 / close_nominal 不复权算股息率总额法），
+    分红记录含登记股本（total_shares）与送转比例（transfer_per_10）供前端锚定
+    历史股本。已知限制：parse_dividend_rows 按金额过滤会丢纯送转行（无现金分红的
+    10转X），若未来有消费方做走势图股息率，需补纯送转锚点事件（浏览器端
+    site/index.html fetchChartData 已放宽该过滤，双端口径以 JS 为准）。"""
     stock_code = normalize_stock_code(stock_input)
     if not (stock_code.isdigit() and len(stock_code) == 6):
         logger.error("无效的股票代码: %s", stock_code)
@@ -224,4 +261,5 @@ def get_historical_data(stock_input: str) -> Optional[HistoricalData]:
         stock_name=stock_name,
         monthly_prices=monthly_prices,
         dividend_records=dividend_records,
+        total_shares_now=quote.total_shares if quote else None,
     )

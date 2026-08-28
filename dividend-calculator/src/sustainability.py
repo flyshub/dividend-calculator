@@ -185,6 +185,7 @@ def parse_dividend_rows(rows: List[dict]) -> Tuple[List[DividendRecord], Optiona
             report_time=label,
             plan_notice_date=plan_date,
             total_shares=_to_float(row.get("TOTAL_SHARES")),
+            transfer_per_10=_to_float(row.get("IT_RATIO")),
         ))
 
         if year not in yearly:

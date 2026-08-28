@@ -173,6 +173,17 @@ def summarize_fhps_df(fhps_df=None, source: str = "akshare fhps_detail_em",
         report_date = _fhps_report_date(row['报告期'])
         if report_date is None:
             continue
+        # 总股本/送转比例（登记日口径，走势图股息率总额法的股本锚点）；列缺失 → None
+        ts = row.get('总股本')
+        try:
+            ts_val = float(ts) if ts is not None and not pd.isna(ts) else None
+        except (TypeError, ValueError):
+            ts_val = None
+        tr = row.get('送转股份-送转总比例')
+        try:
+            tr_val = float(tr) if tr is not None and not pd.isna(tr) else None
+        except (TypeError, ValueError):
+            tr_val = None
         rows.append({
             "REPORT_DATE": report_date,
             "PRETAX_BONUS_RMB": float(row['现金分红-现金分红比例']),
@@ -181,6 +192,8 @@ def summarize_fhps_df(fhps_df=None, source: str = "akshare fhps_detail_em",
             "ASSIGN_PROGRESS": "实施",
             "EX_DIVIDEND_DATE": _date_str(row.get('除权除息日')),
             "PLAN_NOTICE_DATE": _date_str(row.get('预案公告日')),
+            "TOTAL_SHARES": ts_val,
+            "IT_RATIO": tr_val,
         })
 
     records, latest_year = parse_dividend_rows(rows)

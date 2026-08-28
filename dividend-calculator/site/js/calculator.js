@@ -117,6 +117,125 @@
     };
   }
 
+  /* ── 走势图月度股息率（总额法）──
+   * 对齐主链路架构决策「总额法 > 每股法」：每股法（每股分红 ÷ 前复权价）在高送转公司
+   * 口径错配——分子是除权时点名义每股分红（旧股本口径），分母是按当前股本回溯调整的
+   * 前复权价（嘉友国际 603871 2021/01 曾因此显示 45.77%，真实约 3.7%）。
+   * 总额法：
+   *   分子 = 财年分红总额 Σ(dividend_per_10/10 × 该次登记股本 total_shares)
+   *   分母 = 该月名义收盘价 close_nominal × 该月股本
+   * 登记股本语义（东财 TOTAL_SHARES = 股权登记日股本 = 该次除权**前**股本）：
+   *   S(t) = 下一次除权记录的登记股本（t 在两次除权之间）
+   *   t 早于首笔除权 → 首笔登记股本；t 晚于全部除权 → totalSharesNow（当前总股本，
+   *   与主卡自洽）回退 末条登记股本 × 末条送转因子（transfer_per_10）
+   *   两次除权之间的增发不反映在锚点内（数据可得性极限，误差远小于口径错配）
+   * monthlyPrices: [{date, close(前复权,画图用), close_nominal(不复权,算股息率)}]
+   * dividendRecords: [{ex_dividend_date, dividend_per_10, report_time,
+   *                    plan_notice_date, total_shares, transfer_per_10}]
+   * 财年归因保留原语义：availDate（预案公告日回退除权日）≤ 月末的最新年报财年。
+   * 数据缺失（total_shares / close_nominal 无）→ yield = null（宁缺毋假，数据铁律）。
+   * 返回 [{date, price, yield, fiscalYear}] 升序 */
+  function computeDividendYields(monthlyPrices, dividendRecords, totalSharesNow) {
+    if (!monthlyPrices.length) return [];
+
+    /* 1. 按财年分组：分红总额 + 年报标记 + 生效起点 */
+    var fiscalYears = {};
+    var exEvents = []; /* 除权事件：[{exDate, sharesBefore(登记股本), transfer(10送转X)}] */
+    for (var i = 0; i < dividendRecords.length; i++) {
+      var rec = dividendRecords[i];
+      if (!rec.ex_dividend_date) continue;
+
+      /* 除权事件（现金分红或纯送转均构成股本口径切换点）：纯送转行
+       *（dividend_per_10=0/无）不进分子，但必须进锚点链——否则「上笔分红
+       * 除权 → 纯送转除权」之间月份的股本锚点错到送转后，股息率静默偏差 */
+      if (rec.total_shares > 0) {
+        exEvents.push({
+          exDate: rec.ex_dividend_date,
+          sharesBefore: rec.total_shares,
+          transfer: Number(rec.transfer_per_10) > 0 ? Number(rec.transfer_per_10) : 0,
+        });
+      }
+      if (!(rec.dividend_per_10 > 0)) continue;
+      var yearMatch = /\d{4}/.exec(rec.report_time || '');
+      if (!yearMatch) continue;
+      var year = parseInt(yearMatch[0], 10);
+
+      if (!fiscalYears[year]) {
+        fiscalYears[year] = { totalAmount: 0, complete: false, availDate: '' };
+      }
+      /* 该次分红总额：每股分红 × 该次登记股本；股本缺失 → NaN（该财年整体作缺） */
+      var dps = rec.dividend_per_10 / 10.0;
+      var shares = rec.total_shares > 0 ? rec.total_shares : NaN;
+      fiscalYears[year].totalAmount += dps * shares;
+      if (rec.report_time.indexOf('年报') !== -1 && rec.report_time.indexOf('半年报') === -1) {
+        fiscalYears[year].complete = true;
+      }
+      /* 财年股息生效起点：预案公告日（该财年股息已公布），回退除权日（mootdx 兜底无预案字段） */
+      var effDate = rec.plan_notice_date || rec.ex_dividend_date;
+      if (effDate > fiscalYears[year].availDate) {
+        fiscalYears[year].availDate = effDate;
+      }
+    }
+    exEvents.sort(function (a, b) {
+      return a.exDate < b.exDate ? -1 : (a.exDate > b.exDate ? 1 : 0);
+    });
+
+    /* 2. 完整财年列表（有年报），按年份升序 */
+    var completeYears = [];
+    for (var y in fiscalYears) {
+      if (fiscalYears[y].complete) {
+        completeYears.push({
+          year: parseInt(y, 10),
+          totalAmount: fiscalYears[y].totalAmount,
+          availDate: fiscalYears[y].availDate,
+        });
+      }
+    }
+    completeYears.sort(function (a, b) { return a.year - b.year; });
+
+    /* 3. 该月股本：下一次除权前的登记股本（锚点） */
+    function sharesAt(dateStr) {
+      var last = null;
+      for (var a = 0; a < exEvents.length; a++) {
+        var ev = exEvents[a];
+        if (ev.exDate > dateStr) {
+          return ev.sharesBefore; /* t 在此除权之前 → 登记股本即 t 时点股本 */
+        }
+        last = ev;
+      }
+      /* t 晚于全部除权：当前总股本（与主卡自洽）→ 回退 末条登记股本 × 末条送转因子 */
+      if (totalSharesNow > 0) return totalSharesNow;
+      if (last && last.sharesBefore) {
+        return last.sharesBefore * (10 + last.transfer) / 10;
+      }
+      return null;
+    }
+
+    /* 4. 逐月计算：分子财年总额 ÷ 分母当月市值 */
+    return monthlyPrices.map(function (month) {
+      var selected = null;
+      for (var k = 0; k < completeYears.length; k++) {
+        if (completeYears[k].availDate <= month.date) {
+          selected = completeYears[k];
+        }
+      }
+
+      var yld = null;
+      var shares = sharesAt(month.date);
+      var nominal = Number(month.close_nominal);
+      if (selected && selected.totalAmount > 0 && shares && nominal > 0) {
+        yld = round2(selected.totalAmount / (nominal * shares) * 100);
+      }
+
+      return {
+        date: month.date,
+        price: month.close,
+        yield: yld,
+        fiscalYear: selected ? selected.year : null,
+      };
+    });
+  }
+
   /* TTM 股息率（#19）：近 12 个月（按除权除息日）实际派发现金分红。
    * 对齐 Python utils.compute_ttm_dividend。返回 {ttm_dividend, period, count, source} */
   function computeTtmDividend(rows, totalShares, asOfDate) {
@@ -974,6 +1093,7 @@
     reportTime: reportTime,
     calculateDividendYield: calculateDividendYield,
     parseDividendRecords: parseDividendRecords,
+    computeDividendYields: computeDividendYields,
     computeTtmDividend: computeTtmDividend,
     parseFinancials: parseFinancials,
     computeBasicPR: computeBasicPR,

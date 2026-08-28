@@ -28,7 +28,8 @@ class DividendDetail:
 class MonthlyPrice:
     """月度价格数据"""
     date: str        # YYYY-MM-DD 月末日期
-    close: float     # 前复权收盘价
+    close: float     # 前复权收盘价（走势图画图用）
+    close_nominal: Optional[float] = None  # 不复权名义收盘价（走势图股息率总额法分母口径；缺 None）
 
 
 @dataclass
@@ -38,7 +39,8 @@ class DividendRecord:
     dividend_per_10: float  # 每10股派息金额
     report_time: str        # 报告期
     plan_notice_date: str = ""  # 预案公告日 YYYY-MM-DD（该财年股息生效起点；mootdx 兜底无此字段）
-    total_shares: Optional[float] = None  # 该分红实施时的总股本（东财 RPT_SHAREBONUS_DET 行自带；cninfo/mootdx 路径为 None）
+    total_shares: Optional[float] = None  # 股权登记日总股本 = 该次除权前股本（东财 RPT_SHAREBONUS_DET 行自带；cninfo/mootdx 路径为 None）
+    transfer_per_10: Optional[float] = None  # 送转比例（10送转X，东财 IT_RATIO；走势图股本锚点回退用）
 
 
 @dataclass
@@ -48,6 +50,7 @@ class HistoricalData:
     stock_name: Optional[str]
     monthly_prices: List[MonthlyPrice]
     dividend_records: List[DividendRecord]
+    total_shares_now: Optional[float] = None  # 当前总股本（腾讯 Index 73；走势图最新月份股本锚点，与主卡口径自洽）
 
 
 class StockInfoProvider(Protocol):
