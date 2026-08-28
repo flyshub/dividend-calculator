@@ -14,7 +14,9 @@
 
 严禁虚构数据：数据源不可用即返回空/None，由调用方显式标注缺失。
 """
+import json
 import logging
+from pathlib import Path
 from typing import List, Optional
 
 import requests
@@ -95,7 +97,7 @@ def fetch_cashflow_rows(stock_code: str) -> List[dict]:
 
 
 def fetch_dividend_rows(stock_code: str) -> Optional[List[dict]]:
-    """东财分红明细行。
+    """东财分红明细行（出口应用已知错误行修正表 site/data/dividend_fixes.json）。
 
     语义（#38 M5）：网络/HTTP 异常 → None（取数失败）；请求成功但无数据 → []
     （真无分红）。调用方据此区分「取数失败」与「真无分红」，避免把无分红公司
@@ -104,10 +106,55 @@ def fetch_dividend_rows(stock_code: str) -> Optional[List[dict]]:
     try:
         resp = requests.get(_DIVIDEND_URL.format(code=stock_code), headers=_UA, timeout=15)
         resp.raise_for_status()
-        return (resp.json().get("result") or {}).get("data") or []
+        rows = (resp.json().get("result") or {}).get("data") or []
+        return _apply_dividend_fixes(rows, stock_code)
     except Exception as e:
         logger.warning("东财分红接口获取失败 %s: %s", stock_code, e)
         return None
+
+
+# 东财分红明细个别行存在数值错误（2026-08 抽样 30 股 579 行年报记录发现 1 行：
+# 长江电力 600900 2015 年度东财 10派1.2946，官方公告与巨潮/同花顺/新浪均为 10派4）。
+# 修正表仅录入经多源官方验证的个案（巨潮在 A+H 股上自身有错，不能自动仲裁，
+# 见 docs/DATA_RELIABILITY.md）。键：code + REPORT_DATE + EX_DIVIDEND_DATE 三者同匹配。
+_FIXES_CACHE: Optional[dict] = None
+
+
+def _load_dividend_fixes() -> dict:
+    """加载修正表（进程内缓存）。缺失/损坏 → 空表（降级为原始数据，不阻断）。"""
+    global _FIXES_CACHE
+    if _FIXES_CACHE is None:
+        path = Path(__file__).resolve().parent.parent / "site" / "data" / "dividend_fixes.json"
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            _FIXES_CACHE = {
+                (f["code"], str(f["report_date"])[:10], str(f["ex_dividend_date"])[:10]): f
+                for f in data.get("fixes", [])
+            }
+        except Exception as e:
+            logger.warning("分红修正表加载失败（降级为未修正）: %s", e)
+            _FIXES_CACHE = {}
+    return _FIXES_CACHE
+
+
+def _apply_dividend_fixes(rows: List[dict], stock_code: str) -> List[dict]:
+    """对东财分红行应用修正表：命中行替换 PRETAX_BONUS_RMB 并记日志（透明可追溯）。"""
+    fixes = _load_dividend_fixes()
+    if not fixes:
+        return rows
+    for row in rows:
+        rd = str(row.get("REPORT_DATE") or "")[:10]
+        ex = str(row.get("EX_DIVIDEND_DATE") or "")[:10]
+        fix = fixes.get((stock_code, rd, ex))
+        if fix is not None:
+            logger.warning(
+                "分红修正 %s %s：东财 %.4f → %.4f（%s）",
+                stock_code, rd, row.get("PRETAX_BONUS_RMB") or 0,
+                fix["corrected_per_10"], fix.get("verified_by", ""),
+            )
+            row["PRETAX_BONUS_RMB"] = fix["corrected_per_10"]
+    return rows
 
 
 def fetch_industry(stock_code: str) -> str:

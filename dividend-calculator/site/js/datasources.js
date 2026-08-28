@@ -82,14 +82,46 @@
     });
   }
 
-  /* ── 东财分红明细（RPT_SHAREBONUS_DET，每10股派息口径）── */
+  /* ── 东财分红明细（RPT_SHAREBONUS_DET，每10股派息口径）──
+   * 出口应用已知错误行修正表 data/dividend_fixes.json（同源静态文件，与 Python
+   * eastmoney_fetcher._apply_dividend_fixes 双端一致；修正须多源官方验证后录入，
+   * 东财整体可靠、仅修已证实个案）。修正表加载失败 → 空表降级，不阻断取数。 */
+  var dividendFixesCache = null;
+  function fetchDividendFixes() {
+    if (dividendFixesCache) return Promise.resolve(dividendFixesCache);
+    return jsonFetch('data/dividend_fixes.json').then(function (d) {
+      var map = {};
+      (d.fixes || []).forEach(function (f) {
+        map[f.code + '|' + String(f.report_date).slice(0, 10) + '|' + String(f.ex_dividend_date).slice(0, 10)] = f;
+      });
+      dividendFixesCache = map;
+      return map;
+    }).catch(function () {
+      dividendFixesCache = {};
+      return dividendFixesCache;
+    });
+  }
+
   function fetchDividendRecords(stockCode) {
     var url = 'https://datacenter-web.eastmoney.com/api/data/v1/get?sortColumns=REPORT_DATE&sortTypes=-1' +
       '&pageSize=100&pageNumber=1&reportName=RPT_SHAREBONUS_DET&columns=ALL' +
       '&filter=(SECURITY_CODE%3D%22' + stockCode + '%22)';
-    return jsonFetch(url).then(function (d) {
-      var result = d.result;
-      return (result && result.data) || [];
+    return Promise.all([jsonFetch(url), fetchDividendFixes()]).then(function (res) {
+      var result = res[0].result;
+      var rows = (result && result.data) || [];
+      var fixes = res[1];
+      if (!Object.keys(fixes).length) return rows;
+      rows.forEach(function (r) {
+        var key = stockCode + '|' + String(r.REPORT_DATE || '').slice(0, 10) + '|' +
+          String(r.EX_DIVIDEND_DATE || '').slice(0, 10);
+        if (fixes[key]) {
+          console.warn('分红修正 ' + stockCode + ' ' + String(r.REPORT_DATE).slice(0, 10) +
+            '：东财 ' + r.PRETAX_BONUS_RMB + ' → ' + fixes[key].corrected_per_10 +
+            '（' + (fixes[key].verified_by || '') + '）');
+          r.PRETAX_BONUS_RMB = fixes[key].corrected_per_10;
+        }
+      });
+      return rows;
     });
   }
 

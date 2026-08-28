@@ -1,0 +1,14 @@
+{
+  "comment": "东财 RPT_SHAREBONUS_DET 已确认错误行的修正表。每条修正须经至少两个独立官方/权威源交叉验证后手工录入（键：code+report_date+ex_dividend_date，三者同时匹配才应用）。东财整体可靠（2026-08 抽样 30 股 579 行年报记录仅 1 行错），本表只修已证实个案，不做自动仲裁（巨潮接口在 A+H 股上自身有错，不能作自动仲裁源，见 docs/DATA_RELIABILITY.md）。",
+  "fixes": [
+    {
+      "code": "600900",
+      "report_date": "2015-12-31",
+      "ex_dividend_date": "2016-07-19",
+      "wrong_per_10": 1.2946,
+      "corrected_per_10": 4.0,
+      "verified_by": "巨潮资讯(10派4元)+同花顺F10(4.000)+新浪财经(10派4元) 三源一致，对长江电力2015年年度权益分派实施公告",
+      "verified_at": "2026-08-28"
+    }
+  ]
+}

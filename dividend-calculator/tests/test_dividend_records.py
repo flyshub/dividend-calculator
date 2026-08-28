@@ -294,3 +294,59 @@ def test_cninfo_quarterly_labeled_interim():
     assert s.latest_year is None
     assert s.fiscal_total_per_10 == 0.0
     assert s.ttm_total_per_10 == pytest.approx(2.1)
+
+
+def test_apply_dividend_fixes_hit_and_miss(monkeypatch):
+    """修正表应用：三键全匹配才替换；报告期/除权日任一不匹配不动（防误伤）。"""
+    import src.eastmoney_fetcher as ef
+
+    monkeypatch.setattr(ef, "_FIXES_CACHE", {
+        ("600900", "2015-12-31", "2016-07-19"): {
+            "code": "600900", "report_date": "2015-12-31", "ex_dividend_date": "2016-07-19",
+            "wrong_per_10": 1.2946, "corrected_per_10": 4.0,
+            "verified_by": "巨潮+同花顺+新浪 三源一致", "verified_at": "2026-08-28",
+        },
+    })
+    rows = [
+        # 命中行：长电 2015 年度（东财错误值 1.2946 → 官方 4.0）
+        {"REPORT_DATE": "2015-12-31 00:00:00", "EX_DIVIDEND_DATE": "2016-07-19 00:00:00",
+         "PRETAX_BONUS_RMB": 1.2946, "ASSIGN_PROGRESS": "实施分配"},
+        # 同报告期不同除权日 → 不动
+        {"REPORT_DATE": "2015-12-31 00:00:00", "EX_DIVIDEND_DATE": "2016-06-30 00:00:00",
+         "PRETAX_BONUS_RMB": 1.2946, "ASSIGN_PROGRESS": "实施分配"},
+    ]
+    out = ef._apply_dividend_fixes([dict(r) for r in rows], "600900")
+    assert out[0]["PRETAX_BONUS_RMB"] == 4.0
+    assert out[1]["PRETAX_BONUS_RMB"] == 1.2946
+
+    # 其他股票（同报告期同除权日）→ 不动（修正按 stock_code 隔离，防跨股误伤）
+    other = [{"REPORT_DATE": "2015-12-31 00:00:00", "EX_DIVIDEND_DATE": "2016-07-19 00:00:00",
+              "PRETAX_BONUS_RMB": 1.2946, "ASSIGN_PROGRESS": "实施分配"}]
+    out2 = ef._apply_dividend_fixes(other, "600036")
+    assert out2[0]["PRETAX_BONUS_RMB"] == 1.2946
+
+
+def test_apply_dividend_fixes_empty_table(monkeypatch):
+    """修正表为空 → 原样返回（降级不阻断）。"""
+    import src.eastmoney_fetcher as ef
+
+    monkeypatch.setattr(ef, "_FIXES_CACHE", {})
+    rows = [{"REPORT_DATE": "2015-12-31 00:00:00", "EX_DIVIDEND_DATE": "2016-07-19 00:00:00",
+             "PRETAX_BONUS_RMB": 1.2946, "ASSIGN_PROGRESS": "实施分配"}]
+    out = ef._apply_dividend_fixes(rows, "600900")
+    assert out[0]["PRETAX_BONUS_RMB"] == 1.2946
+
+
+def test_dividend_fixes_file_loadable_and_verified():
+    """修正表 JSON 可加载：每条修正含必需字段（数据铁律：修正可追溯）。"""
+    import json
+    from pathlib import Path
+    from src.eastmoney_fetcher import _load_dividend_fixes
+
+    fixes = _load_dividend_fixes()
+    assert isinstance(fixes, dict)
+    for key, f in fixes.items():
+        assert key == (f["code"], f["report_date"], f["ex_dividend_date"])
+        assert f["corrected_per_10"] > 0
+        assert f["verified_by"]
+        assert f["verified_at"]
