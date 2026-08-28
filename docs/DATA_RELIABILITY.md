@@ -136,3 +136,4 @@
 | 2026-08-07 | 初版审查；铁律写入 `CLAUDE.md`/双 README；市赚率公式段修正为 `ROE_latest`（对齐 `pr.py:415`） |
 | 2026-08-07 | 完成 #8-#17 全部修复（校验层/股本/交叉验证/财年/时效/TTM/浮点/来源/CI）；code-review 修订（元组契约/文案/市赚率说明）；风险清单状态列 ✅ |
 | 2026-08-07 | 财年口径收紧为 `month == 12` 才算年报（3/6/9 月归中期分配，覆盖 2025-2026 季度分红）；三套口径表格同步；CI 接入 `verify_js_vs_python.py` 双端一致性验证 |
+| 2026-08-28 | 分红明细源错误率调查（30 股 579 行年报记录抽样）：东财 RPT_SHAREBONUS_DET 仅 1 行错（长电 600900 2015 年度 10派1.2946，官方与巨潮/同花顺/新浪三源均为 10派4）；巨潮接口在 A+H 股上多行自身错误（中石油 601857 2016-2019、太保 601601 2020），**不能作自动仲裁源**。处置：建修正表 `site/data/dividend_fixes.json`（多源人工验证后录入，键 code+report_date+ex_dividend_date，含 verified_by/verified_at 可追溯），东财取数出口统一应用（Python `fetch_dividend_rows` / JS `fetchDividendRecords`），缺失降级不阻断。走势图股息率同日改总额法（高送转口径错配修复，见 commit 45ff67b） |
