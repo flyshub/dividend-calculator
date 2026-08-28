@@ -1091,7 +1091,7 @@
 
       var prices = apiData.monthly_prices;
       var dividends = apiData.dividend_records;
-      var yieldData = Calc.computeDividendYields(prices, dividends, apiData.total_shares_now);
+      var yieldData = Calculator.computeDividendYields(prices, dividends, apiData.total_shares_now);
       if (!yieldData.length) return null;
 
       var dates = yieldData.map(function(d) { return d.date; });
