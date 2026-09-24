@@ -58,6 +58,15 @@
     return '';
   }
 
+  // 高回报提示：估值不变下的股东总回报率 > 15%（用户约定阈值，非回测结论）
+  function tsrNote(r) {
+    var t = Number(r['股东总回报率%']);
+    if (isFinite(t) && t > 15) {
+      return noteBadge('高回报', '估值不变下的股东总回报率 >15%（约定阈值，非回测结论；假设 PB 一年不变）');
+    }
+    return '';
+  }
+
   // 单行渲染（行字段拼接，返回值拼进 innerHTML；字符串列已 esc）
   // 列序须与 site/screener.html 的 <th> 表头一致
   function rowHtml(r) {
@@ -68,12 +77,12 @@
       '<td>' + zoneBadge(esc(r['估值区间'])) + '</td>' +
       '<td class="num">' + fmtNum(r['市赚率PR'], 2) + prNote(r) + '</td>' +
       '<td class="num">' + fmtNum(r['ROE%'], 2) + '</td>' +
-      '<td class="num">' + fmtNum(r['股东总回报率%'], 2) + '</td>' +
+      '<td class="num">' + fmtNum(r['股东总回报率%'], 2) + tsrNote(r) + '</td>' +
       '<td class="num">' + fmtNum(r['总市值(亿)'], 1) + '</td>' +
       '<td class="num">' + fmtNum(r['TTM股息率%'], 2) + '</td>' +
       '<td>' + esc(r['行业']) + '</td>' +
       '<td>' + esc(r['数据来源']) + '</td>';
   }
 
-  return { esc: esc, fmtNum: fmtNum, zoneBadge: zoneBadge, susBadge: susBadge, noteBadge: noteBadge, prNote: prNote, susNote: susNote, rowHtml: rowHtml };
+  return { esc: esc, fmtNum: fmtNum, zoneBadge: zoneBadge, susBadge: susBadge, noteBadge: noteBadge, prNote: prNote, susNote: susNote, tsrNote: tsrNote, rowHtml: rowHtml };
 }));

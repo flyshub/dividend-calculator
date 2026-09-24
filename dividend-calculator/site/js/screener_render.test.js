@@ -52,6 +52,15 @@ test('susNote 偏弱加注释，其余不加', () => {
   assert.match(R.susNote({ '可持续性': '不可持续' }), /^$/);
 });
 
+test('tsrNote 高回报（TSR>15%）加徽标，其余不加', () => {
+  assert.match(R.tsrNote({ '股东总回报率%': 15.01 }), /高回报/);
+  assert.match(R.tsrNote({ '股东总回报率%': 20 }), /高回报/);
+  assert.strictEqual(R.tsrNote({ '股东总回报率%': 15 }), '', '边界：15 不算（严格大于）');
+  assert.strictEqual(R.tsrNote({ '股东总回报率%': 14.9 }), '', '低于阈值不加');
+  assert.strictEqual(R.tsrNote({ '股东总回报率%': '—' }), '', '占位符不加');
+  assert.strictEqual(R.tsrNote({}), '', '历史行缺 key 不加');
+});
+
 test('noteBadge 文案与 title 说明均转义', () => {
   const b = R.noteBadge('小盘未验证', '市赚率阈值回测样本为沪深300，请人工核实');
   assert.ok(b.includes('class="badge badge-note"'));

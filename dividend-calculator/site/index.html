@@ -834,6 +834,7 @@
           <span id="signal-valuation" class="badge badge--gray"></span>
           <span id="signal-yield" class="badge badge--gray"></span>
           <span id="signal-sustainability" class="badge badge--gray"></span>
+          <span id="signal-tsr" class="badge badge--green hidden"></span>
         </div>
       </div>
 
@@ -1022,7 +1023,7 @@
           <div class="formula-line">公式: <b>(ROE − 股息率×PB) + 股息率</b>，其中 股息率×PB = 每股分红/每股净资产，ROE 减该项即留存收益推动的每股净资产增速</div>
           <div class="formula-line">假设 PB 一年内不变：股价随净资产同步增长，加现金分红构成一年总回报估计</div>
           <div class="formula-line">口径: 股息率为真实股息率（税前、完整财年总额法）；ROE 周期股取 5 年中位数（<span id="tsr-roe-source">本股用最新年报</span>）</div>
-          <div class="formula-line">注意: 估值变化（PB 抬升/回落）不在估计范围内，实际回报会偏离；本指标为估计值，无回测阈值，不做评级</div>
+          <div class="formula-line">注意: 估值变化（PB 抬升/回落）不在估计范围内，实际回报会偏离；TSR&gt;15% 时标注「高回报」，为约定阈值、非回测结论，不构成估值评级</div>
         </div>
         <p id="tsr-warning" class="warning hidden"></p>
       </div>
@@ -1426,6 +1427,18 @@
           // P3：未触发（含未评估）时隐藏，避免空胶囊残留
           sigSus.textContent = '';
           sigSus.className = 'badge badge--gray hidden';
+        }
+      }
+      // 高回报徽章：估值不变下的股东总回报率 > 15%（用户约定阈值，非回测结论）
+      const sigTsr = document.getElementById('signal-tsr');
+      if (sigTsr) {
+        const tsr = data.pr && data.pr.tsr;
+        if (tsr != null && tsr > 15) {
+          sigTsr.textContent = '高回报 ' + Number(tsr).toFixed(2) + '%';
+          sigTsr.className = 'badge badge--green';
+        } else {
+          sigTsr.textContent = '';
+          sigTsr.className = 'badge badge--green hidden';
         }
       }
     }
