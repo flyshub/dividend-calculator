@@ -73,6 +73,23 @@ def compute_n_factor(payout_ratio: Optional[float]) -> Optional[float]:
     return max(1.0, min(2.0, raw))
 
 
+def compute_tsr(roe_latest: Optional[float], roe_5y_median: Optional[float],
+                is_cyclical: bool, real_yield_pct: Optional[float],
+                pb: Optional[float]) -> Optional[float]:
+    """估值不变下的股东总回报率 = (ROE − 股息率×PB) + 股息率（百分比）。
+
+    假设 PB 一年内不变：ROE − 股息率×PB 为留存收益推动的每股净资产增速
+    （此时即价格回报），加股息率为现金分红回报。股息率取真实股息率
+    （税前、完整财年总额法）；ROE 周期股取 5 年中位数（对齐 PB-市赚率与
+    漏斗③ 先例），中位数缺失回退 roe_latest。ROE 为负（亏损股）照算，
+    警示由展示层负责；PB ≤ 0 视为数据异常返回 None。
+    """
+    roe = roe_5y_median if (is_cyclical and roe_5y_median is not None) else roe_latest
+    if roe is None or real_yield_pct is None or pb is None or pb <= 0:
+        return None
+    return round((roe - real_yield_pct * pb) + real_yield_pct, 2)
+
+
 def classify_valuation(pr: Optional[float]) -> str:
     """估值四档分类。
 

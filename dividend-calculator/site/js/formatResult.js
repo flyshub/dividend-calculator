@@ -21,6 +21,7 @@ module.exports = function formatResult(r) {
     pr_basic: r.pr.pr_basic,
     pr_corrected: r.pr.pr_corrected,
     pr_pb: r.pr.pr_pb,
+    tsr: r.pr.tsr,
     valuation_zone: r.pr.valuation_zone,
     pr_warning: r.pr.pr_warning,
     payout_ratio: r.pr.payout_ratio,

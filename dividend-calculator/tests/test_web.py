@@ -12,7 +12,7 @@ sys.path.insert(0, str(project_root))
 
 from src.dividend import DividendDetail, DividendResult
 from src.pr import PRResult
-from src.web import DividendRequestHandler, serialize_result, serialize_pr_result
+from src.web import DividendRequestHandler, serialize_result, serialize_pr_result, attach_tsr
 
 
 def test_serialize_result_with_dividend_details():
@@ -133,6 +133,35 @@ def test_serialize_pr_result_basic():
     assert data["pb"] == 3.5
     assert data["is_cyclical"] is False
     assert data["errors"] == []
+
+
+# ---- attach_tsr（估值不变下的股东总回报率进详情页 payload）----
+
+def test_attach_tsr_normal():
+    data = {"roe_latest": 15.9, "roe_5y_median": 14.5, "is_cyclical": False,
+            "pb": 3.5, "dividend_yield_before_tax": 5.0}
+    # (15.9 − 5.0×3.5) + 5.0 = 3.4
+    assert attach_tsr(data)["tsr"] == 3.4
+
+
+def test_attach_tsr_cyclical_uses_median():
+    data = {"roe_latest": 20.0, "roe_5y_median": 12.0, "is_cyclical": True,
+            "pb": 2.0, "dividend_yield_before_tax": 5.0}
+    # 周期股取中位数：(12.0 − 5.0×2.0) + 5.0 = 7.0
+    assert attach_tsr(data)["tsr"] == 7.0
+
+
+def test_attach_tsr_missing_pb_returns_none():
+    data = {"roe_latest": 15.9, "roe_5y_median": None, "is_cyclical": False,
+            "pb": None, "dividend_yield_before_tax": 5.0}
+    assert attach_tsr(data)["tsr"] is None
+
+
+def test_attach_tsr_missing_yield_degrades_to_roe():
+    """股息率缺失（无分红）按 0 参与 → TSR 退化为 ROE（对齐 JS 端 yields[0]=0）。"""
+    data = {"roe_latest": 15.9, "roe_5y_median": None, "is_cyclical": False,
+            "pb": 3.5, "dividend_yield_before_tax": None}
+    assert attach_tsr(data)["tsr"] == 15.9
 
 
 def test_serialize_pr_result_with_errors():

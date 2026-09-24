@@ -616,6 +616,19 @@
     };
   }
 
+  /* ROE 取值规则（对齐 Python compute_tsr 内部逻辑）：周期股取 5 年中位数，缺失回退最新年报。
+   * 导出供页面渲染复用，防止 ROE 选择规则在计算端与展示端漂移 */
+  function selectRoe(roeLatest, roe5yMedian, isCyclical) {
+    return (isCyclical && roe5yMedian != null) ? roe5yMedian : roeLatest;
+  }
+
+  /* 估值不变下的股东总回报率（对齐 Python pr_calculator.compute_tsr，双端一致） */
+  function computeTsr(roeLatest, roe5yMedian, isCyclical, realYieldPct, pb) {
+    var roe = selectRoe(roeLatest, roe5yMedian, isCyclical);
+    if (roe == null || realYieldPct == null || pb == null || pb <= 0) return null;
+    return Math.round(((roe - realYieldPct * pb) + realYieldPct) * 100) / 100;
+  }
+
   /* ════════════════════════════════════════════════════════════
    * 股息可持续性（对齐 src/sustainability_calculator.py 分层级联模型）
    * Layer 0 行业路由 → Layer 1 致命红旗 → Layer 2 加权评分 → Layer 3 情境红旗
@@ -1130,6 +1143,8 @@
     computeCorrectedPR: computeCorrectedPR,
     computePbPR: computePbPR,
     computeNFactor: computeNFactor,
+    computeTsr: computeTsr,
+    selectRoe: selectRoe,
     classifyValuation: classifyValuation,
     classifyIndustry: classifyIndustry,
     computePr: computePr,

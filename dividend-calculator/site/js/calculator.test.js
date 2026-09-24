@@ -39,6 +39,28 @@ test('computeNFactor 中支付率 0.40→1.25', () => assert.equal(Calc.computeN
 test('computeNFactor 边界0.50→1.0', () => assert.equal(Calc.computeNFactor(0.50), 1.0));
 test('computeNFactor 边界0.25→2.0', () => assert.equal(Calc.computeNFactor(0.25), 2.0));
 
+// ---- computeTsr（估值不变下的股东总回报率，对齐 test_pr_calculator.py TestComputeTSR）----
+test('computeTsr 正常', () => assert.equal(Calc.computeTsr(15.9, null, false, 5.0, 2.0), round2((15.9 - 10.0) + 5.0)));
+test('computeTsr 周期股取5年中位数', () => assert.equal(Calc.computeTsr(20.0, 12.0, true, 5.0, 2.0), 7.0));
+test('computeTsr 周期股中位数缺失回退最新', () => assert.equal(Calc.computeTsr(20.0, null, true, 5.0, 2.0), 15.0));
+test('computeTsr 非周期忽略中位数', () => assert.equal(Calc.computeTsr(15.0, 12.0, false, 5.0, 2.0), 10.0));
+test('computeTsr 无分红退化为ROE', () => assert.equal(Calc.computeTsr(12.0, null, false, 0.0, 3.0), 12.0));
+test('computeTsr 亏损股照算', () => assert.equal(Calc.computeTsr(-8.0, null, false, 2.0, 1.5), -9.0));
+test('computeTsr 任一输入null', () => {
+  assert.equal(Calc.computeTsr(null, null, false, 5.0, 2.0), null);
+  assert.equal(Calc.computeTsr(10.0, null, false, null, 2.0), null);
+  assert.equal(Calc.computeTsr(10.0, null, false, 5.0, null), null);
+});
+test('computeTsr PB非正视为异常', () => {
+  assert.equal(Calc.computeTsr(10.0, null, false, 5.0, 0.0), null);
+  assert.equal(Calc.computeTsr(10.0, null, false, 5.0, -1.0), null);
+});
+
+// ---- selectRoe（ROE 取值规则：周期股中位数，缺失回退最新；计算与展示共用）----
+test('selectRoe 周期股取中位数', () => assert.equal(Calc.selectRoe(20.0, 12.0, true), 12.0));
+test('selectRoe 周期股中位数缺失回退最新', () => assert.equal(Calc.selectRoe(20.0, null, true), 20.0));
+test('selectRoe 非周期忽略中位数', () => assert.equal(Calc.selectRoe(15.0, 12.0, false), 15.0));
+
 // ---- classifyValuation ----
 test('classifyValuation 低估', () => assert.equal(Calc.classifyValuation(0.3), '低估'));
 test('classifyValuation 合理偏低', () => assert.equal(Calc.classifyValuation(0.6), '合理偏低'));

@@ -13,6 +13,7 @@ sys.path.insert(0, str(project_root))
 from src.analysis import run_stock_analysis
 from src.dividend import DividendResult, calculate_true_dividend_yield
 from src.pr import PRResult
+from src.pr_calculator import compute_tsr
 from src.sustainability_calculator import SustainabilityResult, explain_sustainability
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,23 @@ SCREENER_FILE = STATIC_DIR / "screener.html"
 def serialize_pr_result(result: PRResult) -> dict:
     """序列化市赚率计算结果为 JSON"""
     return asdict(result)
+
+
+def attach_tsr(data: dict) -> dict:
+    """在详情页 payload 上补「估值不变下的股东总回报率」（tsr，见 CONTEXT.md）。
+
+    输入字段（pb/roe_latest/roe_5y_median/is_cyclical）来自 serialize_pr_result，
+    dividend_yield_before_tax 由 handler 在调用前补入。股息率缺失（无分红）按 0
+    参与公式 → TSR 退化为 ROE，与 JS 端 computeFromRaw（yields[0]=0）一致；
+    ROE/PB 缺失 → None（页面明示「数据不足」）。
+    """
+    yield_val = data.get("dividend_yield_before_tax")
+    data["tsr"] = compute_tsr(
+        data.get("roe_latest"), data.get("roe_5y_median"),
+        bool(data.get("is_cyclical")),
+        yield_val if yield_val is not None else 0.0, data.get("pb"),
+    )
+    return data
 
 
 def serialize_sustainability(result: SustainabilityResult) -> dict:
@@ -167,6 +185,7 @@ class DividendRequestHandler(BaseHTTPRequestHandler):
 
         data = serialize_pr_result(analysis.pr_result)
         data["dividend_yield_before_tax"] = analysis.dividend_yield_before_tax
+        data = attach_tsr(data)
         data["sustainability"] = (
             serialize_sustainability(analysis.sustainability)
             if analysis.sustainability is not None else None

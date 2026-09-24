@@ -46,10 +46,12 @@ def _sample_rows():
     return [
         {"代码": "600900", "名称": "长江电力", "TTM股息率%": "3.80", "真实股息率%": "3.80",
          "估值区间": "低估", "市赚率PR": "0.52", "行业": "公用事业-电力",
-         "可持续性": "可持续", "ROE%": "16.00", "总市值(亿)": "6800.5", "数据来源": "mootdx"},
+         "可持续性": "可持续", "ROE%": "16.00", "股东总回报率%": "13.32",
+         "总市值(亿)": "6800.5", "数据来源": "mootdx"},
         {"代码": "000651", "名称": "格力电器", "TTM股息率%": "7.48", "真实股息率%": "7.48",
          "估值区间": "低估", "市赚率PR": "0.38", "行业": "家电-白色家电",
-         "可持续性": "可持续", "ROE%": "20.30", "总市值(亿)": "2246", "数据来源": "akshare"},
+         "可持续性": "可持续", "ROE%": "20.30", "股东总回报率%": "15.06",
+         "总市值(亿)": "2246", "数据来源": "akshare"},
     ]
 
 
@@ -151,7 +153,7 @@ class TestHeaderValidation:
     def test_missing_column_raises(self, ex, tmp_path):
         """CSV 表头缺列 → parse_csv 报错（口径不准宁可失败）。"""
         p = tmp_path / "screener_20260809_100000.csv"
-        # 缺「行业」列
+        # 缺「行业」列（非 TSR 列，不在历史白名单）
         header = [c for c in CSV_HEADER if c != "行业"]
         with open(p, "w", encoding="utf-8", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=header)
@@ -170,6 +172,30 @@ class TestHeaderValidation:
             writer.writerow({c: "x" for c in header})
         with pytest.raises(ValueError, match="表头与 FIELDS 不一致"):
             ex.parse_csv(p)
+
+    def test_legacy_11_column_header_passes(self, ex, tmp_path):
+        """历史 11 列表头（无 TSR 列）白名单放行（ADR-0003）：行 dict 缺新列、不崩溃。"""
+        p = tmp_path / "screener_20260809_100000.csv"
+        legacy_header = [c for c in CSV_HEADER if c != "股东总回报率%"]
+        with open(p, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=legacy_header)
+            writer.writeheader()
+            writer.writerow({c: "x" for c in legacy_header})
+        rows = ex.parse_csv(p)
+        assert len(rows) == 1
+        assert "股东总回报率%" not in rows[0], "历史行无 TSR 列，页面渲染为空白"
+        assert len(rows[0]) == 11
+
+    def test_mixed_new_and_legacy_csv_both_parse(self, ex, tmp_path):
+        """新旧表头 CSV 混合（真实上线场景）：都能解析，互不干扰。"""
+        legacy_header = [c for c in CSV_HEADER if c != "股东总回报率%"]
+        with open(tmp_path / "screener_20260801_100000.csv", "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=legacy_header)
+            writer.writeheader()
+            writer.writerow({c: "x" for c in legacy_header})
+        _write_csv(tmp_path / "screener_20260809_100000.csv", _sample_rows()[:1])
+        assert len(ex.parse_csv(tmp_path / "screener_20260801_100000.csv")) == 1
+        assert ex.parse_csv(tmp_path / "screener_20260809_100000.csv")[0]["股东总回报率%"] == 13.32
 
 
 class TestRetention:

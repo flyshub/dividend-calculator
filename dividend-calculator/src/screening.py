@@ -18,6 +18,7 @@ from src.pr_calculator import (
     compute_basic_pr,
     compute_corrected_pr,
     compute_n_factor,
+    compute_tsr,
 )
 from src.screener_cache import DividendSnapshot, FinanceSnapshot, QuoteSnapshot
 
@@ -27,9 +28,10 @@ DEFAULT_MIN_REAL = 5.0
 DEFAULT_PR_ZONE = ("合理偏低", "低估")
 DEFAULT_SUS_VERDICT = ("可持续", "偏弱")
 
-# CSV 11 列契约（export_screener_json.py 与选股页列定义共用；改动需三处同步）
+# CSV 12 列契约（export_screener_json.py 与选股页列定义共用；改动需三处同步；
+# 「股东总回报率%」于 2026-09 起 11 列 → 12 列，历史 11 列表头由 export 白名单放行，见 ADR-0003）
 FIELDS = ["代码", "名称", "TTM股息率%", "真实股息率%", "估值区间", "市赚率PR",
-          "行业", "可持续性", "ROE%", "总市值(亿)", "数据来源"]
+          "行业", "可持续性", "ROE%", "股东总回报率%", "总市值(亿)", "数据来源"]
 
 
 @dataclass(frozen=True)
@@ -181,10 +183,12 @@ def run_funnel(
 
 
 def build_output_rows(result: FunnelResult) -> List[dict]:
-    """FunnelResult → 11 列 CSV 行（与 FIELDS 契约一致），按真实股息率降序。
+    """FunnelResult → 12 列 CSV 行（与 FIELDS 契约一致），按真实股息率降序。
 
     与既有输出口径一致：实时股息率 = 分红总额 / 当日市值（缺失显示空串，
     不使用漏斗② 的回退旧值——CSV 如实标注缺失）。
+    TSR = (ROE − 真实股息率×PB) + 真实股息率，周期股 ROE 取 5 年中位数
+    （compute_tsr 单点实现）；输入缺失（如腾讯无 PB）→ 空串。
     """
     rows = []
     for c in result.candidates:
@@ -192,6 +196,11 @@ def build_output_rows(result: FunnelResult) -> List[dict]:
         market_cap = q.market_cap if q else None
         real_yield_now = compute_real_yield(d.total_dividend if d else None, market_cap)
         ttm_yield_now = compute_real_yield(d.ttm_dividend if d else None, market_cap)
+        tsr = compute_tsr(
+            fin.roe_latest if fin else None,
+            fin.roe_5y_median if fin else None,
+            bool(fin.is_cyclical) if fin else False,
+            real_yield_now, q.pb if q else None)
         rows.append({
             "代码": c.code,
             "名称": q.name if q else "",
@@ -202,6 +211,7 @@ def build_output_rows(result: FunnelResult) -> List[dict]:
             "行业": c.industry,
             "可持续性": c.verdict,
             "ROE%": fin.roe_latest if fin else "",
+            "股东总回报率%": tsr if tsr is not None else "",
             "总市值(亿)": round(market_cap / 1e8, 2) if market_cap else "",
             "数据来源": (d.dividend_source if d else "") + " / " + (q.source if q else "腾讯"),
         })

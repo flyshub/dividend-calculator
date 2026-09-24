@@ -29,8 +29,8 @@ from src.screener_cache import DividendSnapshot, FinanceSnapshot, QuoteSnapshot
 _MISSING = object()
 
 
-def _quote(code="600900", price=10.0, pe=8.0, market_cap=1e11, shares=1e10):
-    return QuoteSnapshot(code=code, name="长江电力", price=price, pe_ttm=pe, pb=1.0,
+def _quote(code="600900", price=10.0, pe=8.0, market_cap=1e11, shares=1e10, pb=1.0):
+    return QuoteSnapshot(code=code, name="长江电力", price=price, pe_ttm=pe, pb=pb,
                          total_shares=shares, market_cap=market_cap,
                          quote_time="", source="腾讯")
 
@@ -376,6 +376,34 @@ class TestBuildOutputRows:
         assert r["真实股息率%"] == ""
         assert r["TTM股息率%"] == ""
 
+    def test_tsr_column_normal(self):
+        """TSR 列 = (ROE − 真实股息率×PB) + 真实股息率；默认 pb=1、roe=16、real=6 → 16.0"""
+        c = _candidate()
+        c.valuation_zone = "低估"
+        c.verdict = "可持续"
+        result = FunnelResult(stage_counts=[1, 1, 1, 1], candidates=[c])
+        r = build_output_rows(result)[0]
+        assert r["股东总回报率%"] == 16.0
+
+    def test_tsr_column_cyclical_uses_median(self):
+        """周期股 TSR 的 ROE 取 5 年中位数（对齐 PB-市赚率/漏斗③ 先例）。"""
+        c = _candidate(quote=_quote(pb=2.0), finance=_finance(roe=16.0, roe_5y=12.0, cyclical=True))
+        c.valuation_zone = "低估"
+        c.verdict = "可持续"
+        result = FunnelResult(stage_counts=[1, 1, 1, 1], candidates=[c])
+        r = build_output_rows(result)[0]
+        # (12 − 6×2) + 6 = 6.0
+        assert r["股东总回报率%"] == 6.0
+
+    def test_tsr_column_blank_when_pb_missing(self):
+        """PB 缺失（腾讯个别股票）→ TSR 列空串，不虚构。"""
+        c = _candidate(quote=_quote(pb=None))
+        c.valuation_zone = "低估"
+        c.verdict = "可持续"
+        result = FunnelResult(stage_counts=[1, 1, 1, 1], candidates=[c])
+        r = build_output_rows(result)[0]
+        assert r["股东总回报率%"] == ""
+
     def test_empty_result(self):
         assert build_output_rows(FunnelResult(stage_counts=[0, 0, 0, 0], candidates=[])) == []
 
@@ -387,7 +415,10 @@ class TestDefaults:
         assert DEFAULT_PR_ZONE == ("合理偏低", "低估")
         assert DEFAULT_SUS_VERDICT == ("可持续", "偏弱")
 
-    def test_fields_contract_11_columns(self):
-        assert len(FIELDS) == 11
+    def test_fields_contract_12_columns(self):
+        assert len(FIELDS) == 12
         assert FIELDS[0] == "代码"
         assert "行业" in FIELDS
+        # TSR 列插在 ROE% 之后、总市值(亿) 之前（Q7-A：双端同序）
+        assert FIELDS.index("股东总回报率%") == FIELDS.index("ROE%") + 1
+        assert FIELDS[FIELDS.index("股东总回报率%") + 1] == "总市值(亿)"

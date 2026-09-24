@@ -31,7 +31,7 @@ FIELDS_NUMERIC = [
     "total_dividend", "dividend_yield_before_tax",
     "dividend_yield_after_tax_10", "dividend_yield_after_tax_20",
     "ttm_dividend", "dividend_yield_ttm_before_tax",
-    "pr_basic", "pr_corrected", "pr_pb", "payout_ratio", "n_factor",
+    "pr_basic", "pr_corrected", "pr_pb", "tsr", "payout_ratio", "n_factor",
     "roe_latest", "roe_5y_median", "net_profit_latest_period", "net_profit_annual",
     "sustainability_triggered", "sustainability_score", "sustainability_score_100",
     # 衍生指标拍平（来自 sustainability.metrics）——防止双端在 FCF/coverage 公式上发散
@@ -168,7 +168,7 @@ def compute_python(raw: dict) -> dict:
     from src.datasource.base import StockInfo
     from src.pr_calculator import (
         compute_basic_pr, compute_corrected_pr, compute_n_factor,
-        compute_pb_pr, classify_valuation, classify_industry,
+        compute_pb_pr, compute_tsr, classify_valuation, classify_industry,
     )
 
     quote = raw["quote"]
@@ -275,6 +275,8 @@ def compute_python(raw: dict) -> dict:
         "pr_basic": pr_basic,
         "pr_corrected": pr_corrected,
         "pr_pb": pr_pb,
+        # 估值不变下的股东总回报率（对齐 JS app.js computeFromRaw 的 pr.tsr）
+        "tsr": compute_tsr(fin["roe_latest"], fin["roe_5y_median"], is_cyclical, yld, quote["pb"]),
         "valuation_zone": zone,
         "pr_warning": warning,
         "payout_ratio": payout,

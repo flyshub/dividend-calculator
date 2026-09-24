@@ -9,6 +9,7 @@ from src.pr_calculator import (
     compute_corrected_pr,
     compute_pb_pr,
     compute_n_factor,
+    compute_tsr,
     classify_valuation,
     classify_industry,
 )
@@ -281,3 +282,40 @@ class TestGetPePbEastmoney:
         with self._mock_get({"data": None}):
             pe, pb = _get_pe_pb_eastmoney("600900")
         assert (pe, pb) == (None, None)
+
+
+# ---- compute_tsr（估值不变下的股东总回报率）----
+
+class TestComputeTSR:
+    def test_normal(self):
+        # (15.9 − 5.0×2.0) + 5.0 = 10.9
+        assert compute_tsr(15.9, None, False, 5.0, 2.0) == 10.9
+
+    def test_cyclical_uses_5y_median(self):
+        # 周期股 ROE 取 5 年中位数：(12.0 − 5.0×2.0) + 5.0 = 7.0
+        assert compute_tsr(20.0, 12.0, True, 5.0, 2.0) == 7.0
+
+    def test_cyclical_median_missing_falls_back(self):
+        # 周期股但中位数缺失 → 回退 roe_latest（漏斗③ 同语义）
+        assert compute_tsr(20.0, None, True, 5.0, 2.0) == 15.0
+
+    def test_non_cyclical_ignores_median(self):
+        assert compute_tsr(15.0, 12.0, False, 5.0, 2.0) == 10.0
+
+    def test_no_dividend_degrades_to_roe(self):
+        # 无分红（股息率 0）→ 公式退化为 ROE
+        assert compute_tsr(12.0, None, False, 0.0, 3.0) == 12.0
+
+    def test_loss_stock_still_computes(self):
+        # 亏损股（ROE 负值）照算，警示由展示层负责
+        assert compute_tsr(-8.0, None, False, 2.0, 1.5) == -9.0
+
+    def test_any_none_input_returns_none(self):
+        assert compute_tsr(None, None, False, 5.0, 2.0) is None
+        assert compute_tsr(10.0, None, False, None, 2.0) is None
+        assert compute_tsr(10.0, None, False, 5.0, None) is None
+
+    def test_invalid_pb_returns_none(self):
+        # PB ≤ 0 视为数据异常，不计算
+        assert compute_tsr(10.0, None, False, 5.0, 0.0) is None
+        assert compute_tsr(10.0, None, False, 5.0, -1.0) is None

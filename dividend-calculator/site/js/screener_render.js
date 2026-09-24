@@ -68,6 +68,7 @@
       '<td>' + zoneBadge(esc(r['估值区间'])) + '</td>' +
       '<td class="num">' + fmtNum(r['市赚率PR'], 2) + prNote(r) + '</td>' +
       '<td class="num">' + fmtNum(r['ROE%'], 2) + '</td>' +
+      '<td class="num">' + fmtNum(r['股东总回报率%'], 2) + '</td>' +
       '<td class="num">' + fmtNum(r['总市值(亿)'], 1) + '</td>' +
       '<td class="num">' + fmtNum(r['TTM股息率%'], 2) + '</td>' +
       '<td>' + esc(r['行业']) + '</td>' +

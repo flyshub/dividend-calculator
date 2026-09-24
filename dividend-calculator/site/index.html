@@ -1007,6 +1007,25 @@
         </div>
         <p id="pr-warning" class="warning hidden"></p>
       </div>
+
+      <div class="result-card full hidden" id="tsr-card">
+        <div class="label">股东总回报率分析</div>
+        <div class="metric-row">
+          <div class="metric">
+            <div class="label">估值不变下的股东总回报率</div>
+            <div id="tsr-value" class="value value--xl"></div>
+            <div id="tsr-formula" class="note note--sm"></div>
+          </div>
+        </div>
+        <div class="tip tip--applicability">
+          <div class="tip__title">口径与假设</div>
+          <div class="formula-line">公式: <b>(ROE − 股息率×PB) + 股息率</b>，其中 股息率×PB = 每股分红/每股净资产，ROE 减该项即留存收益推动的每股净资产增速</div>
+          <div class="formula-line">假设 PB 一年内不变：股价随净资产同步增长，加现金分红构成一年总回报估计</div>
+          <div class="formula-line">口径: 股息率为真实股息率（税前、完整财年总额法）；ROE 周期股取 5 年中位数（<span id="tsr-roe-source">本股用最新年报</span>）</div>
+          <div class="formula-line">注意: 估值变化（PB 抬升/回落）不在估计范围内，实际回报会偏离；本指标为估计值，无回测阈值，不做评级</div>
+        </div>
+        <p id="tsr-warning" class="warning hidden"></p>
+      </div>
     </section>
 
     <footer class="site-note">
@@ -1469,6 +1488,37 @@
       if (prCard) prCard.classList.remove('hidden');
     }
 
+    /* 股东总回报率（TSR）：估值不变假设下的一年总回报估计（见 CONTEXT.md）
+     * d = data.pr + 股息率（renderResult 合并）；缺失即明示，退化照算 */
+    function renderTsr(d) {
+      var card = document.getElementById('tsr-card');
+      var valEl = document.getElementById('tsr-value');
+      var fEl = document.getElementById('tsr-formula');
+      var srcEl = document.getElementById('tsr-roe-source');
+      var wEl = document.getElementById('tsr-warning');
+      wEl.classList.add('hidden');
+
+      if (d.tsr == null) {
+        valEl.textContent = '数据不足';
+        fEl.textContent = 'ROE、真实股息率或 PB 缺失，无法计算';
+        card.classList.remove('hidden');
+        return;
+      }
+      valEl.textContent = Number(d.tsr).toFixed(2) + '%';
+      var roeUsed = Calculator.selectRoe(d.roe_latest, d.roe_5y_median, d.is_cyclical);
+      var y = Number(d.dividend_yield_before_tax);
+      fEl.textContent = '(' + Number(roeUsed).toFixed(2) + '% − ' + y.toFixed(2) + '% × ' + Number(d.pb).toFixed(2) + ') + ' + y.toFixed(2) + '% = ' + Number(d.tsr).toFixed(2) + '%';
+      if (srcEl) {
+        srcEl.textContent = (d.is_cyclical && d.roe_5y_median != null)
+          ? '本股为周期股，已用 5 年中位数' : '本股用最新年报';
+      }
+      if (d.is_loss_stock) {
+        wEl.textContent = '该公司处于亏损状态（ROE 为负），总回报率估计仅作参考';
+        wEl.classList.remove('hidden');
+      }
+      card.classList.remove('hidden');
+    }
+
     var SUS_VERDICT_COLOR = { '可持续': '#0d7a4e', '偏弱': '#a85a12', '不可持续': '#be2a2a', '未评估': '#6e7683' };
     var SUS_DIM_LABEL = {
       cf_coverage: '经营现金流覆盖', payout: '股利支付率', profitability: '盈利稳定性',
@@ -1648,6 +1698,9 @@
           stock_name: si.stock_name,
           stock_code: si.stock_code,
           dividend_total: di.total_dividend,
+        }));
+        renderTsr(Object.assign({}, data.pr, {
+          dividend_yield_before_tax: di.dividend_yield_before_tax,
         }));
       }
       if (data.sustainability) renderSustainability(data.sustainability);

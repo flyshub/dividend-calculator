@@ -130,6 +130,9 @@
         pr_basic: pr.pr_basic,
         pr_corrected: pr.pr_corrected,
         pr_pb: pr.pr_pb,
+        /* 估值不变下的股东总回报率（对齐 Python web.attach_tsr，双端一致） */
+        tsr: Calculator.computeTsr(fin.roeLatest, fin.roe5yMedian, indClass.isCyclical,
+                                   yields[0], quote.pb),
         valuation_zone: pr.valuation_zone,
         pr_warning: prWarning,
         pe_ttm: quote.pe_ttm,
