@@ -89,10 +89,24 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: '⚠️ 选股器月频数据刷新失败',
-              body: `## 选股器月频数据刷新失败\n\n- **运行**: [查看日志](${context.serverUrl}/${context.repo.full_name}/actions/runs/${context.runId})\n- **时间**: ${new Date().toISOString()}\n\n股息/财务/可持续性数据可能过期（30 天），请检查并重跑`,
-              labels: ['bug', 'automation'],
-            })
+            const title = '⚠️ 选股器月频数据刷新失败';
+            const runUrl = `${context.serverUrl}/${context.repo.full_name}/actions/runs/${context.runId}`;
+            const body = `## 选股器月频数据刷新失败\n\n- **运行**: [查看日志](${runUrl})\n- **时间**: ${new Date().toISOString()}\n\n股息/财务/可持续性数据可能过期（30 天），请检查并重跑`;
+            // 去重：已有同类未关闭 issue 时追加评论，不再新建
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', per_page: 100,
+            });
+            const dup = open.find(i => i.title === title && !i.pull_request);
+            if (dup) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: dup.number, body,
+              });
+              console.log(`已有同类 issue #${dup.number}，追加评论`);
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title, body, labels: ['bug', 'automation'],
+              });
+            }

@@ -29,14 +29,23 @@ jobs:
 
             const successRuns = runs.data.workflow_runs.filter(r => r.conclusion === 'success');
             if (successRuns.length === 0) {
-              const recentUrl = `${context.serverUrl}/${context.repo.full_name}/actions`;
-              await github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title: '🔔 选股器定时任务可能已停止',
-                body: `## 定时任务异常\n\n最近 3 天没有发现成功的选股器每日更新。\n\n可能原因：\n- GitHub Actions cron 被静默禁用\n- workflow 文件语法错误\n- 上游依赖变更（akshare/东财限流）\n\n请检查：[Actions 页面](${recentUrl})`,
-                labels: ['bug', 'automation'],
+              const title = '🔔 选股器定时任务可能已停止';
+              const runUrl = `${context.serverUrl}/${context.repo.full_name}/actions`;
+              const body = `## 定时任务异常\n\n最近 3 天没有发现成功的选股器每日更新。\n\n可能原因：\n- GitHub Actions cron 被静默禁用\n- workflow 文件语法错误\n- 上游依赖变更（akshare/东财限流）\n\n请检查：[Actions 页面](${runUrl})`;
+              // 去重：已有未关闭的同类告警则跳过（否则每轮检查都新开一条）
+              const open = await github.paginate(github.rest.issues.listForRepo, {
+                owner: context.repo.owner, repo: context.repo.repo,
+                state: 'open', per_page: 100,
               });
+              const dup = open.find(i => i.title === title && !i.pull_request);
+              if (dup) {
+                console.log(`已有同类告警 issue #${dup.number}，跳过`);
+              } else {
+                await github.rest.issues.create({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  title, body, labels: ['bug', 'automation'],
+                });
+              }
             } else {
               console.log(`Found ${successRuns.length} successful runs in the last 3 days. Health OK.`);
             }
