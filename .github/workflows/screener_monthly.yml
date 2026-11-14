@@ -15,6 +15,14 @@ on:
         description: '强制刷新（跳过覆盖率判定，用于验证链路）'
         type: boolean
         default: false
+      mode:
+        description: '刷新范围（finance 用于单独回补财务快照，不重拉股息）'
+        type: choice
+        options:
+          - all
+          - finance
+          - dividend
+        default: all
 
 permissions:
   contents: write
@@ -102,6 +110,7 @@ jobs:
           path: dividend-calculator/data
 
       - name: Refresh dividend (shard ${{ matrix.shard }}/${{ env.SHARDS }})
+        if: ${{ (inputs.mode || 'all') != 'finance' }}
         working-directory: dividend-calculator
         timeout-minutes: 110
         continue-on-error: true
@@ -112,6 +121,7 @@ jobs:
             --max-runtime-minutes 100
 
       - name: Refresh finance (shard ${{ matrix.shard }}/${{ env.SHARDS }})
+        if: ${{ (inputs.mode || 'all') != 'dividend' }}
         working-directory: dividend-calculator
         timeout-minutes: 60
         continue-on-error: true
