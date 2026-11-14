@@ -138,7 +138,7 @@ CSV/JSON 按 **90 天保留周期**自动清理；DB 快照表**不做时间裁�
 | PE_TTM / PB | 腾讯行情                                          | akshare 同花顺(EPS 推算) → 东方财富 push2 |
 | 总股本         | 腾讯 Index 73                                   | mootdx finance                   |
 | 除权除息 / 分红   | akshare fhps_detail_em（东财 datacenter，按报告期判财年） | akshare cninfo → mootdx xdxr     |
-| ROE / 净利润   | mootdx F10 财务分析                               | akshare 同花顺                      |
+| ROE / 净利润   | 东方财富 datacenter（RPT_F10_FINANCE_MAINFINADATA）  | mootdx F10 → akshare 同花顺         |
 | 行业分类        | mootdx F10 行业分析                               | 东方财富 datacenter                  |
 | 可持续性字段      | 东方财富 datacenter                               | —                                |
 
@@ -148,7 +148,8 @@ CSV/JSON 按 **90 天保留周期**自动清理；DB 快照表**不做时间裁�
 
 ## 开发坑位
 
-- mootdx 通达信协议全球可用，不依赖东方财富；ROE 主源保留 mootdx F10（注：当初"akshare/同花顺海外限流"的迁移动机经 2026-08 海外探针实测已不成立，同花顺接口海外 10/10 可用、平均 2s，详见 docs/DATASOURCE_README.md 修复历史）
+- **GitHub Actions 出网限制（2026-11 实测）**：TDX 7709 端口被封（mootdx 全部 Timeout/Refused）；同花顺 `*.10jqka.com.cn` 对机房 IP 返回 403；akshare ≥1.20.41 移除了 `stock_financial_abstract_ths`。因此**能在 CI 上跑的财务源只剩东财 HTTP**——`pr._get_financial` 的降级链是 东财 → mootdx → 同花顺，不要把它改回 mootdx 优先（改了 CI 上财务快照会静默冻结，返回全 None 且不抛异常）
+- mootdx 通达信协议在住宅/办公网络可用，但**在 GitHub Actions 上不可用**（注意别被「全球可用」这句话误导）；本地开发与 CI 的行为差异大多来自这里
 - 东财 datacenter HTTP 接口对海外 IP 限流，CI（GitHub Actions 海外 runner）访问易超时：所有 requests 调用须带重试（3 次退避 + 30s 读取超时），参考 `scripts/verify_js_vs_python.py` 的 `_get()` 统一会话
 - 腾讯 fqkline 接口全球可用，走势图数据源首选
 - 半年报除权日通常在 9-12 月，要用除权日而非公告日推断财年
