@@ -207,6 +207,15 @@ class TestFunnel3Pr:
         assert result.stage_counts[2] == 1
         assert c.pr == pytest.approx(1.0)
 
+    def test_reject_reasons_separate_missing_data_from_expensive(self):
+        """③ 淘汰原因分桶：数据缺失与估值不达标要能区分（2026-11 排查靠这个）。"""
+        missing = _candidate(code="000001", finance=None)         # 无财务快照 → 无法判定
+        expensive = _candidate(code="000002", finance=_finance(roe=2.0))  # PR 4.0 → 高估
+        result = run_funnel([missing, expensive])
+        assert result.stage_counts[1] == 2
+        assert result.stage_counts[2] == 0
+        assert result.pr_reject_reasons == {"无法判定": 1, "高估": 1}
+
 
 class TestFunnel4Sustainability:
     def _run(self, verdict="可持续", **cfg):

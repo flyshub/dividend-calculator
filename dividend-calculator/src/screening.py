@@ -10,8 +10,8 @@
 本 module 不碰网络、不碰缓存：数据获取（拉行情/股息/财务/可持续性）
 由编排层注入 evaluate_pr / evaluate_sustainability 两个回调；测试用假回调离线验证。
 """
-from dataclasses import dataclass
-from typing import Callable, List, Optional, Sequence
+from dataclasses import dataclass, field
+from typing import Callable, Dict, List, Optional, Sequence
 
 from src.pr_calculator import (
     classify_valuation,
@@ -73,6 +73,9 @@ class FunnelResult:
     candidates: List[FunnelCandidate]  # 通过全部层的候选
     fallback_count: int = 0            # 漏斗② 缺 total/ttm_dividend 触发回退的股票数
     fallback_passed: int = 0           # 其中最终入选数
+    pr_reject_reasons: Dict[str, int] = field(default_factory=dict)
+    """漏斗③ 淘汰原因分布（估值区间 → 只数）。用于区分「数据缺失」与「估值不达标」：
+    2026-11 排查中无法判断 ②→③ 的淘汰里多少是 finance 快照缺失。"""
 
 
 @dataclass(frozen=True)
@@ -126,6 +129,7 @@ def run_funnel(
     stage_counts = [0, 0, 0, 0]
     fallback_count = 0
     fallback_passed = 0
+    pr_reject_reasons: Dict[str, int] = {}
     final_candidates: List[FunnelCandidate] = []
 
     for c in universe:
@@ -166,6 +170,7 @@ def run_funnel(
         if val.industry:
             c.industry = val.industry
         if c.valuation_zone not in config.pr_zone:
+            pr_reject_reasons[c.valuation_zone] = pr_reject_reasons.get(c.valuation_zone, 0) + 1
             continue
         c.pass_pr = True
         stage_counts[2] += 1
@@ -179,7 +184,8 @@ def run_funnel(
         final_candidates.append(c)
 
     return FunnelResult(stage_counts=stage_counts, candidates=final_candidates,
-                        fallback_count=fallback_count, fallback_passed=fallback_passed)
+                        fallback_count=fallback_count, fallback_passed=fallback_passed,
+                        pr_reject_reasons=pr_reject_reasons)
 
 
 def build_output_rows(result: FunnelResult) -> List[dict]:

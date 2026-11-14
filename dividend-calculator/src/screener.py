@@ -108,6 +108,10 @@ def run_screener(
     print(f"漏斗① 行情可用: {n1} 只", file=sys.stderr)
     print(f"漏斗② 真实股息率>{min_real}%: {n2} 只", file=sys.stderr)
     print(f"漏斗③ PR {pr_zone}: {n3} 只", file=sys.stderr)
+    if result.pr_reject_reasons:
+        detail = "、".join(f"{k} {v} 只" for k, v in
+                          sorted(result.pr_reject_reasons.items(), key=lambda kv: -kv[1]))
+        print(f"漏斗③ 淘汰原因: {detail}", file=sys.stderr)
     print(f"漏斗④ 可持续性 {sus_verdict}: {n4} 只", file=sys.stderr)
     if result.fallback_count:
         print(f"漏斗② 降级: {result.fallback_count} 只缺 total/ttm_dividend 用存储旧值，"
