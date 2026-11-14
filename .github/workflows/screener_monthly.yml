@@ -1,34 +1,41 @@
-name: Screener Monthly Refresh
+name: Screener Data Refresh
 
+# 全 A 股息/财务刷新约 7.5 小时（实测 4.9s/只），单 job 上限 6h 跑不完，
+# 因此按代码分片并行：prepare（判覆盖率）→ shard ×8（并行刷新+导出）→ merge（合并+预拉+上传）。
+# 刷新幂等：刷过的行变「新鲜」，下一轮跳过；所以 6 小时一次的缺口续跑会自动收敛。
 on:
   schedule:
-    # 每月 1 日 02:30 UTC（北京 10:30）——重拉股息/财务/可持续性（30 天过期数据）
-    # 避开每日任务时段，凌晨跑耗时任务（全 A 限流约 60-70 分钟可接受）
+    # 每月 1 日 02:30 UTC（北京 10:30）全量刷新（30 天过期数据）
     - cron: '30 2 1 * *'
+    # 缺口续跑：只在确有过期行时启动分片（无缺口时空转 ~2 分钟）
+    - cron: '0 */6 * * *'
   workflow_dispatch:
 
 permissions:
   contents: write
   issues: write
 
+concurrency:
+  group: screener-refresh
+  cancel-in-progress: false
+
+env:
+  SHARDS: 8
+
 jobs:
-  refresh:
+  # 1) 判覆盖率：无过期行则不启动分片
+  prepare:
     runs-on: ubuntu-latest
-    # 全流程上限（股息 5559 只 ~74 分钟 + 财务 + 可持续性预拉）
-    timeout-minutes: 200
+    timeout-minutes: 15
+    outputs:
+      need_refresh: ${{ steps.coverage.outputs.need_refresh }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install deps
-        run: pip install -r dividend-calculator/requirements.txt
-
-      # 从 Release 拉取当前 seed（已有每日行情累积）
       - name: Download screener.db from Release
         run: |
           mkdir -p dividend-calculator/data
@@ -41,32 +48,120 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-      # 月频重拉：股息 + 财务（fill_screener_data，限流 0.8s/只，增量复用未过期数据）
-      - name: Refresh dividend data
-        id: refresh_dividend
+      - name: Check stale coverage
+        id: coverage
         working-directory: dividend-calculator
-        timeout-minutes: 150
+        run: python scripts/check_stale_coverage.py --github-output
+
+      - name: Upload seed as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: seed-db
+          path: dividend-calculator/data/screener.db
+          retention-days: 1
+
+  # 2) 分片并行刷新（每片 ~695 只，股息 ~57 分 + 财务 ~45 分）
+  shard:
+    needs: prepare
+    if: needs.prepare.outputs.need_refresh == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install -r dividend-calculator/requirements.txt
+
+      - name: Download seed
+        uses: actions/download-artifact@v4
+        with:
+          name: seed-db
+          path: dividend-calculator/data
+
+      - name: Refresh dividend (shard ${{ matrix.shard }}/${{ env.SHARDS }})
+        working-directory: dividend-calculator
+        timeout-minutes: 110
         continue-on-error: true
         run: |
-          if [ -f data/screener.db ]; then
-            python scripts/fill_screener_data.py --dividend
-            python scripts/fill_screener_data.py --finance
-          else
-            echo "缺少 screener.db"
-            exit 1
-          fi
+          python scripts/fill_screener_data.py --dividend \
+            --shard ${{ matrix.shard }}/${{ env.SHARDS }} \
+            --export-rows shard.json \
+            --max-runtime-minutes 100
 
-      # 月频重拉：可持续性预拉（高股息候选）
+      - name: Refresh finance (shard ${{ matrix.shard }}/${{ env.SHARDS }})
+        working-directory: dividend-calculator
+        timeout-minutes: 60
+        continue-on-error: true
+        run: |
+          python scripts/fill_screener_data.py --finance \
+            --shard ${{ matrix.shard }}/${{ env.SHARDS }} \
+            --export-rows shard.json \
+            --max-runtime-minutes 45
+
+      - name: Upload shard rows
+        uses: actions/upload-artifact@v4
+        with:
+          name: shard-${{ matrix.shard }}
+          path: dividend-calculator/shard.json
+          if-no-files-found: warn
+          retention-days: 1
+
+  # 3) 合并分片结果 → 预拉可持续性 → 上传
+  merge:
+    needs: [prepare, shard]
+    if: always() && needs.prepare.outputs.need_refresh == '1' && needs.shard.result != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install -r dividend-calculator/requirements.txt
+
+      # 合并前重新拉当前 seed（拿最新行情/quotes，避免用 prepare 时点的旧库覆盖每日更新）
+      - name: Download latest screener.db from Release
+        run: |
+          mkdir -p dividend-calculator/data
+          gh release download screener-seed \
+            --repo ${{ github.repository }} \
+            --pattern "screener.db" \
+            --dir dividend-calculator/data \
+            --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Download shard rows
+        uses: actions/download-artifact@v4
+        with:
+          pattern: shard-*
+          path: shards
+          merge-multiple: true
+
+      - name: Merge shard rows
+        working-directory: dividend-calculator
+        run: python scripts/merge_shard_rows.py ../shards/*.json
+
+      # 可持续性预拉（高股息候选，几十只到几百只）
       - name: Refresh sustainability prefetch
         id: refresh_sus
         working-directory: dividend-calculator
+        timeout-minutes: 45
         continue-on-error: true
-        run: |
-          python scripts/prefetch_sustainability.py
+        run: python scripts/prefetch_sustainability.py
 
-      # 回传更新后的 screener.db 到 Release
       - name: Upload refreshed screener.db to Release
-        if: steps.refresh_dividend.outcome == 'success' || steps.refresh_sus.outcome == 'success'
         run: |
           set -euo pipefail
           # 守卫：刷新失败留下空库时拒绝上传（同 screener_daily.yml）
@@ -83,15 +178,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-      # 失败建 Issue 通知
+      # 失败建 Issue 通知（有分片失败 / 合并失败 / 预拉失败都算）
       - name: Create issue on failure
-        if: steps.refresh_dividend.outcome != 'success' || steps.refresh_sus.outcome != 'success'
+        if: always() && (failure() || needs.shard.result != 'success' || steps.refresh_sus.outcome == 'failure')
         uses: actions/github-script@v7
         with:
           script: |
-            const title = '⚠️ 选股器月频数据刷新失败';
+            const title = '⚠️ 选股器数据刷新失败';
             const runUrl = `${context.serverUrl}/${context.repo.full_name}/actions/runs/${context.runId}`;
-            const body = `## 选股器月频数据刷新失败\n\n- **运行**: [查看日志](${runUrl})\n- **时间**: ${new Date().toISOString()}\n\n股息/财务/可持续性数据可能过期（30 天），请检查并重跑`;
+            const body = `## 选股器数据刷新失败\n\n- **运行**: [查看日志](${runUrl})\n- **时间**: ${new Date().toISOString()}\n\n股息/财务/可持续性数据可能过期。刷新是幂等的，重跑即可继续（已刷过的行会自动跳过）`;
             // 去重：已有同类未关闭 issue 时追加评论，不再新建
             const open = await github.paginate(github.rest.issues.listForRepo, {
               owner: context.repo.owner, repo: context.repo.repo,

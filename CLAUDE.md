@@ -46,11 +46,11 @@ TTM 会把不同财年的分红混在一起（如招行 2025/7 发 2024年报分
 
 ### 三档税率
 
-| 持股时长 | 税率 | 字段 |
-|---------|------|------|
-| >1年 | 0% | `dividend_yield_before_tax` |
-| 1月~1年 | 10% | `dividend_yield_after_tax` |
-| <1月 | 20% | `dividend_yield_after_tax_20` |
+| 持股时长  | 税率  | 字段                            |
+| ----- | --- | ----------------------------- |
+| >1年   | 0%  | `dividend_yield_before_tax`   |
+| 1月~1年 | 10% | `dividend_yield_after_tax`    |
+| <1月   | 20% | `dividend_yield_after_tax_20` |
 
 ## 市赚率公式
 
@@ -103,6 +103,17 @@ CSV/JSON 按 **90 天保留周期**自动清理；DB 快照表**不做时间裁�
 - **Release seed DB 历史备份**：每日 CI 覆盖上传 `screener.db` 到 Release `screener-seed` 前，先把当前版（上一日结果）另存为 `screener_YYYYMMDD.db` 历史版（命名取**下载日期**，与旧 DB 内容解耦，运行空档多久都不被立即剪掉），**保留最近 7 天**后自动清理过期备份。备份段独立容错——备份失败仅告警，绝不阻断当日 DB 上传。上传前有守卫：`dividend_snapshot` < 1000 行则拒绝覆盖 seed
 - **git 历史即回滚层**：被清理的 CSV/JSON 仍可从 git log 取回，更早数据无需在线保留
 
+### 数据刷新管线（分片）
+
+全 A 股息刷新实测 **4.9s/只 ≈ 7.5 小时**，单 job 上限 6h 跑不完，所以刷新按代码分片并行（`.github/workflows/screener_monthly.yml`，显示名 Screener Data Refresh）：
+
+`prepare`（判过期覆盖）→ `shard ×8`（`fill_screener_data.py --shard i/8 --export-rows shard.json`）→ `merge`（`merge_shard_rows.py` 合并 + `prefetch_sustainability.py` + 上传）
+
+- **幂等可续跑**：刷过的行变成「新鲜」（30 天窗口），下一轮自动跳过。因此 6 小时一次的 cron 只在 `check_stale_coverage.py` 判断确有过期行时才启动分片，无缺口时空转约 2 分钟
+- **分片互不重叠**：`shard_codes()` 按排序后的代码切 i/n 段，各片并集等于全量（有单测）
+- **合并只覆盖导出的行**：某片失败/未处理的代码，主库原值保留（宁旧不缺）
+- 单只取数超时（`call_with_timeout`，90s/120s）+ 单只异常跳过 + 连续 30 只失败中止本轮；三个 CLI 都 `os._exit` 硬退出（tdxpy 心跳线程会拖住进程）
+
 改 CSV/JSON 保留天数时，需同时更新 `export_screener_json.py` 的 `RETENTION_DAYS` 与此处文档。Release 备份的 7 天窗口在 `screener_daily.yml` 的 Upload 步（`cutoff=date -u -d '7 days ago'`），改窗口时同步改此处文档。
 
 ### A+H 股两地上市
@@ -118,16 +129,16 @@ CSV/JSON 按 **90 天保留周期**自动清理；DB 快照表**不做时间裁�
 
 ## 数据源架构（mootdx + 腾讯双引擎）
 
-| 数据 | 主数据源 | 备用 |
-|------|---------|------|
-| 实时价格 + 总股本 | 腾讯行情 | 新浪(价) → mootdx finance |
-| K线（走势图） | 腾讯 fqkline | mootdx bars |
-| PE_TTM / PB | 腾讯行情 | akshare 同花顺(EPS 推算) → 东方财富 push2 |
-| 总股本 | 腾讯 Index 73 | mootdx finance |
-| 除权除息 / 分红 | akshare fhps_detail_em（东财 datacenter，按报告期判财年） | akshare cninfo → mootdx xdxr |
-| ROE / 净利润 | mootdx F10 财务分析 | akshare 同花顺 |
-| 行业分类 | mootdx F10 行业分析 | 东方财富 datacenter |
-| 可持续性字段 | 东方财富 datacenter | — |
+| 数据          | 主数据源                                          | 备用                               |
+| ----------- | --------------------------------------------- | -------------------------------- |
+| 实时价格 + 总股本  | 腾讯行情                                          | 新浪(价) → mootdx finance           |
+| K线（走势图）     | 腾讯 fqkline                                    | mootdx bars                      |
+| PE_TTM / PB | 腾讯行情                                          | akshare 同花顺(EPS 推算) → 东方财富 push2 |
+| 总股本         | 腾讯 Index 73                                   | mootdx finance                   |
+| 除权除息 / 分红   | akshare fhps_detail_em（东财 datacenter，按报告期判财年） | akshare cninfo → mootdx xdxr     |
+| ROE / 净利润   | mootdx F10 财务分析                               | akshare 同花顺                      |
+| 行业分类        | mootdx F10 行业分析                               | 东方财富 datacenter                  |
+| 可持续性字段      | 东方财富 datacenter                               | —                                |
 
 所有数据源均为全球可用（mootdx 走二进制通达信协议，腾讯走 HTTP，akshare/同花顺经 2026-08 海外探针实测 10/10 可用、平均 2s）；可持续性模块与 JS 静态版刻意走东方财富 datacenter（浏览器可直连、与 Python 同源），其余主链路不依赖东方财富服务器。
 

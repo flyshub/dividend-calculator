@@ -12,7 +12,7 @@ PR 不建表（由 quote.pe_ttm + finance.roe_latest 派生，筛选时实时算
 """
 import sqlite3
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -349,6 +349,25 @@ class ScreenerCache:
         except ValueError:
             return True
         return (date.today() - updated).days > max_age_days
+
+    def stale_counts(self, max_age_days: int = 30) -> dict:
+        """各快照表 {(总行数, 过期行数)}，CI 据此判断是否需要补刷。
+
+        与 is_dividend_stale 等判定同语义：updated_at 为 NULL 或早于 max_age_days
+        前视为过期（date() 比较，忽略时分秒）。
+        """
+        cutoff = (date.today() - timedelta(days=max_age_days)).isoformat()
+        out = {}
+        with self._conn() as conn:
+            for table in ("dividend_snapshot", "finance_snapshot", "sustainability_snapshot"):
+                total, stale = conn.execute(
+                    f"SELECT count(*), "
+                    f"coalesce(sum(CASE WHEN updated_at IS NULL OR date(updated_at) < ? "
+                    f"THEN 1 ELSE 0 END), 0) FROM {table}",
+                    (cutoff,),
+                ).fetchone()
+                out[table] = (int(total), int(stale))
+        return out
 
     def prune_orphan_rows(self) -> int:
         """清理 stock_list 已剔除股票的快照行（孤儿行），返回删除行数。
