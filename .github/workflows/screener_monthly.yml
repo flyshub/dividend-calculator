@@ -36,6 +36,10 @@ jobs:
         with:
           python-version: '3.11'
 
+      # check_stale_coverage 走 src.screener_cache，而 src/__init__ 会 import mootdx/akshare
+      - name: Install deps
+        run: pip install -r dividend-calculator/requirements.txt
+
       - name: Download screener.db from Release
         run: |
           mkdir -p dividend-calculator/data
