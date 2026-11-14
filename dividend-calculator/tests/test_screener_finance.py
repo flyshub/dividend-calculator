@@ -183,3 +183,38 @@ class TestFailureIsolation:
                 financial_provider=boom,
                 industry_provider=lambda c: ("电力", "mootdx"),
                 max_consecutive_failures=2)
+
+    def test_mass_none_aborts(self, tmp_path):
+        """取数全部返回 None（无异常）但数量够多 → 判定数据源失效并中止。
+
+        2026-11 事故：CI 上同花顺取数失效，690 只跑完 18 分钟、finance_snapshot
+        零更新，静默冻结。正常覆盖率 ~14%，批量零写入只可能是数据源整体不可用。
+        """
+        cache = ScreenerCache(tmp_path / "s.db")
+        codes = [f"60{i:04d}" for i in range(5)]
+
+        def no_data(code):
+            return (None, None, None, None, "", ["无数据"], None)
+
+        with pytest.raises(RuntimeError, match="数据源不可用"):
+            compute_finance_for_candidates(
+                codes, cache,
+                financial_provider=no_data,
+                industry_provider=lambda c: ("电力", "mootdx"),
+                mass_failure_min=5)
+        assert cache.get_finance(codes[0]) is None
+
+    def test_few_none_does_not_abort(self, tmp_path):
+        """少量无数据是常态（覆盖率 ~14%），不应中止。"""
+        cache = ScreenerCache(tmp_path / "s.db")
+        codes = [f"60{i:04d}" for i in range(4)]
+
+        def some_data(code):
+            return _fin() if code == codes[-1] else (None, None, None, None, "", ["无数据"], None)
+
+        snaps = compute_finance_for_candidates(
+            codes, cache,
+            financial_provider=some_data,
+            industry_provider=lambda c: ("电力", "mootdx"),
+            mass_failure_min=10)
+        assert [s.code for s in snaps] == [codes[-1]]

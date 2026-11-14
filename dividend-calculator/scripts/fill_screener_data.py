@@ -110,6 +110,14 @@ def fill_finance(cache: ScreenerCache, codes: List[str], deadline: float = 0.0):
     codes = [c for c in codes if c in div_codes]
     print(f"拉取财务: {len(codes)} 只（实测 ~4s/只）", flush=True)
     _fill(cache, codes, "财务", compute_finance_for_candidates, deadline)
+    # 取数全部返回 None 时不会有异常、也不会写行——静默冻结（2026-11：CI 上
+    # 同花顺/akshare 取数失效，690 只跑完后 finance_snapshot 一行未更新）。这里显式告警。
+    today = time.strftime("%Y-%m-%d")
+    fresh = sum(1 for c in codes
+                if (s := cache.get_finance(c)) is not None and s.updated_at == today)
+    if codes and fresh == 0:
+        print(f"::warning::财务取数 {len(codes)} 只无一写入新行（数据源不可用？finance_snapshot 未更新）",
+              flush=True)
 
 
 def main():

@@ -10,6 +10,11 @@ on:
     # 缺口续跑：只在确有过期行时启动分片（无缺口时空转 ~2 分钟）
     - cron: '0 */6 * * *'
   workflow_dispatch:
+    inputs:
+      force:
+        description: '强制刷新（跳过覆盖率判定，用于验证链路）'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -55,7 +60,13 @@ jobs:
       - name: Check stale coverage
         id: coverage
         working-directory: dividend-calculator
-        run: python scripts/check_stale_coverage.py --github-output
+        run: |
+          if [ "${{ inputs.force }}" = "true" ]; then
+            echo "强制刷新：跳过覆盖率判定"
+            echo "need_refresh=1" >> "$GITHUB_OUTPUT"
+          else
+            python scripts/check_stale_coverage.py --github-output
+          fi
 
       - name: Upload seed as artifact
         uses: actions/upload-artifact@v4
@@ -97,7 +108,7 @@ jobs:
         run: |
           python scripts/fill_screener_data.py --dividend \
             --shard ${{ matrix.shard }}/${{ env.SHARDS }} \
-            --export-rows shard.json \
+            --export-rows shard-${{ matrix.shard }}.json \
             --max-runtime-minutes 100
 
       - name: Refresh finance (shard ${{ matrix.shard }}/${{ env.SHARDS }})
@@ -107,14 +118,16 @@ jobs:
         run: |
           python scripts/fill_screener_data.py --finance \
             --shard ${{ matrix.shard }}/${{ env.SHARDS }} \
-            --export-rows shard.json \
+            --export-rows shard-${{ matrix.shard }}.json \
             --max-runtime-minutes 45
 
+      # 文件名必须各片唯一：download-artifact merge-multiple 遇到同名文件会拼接成
+      # 一个非法 JSON（2026-11-14 run 43593390858 即因此合并失败）
       - name: Upload shard rows
         uses: actions/upload-artifact@v4
         with:
           name: shard-${{ matrix.shard }}
-          path: dividend-calculator/shard.json
+          path: dividend-calculator/shard-${{ matrix.shard }}.json
           if-no-files-found: warn
           retention-days: 1
 

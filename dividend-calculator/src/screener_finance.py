@@ -45,13 +45,15 @@ def compute_finance_for_candidates(
     industry_provider: Optional[IndustryProvider] = None,
     fetch_timeout: float = 120.0,
     max_consecutive_failures: int = MAX_CONSECUTIVE_FAILURES,
+    mass_failure_min: int = 200,
 ) -> List[FinanceSnapshot]:
     """对候选池逐股拉财务，写 finance_snapshot，返回全部快照。
 
     增量复用：finance_snapshot 在 fresh_days 内 → 跳过重拉（月频管线 ~30 天跑一次，
     7 天窗口保证月内重跑不重复拉取）。
     限流：batch_wait()（0.8s/只），对齐 fill_dividends。
-    容错：单只失败（超时/数据源异常）记日志跳过，连续 N 只失败则中止本轮。
+    容错：单只失败（超时/数据源异常）记日志跳过，连续 N 只失败则中止本轮；
+    尝试 mass_failure_min 只仍零写入（正常覆盖 ~14%）也判定数据源失效而中止。
     """
     from src.pr import _get_financial, _get_industry
     from src.pr_calculator import classify_industry
@@ -61,6 +63,8 @@ def compute_finance_for_candidates(
     ind_provider = industry_provider or _get_industry
     snapshots: List[FinanceSnapshot] = []
     consecutive_failures = 0
+    attempted = 0     # 真正发起取数的只数（跳过缓存的）
+    written = 0       # 成功写入新行的只数
     for code in codes:
         existing = cache.get_finance(code)
         # 增量复用：缓存未过期且 ROE 完整则跳过重拉。
@@ -74,6 +78,7 @@ def compute_finance_for_candidates(
             snapshots.append(existing)
             continue
         batch_wait()  # 限流：控制请求间隔
+        attempted += 1
         try:
             fin = call_with_timeout(
                 lambda: fin_provider(code), fetch_timeout, what=f"{code} 财务",
@@ -89,6 +94,13 @@ def compute_finance_for_candidates(
         roe_latest, roe_5y_median, _np_latest, np_annual, src, _errors, roe_period = fin
         if roe_latest is None:
             consecutive_failures = 0  # 有响应但无数据 → 不算数据源故障
+            # 但「取了很多只、一行都没写」只可能是数据源整体失效（正常覆盖 ~14%）：
+            # 2026-11 CI 上同花顺取数失效，690 只跑 18 分钟、finance_snapshot 零更新，
+            # 无声冻结。此处中止并报错，避免整轮白跑。
+            if attempted >= mass_failure_min and written == 0:
+                raise RuntimeError(
+                    f"财务取数已尝试 {attempted} 只、无一成功写入，判定数据源不可用，中止本轮"
+                )
             continue  # 数据不可得 → 不写假数据（数据铁律）
         consecutive_failures = 0
         try:
@@ -108,4 +120,5 @@ def compute_finance_for_candidates(
         )
         cache.upsert_finance(snap)
         snapshots.append(snap)
+        written += 1
     return snapshots
