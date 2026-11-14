@@ -1,0 +1,84 @@
+name: Diag Finance Fetch
+
+# 临时诊断：财务取数在 CI 上为何全 None（2026-11 事故排查）
+# 用完即删。手动触发即可。
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install -r dividend-calculator/requirements.txt
+
+      - name: Probe network egress
+        working-directory: dividend-calculator
+        run: |
+          echo "=== 1) 东财 HTTP（已知可用） ==="
+          curl -s -m 15 -o /dev/null -w "push2his eastmoney: %{http_code}\n" \
+            "https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=1.600900&fields1=f1&klt=101&fqt=1&beg=20240101&end=20500101"
+          echo "=== 2) 同花顺 HTTP ==="
+          curl -s -m 15 -o /dev/null -w "basic.10jqka: %{http_code}\n" "https://basic.10jqka.com.cn/600900/finance.html"
+          curl -s -m 15 -o /dev/null -w "data.10jqka: %{http_code}\n" "https://data.10jqka.com.cn/"
+          echo "=== 3) mootdx TDX TCP 7709 ==="
+          python - <<'PY'
+          import socket
+          for host in ("119.147.212.81", "218.108.98.244", "123.125.108.24"):
+              s = socket.socket(); s.settimeout(6)
+              try:
+                  s.connect((host, 7709)); print(f"tdx {host}:7709 OK")
+              except Exception as e:
+                  print(f"tdx {host}:7709 FAIL {type(e).__name__}: {e}")
+              finally:
+                  s.close()
+          PY
+
+      - name: Probe akshare THS financial
+        working-directory: dividend-calculator
+        run: |
+          python - <<'PY'
+          import traceback
+          import akshare as ak
+          print("akshare", ak.__version__)
+          for code in ("600900", "000651"):
+              print(f"\n=== {code} stock_financial_abstract_ths 按年度 ===")
+              try:
+                  df = ak.stock_financial_abstract_ths(symbol=code, indicator="按年度")
+                  print("shape", getattr(df, "shape", None))
+                  print("columns", list(df.columns)[:12] if hasattr(df, "columns") else None)
+                  if hasattr(df, "head") and not df.empty:
+                      print(df.tail(2).to_string()[:600])
+              except Exception as e:
+                  print("EXC", type(e).__name__, e)
+                  traceback.print_exc()
+              print(f"=== {code} 按报告期 ===")
+              try:
+                  dfq = ak.stock_financial_abstract_ths(symbol=code, indicator="按报告期")
+                  print("shape", getattr(dfq, "shape", None))
+              except Exception as e:
+                  print("EXC", type(e).__name__, e)
+          PY
+
+      - name: Probe _get_financial end-to-end
+        working-directory: dividend-calculator
+        run: |
+          python - <<'PY'
+          import logging, traceback
+          logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(message)s")
+          from src.pr import _get_financial
+          for code in ("600900", "000651"):
+              print(f"\n=== _get_financial({code}) ===")
+              try:
+                  print(_get_financial(code))
+              except Exception:
+                  traceback.print_exc()
+          PY
