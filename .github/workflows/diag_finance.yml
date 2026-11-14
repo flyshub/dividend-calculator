@@ -68,17 +68,30 @@ jobs:
                   print("EXC", type(e).__name__, e)
           PY
 
-      - name: Probe _get_financial end-to-end
+      - name: Probe _get_financial end-to-end (东财优先)
         working-directory: dividend-calculator
+        timeout-minutes: 5
         run: |
           python - <<'PY'
-          import logging, traceback
-          logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(message)s")
+          import time, traceback
           from src.pr import _get_financial
           for code in ("600900", "000651"):
-              print(f"\n=== _get_financial({code}) ===")
+              t0 = time.time()
               try:
-                  print(_get_financial(code))
+                  roe, roe5y, np_cur, np_annual, src, errors, period = _get_financial(code)
+                  print(f"{code}: src={src} roe={roe} roe5y={roe5y} "
+                        f"np_annual={(np_annual or 0)/1e8:.2f}亿 period={period} "
+                        f"{time.time()-t0:.1f}s errors={errors}")
               except Exception:
                   traceback.print_exc()
+          # 吞吐抽样：5 只（含限流）
+          from src.screener_rate_limit import batch_wait
+          codes = ["601318", "000915", "603365", "600873", "600019"]
+          t0 = time.time(); ok = 0
+          for c in codes:
+              batch_wait()
+              roe, *_rest = _get_financial(c)
+              ok += 1 if roe is not None else 0
+          print(f"抽样 5 只: {ok} 成功, 总耗时 {time.time()-t0:.1f}s "
+                f"→ 单只 {(time.time()-t0)/len(codes):.2f}s，全 A 推算 {(time.time()-t0)/len(codes)*5559/3600:.2f}h")
           PY

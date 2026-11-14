@@ -231,6 +231,13 @@ def _get_financial_ths(stock_code: str) -> Tuple[
     try:
         import akshare as ak
 
+        # akshare 1.20.41 起移除该接口（2026-11 事故：CI 静默返回全 None）
+        if not hasattr(ak, "stock_financial_abstract_ths"):
+            errors.append(
+                f"akshare {getattr(ak, '__version__', '?')} 已移除 stock_financial_abstract_ths"
+                "（同花顺路径不可用，需东财数据源）")
+            return None, None, None, None, "无", errors, None
+
         # 年度数据
         df_annual = ak.stock_financial_abstract_ths(symbol=stock_code, indicator="按年度")
         if df_annual.empty:
@@ -302,16 +309,79 @@ def _get_financial_ths(stock_code: str) -> Tuple[
         return None, None, None, None, "无", errors, None
 
 
+def _get_financial_em(stock_code: str) -> Tuple[
+    Optional[float], Optional[float], Optional[float], Optional[float], str, List[str], Optional[int],
+]:
+    """东方财富 F10 主要财务指标（RPT_F10_FINANCE_MAINFINADATA）。
+
+    与同花顺路径同口径（roe_latest / roe_5y_median 取年报行，net_profit_latest_period
+    取最新报告期累计值），但与分红/行业/现金流共用同一数据源与域名，全球可用。
+
+    引入原因（2026-11）：mootdx F10 走 TDX 7709 TCP，GitHub Actions 出网被封（Timeout/
+    Refused）；akshare 1.20.41 起移除 stock_financial_abstract_ths 且同花顺对机房 IP 返回
+    403，两条旧路径在 CI 上同时失效，财务快照静默冻结。
+    """
+    from src.eastmoney_fetcher import fetch_financial_rows
+    from src.sustainability import parse_financial_rows
+
+    errors: List[str] = []
+    try:
+        rows = fetch_financial_rows(stock_code)
+    except Exception as e:  # fetch_financial_rows 内部已吞异常返空，这里兜未预期形状
+        return None, None, None, None, "无", [f"东财财务接口异常: {e}"], None
+
+    if not rows:
+        return None, None, None, None, "无", ["东财财务数据为空"], None
+
+    annuals = parse_financial_rows(rows)  # 已按年度降序、仅 12-31
+    if not annuals:
+        return None, None, None, None, "无", ["东财财务无年报行"], None
+
+    roe_latest = annuals[0].roe
+    net_profit_annual = annuals[0].net_profit
+    roe_vals = [a.roe for a in annuals[:5] if a.roe is not None]
+    roe_5y_median = float(statistics.median(roe_vals)) if roe_vals else None
+
+    # 最新报告期累计净利润（可为季报/中报，仅展示；与同花顺口径一致）
+    net_profit_latest_period = None
+    latest_np = rows[0].get("PARENTNETPROFIT")
+    if latest_np is not None:
+        try:
+            net_profit_latest_period = float(latest_np)
+        except (TypeError, ValueError):
+            net_profit_latest_period = None
+
+    logger.debug(
+        "东财财报 %s: ROE年报=%.2f%% ROE5Y中位=%.2f%% 最新报告期净利润=%.2f亿 年报净利润=%.2f亿",
+        stock_code,
+        roe_latest if roe_latest is not None else float("nan"),
+        roe_5y_median if roe_5y_median is not None else float("nan"),
+        (net_profit_latest_period or 0) / 1e8,
+        (net_profit_annual or 0) / 1e8,
+    )
+    return (roe_latest, roe_5y_median, net_profit_latest_period, net_profit_annual,
+            "东方财富", errors, annuals[0].year)
+
+
 def _get_financial(stock_code: str) -> Tuple[
     Optional[float], Optional[float], Optional[float], Optional[float], str, List[str], Optional[int],
 ]:
-    """获取 ROE 和净利润，mootdx F10 优先，akshare/同花顺备用
+    """获取 ROE 和净利润：东方财富 F10 优先，mootdx F10、akshare/同花顺备用
 
     返回：roe_latest, roe_5y_median, net_profit_latest_period, net_profit_annual, src, errors, roe_period(年报年份)
+
+    降级链顺序理由：东财 HTTP 全球可用（与分红/行业/现金流同源），mootdx 走 TDX 7709
+    TCP（GitHub Actions 出网被封），同花顺对机房 IP 403 且 akshare 已移除对应接口。
     """
     errors: List[str] = []
 
-    # 主：mootdx F10
+    # 主：东方财富 F10（CI 与本地均可用）
+    roe_em, roe5y_em, np_cur_em, np_annual_em, src_em, errs_em, period_em = _get_financial_em(stock_code)
+    if roe_em is not None:
+        return roe_em, roe5y_em, np_cur_em, np_annual_em, src_em, errs_em, period_em
+    errors.extend(errs_em)
+
+    # 备 1：mootdx F10
     try:
         from .datasource.mootdx_source import MootdxSource, get_quotes_client
         source = MootdxSource()
@@ -364,8 +434,8 @@ def _get_financial(stock_code: str) -> Tuple[
     except Exception as e:
         errors.append(f"mootdx F10 财报获取失败: {e}")
 
-    # 备：akshare/同花顺
-    logger.info("mootdx 财报不可用，回退到 akshare/同花顺")
+    # 备 2：akshare/同花顺（历史路径；CI 上对机房 IP 403 且新版 akshare 已移除接口）
+    logger.info("东财与 mootdx 财报均不可用，回退到 akshare/同花顺")
     roe, roe5y, np_ttm, np_annual, src, errs2, roe_period = _get_financial_ths(stock_code)
     errors.extend(errs2)
     return roe, roe5y, np_ttm, np_annual, src, errors, roe_period
