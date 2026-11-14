@@ -10,6 +10,7 @@
     python scripts/fill_screener_data.py --limit 1000   # 调试：只拉前 1000
 """
 import argparse
+import os
 import sys
 import time
 from pathlib import Path
@@ -82,8 +83,16 @@ def main():
         fill_finance(cache, args.limit)
     else:
         fill_dividends(cache, args.limit)
+    # 刷新成功后才清理孤儿行（股票池已剔除的快照）；绝不按时间裁剪
+    pruned = cache.prune_orphan_rows()
+    if pruned:
+        print(f"清理 {pruned} 条孤儿快照行（股票池已剔除）", flush=True)
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    code = main()
+    # 显式硬退出：mootdx/tdxpy 心跳线程会拖住进程（见 src/screener.py 同款说明）
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)

@@ -6,6 +6,7 @@
 漏斗② 判定与降级回退测试已随 ADR-0001 迁移到 test_screening.py。
 先例：tests/test_dividend.py（股息计算）、tests/test_screener_cache.py。
 """
+import time
 from unittest.mock import patch
 
 import pytest
@@ -116,3 +117,44 @@ class TestComputeDividends:
         assert calls == [], "total_dividend 有值应复用缓存不重拉"
         assert len(snaps) == 1
         assert snaps[0].total_dividend == pytest.approx(4e10)
+
+
+class TestFailureIsolation:
+    """单只取数失败/超时不得中断整批（2026-11 事故：一只卡死拖垮整轮 5559 只）。"""
+
+    def test_single_failure_skipped(self, tmp_path):
+        cache = ScreenerCache(tmp_path / "s.db")
+
+        def fake(code):
+            if code == "600900":
+                raise RuntimeError("boom")
+            return _result(code=code)
+
+        snaps = compute_dividends_for_candidates(
+            ["600900", "600987"], cache, calc_provider=fake)
+        assert [s.code for s in snaps] == ["600987"]
+
+    def test_consecutive_failures_abort(self, tmp_path):
+        """连续失败达阈值 → 判定数据源不可用，中止本轮（避免逐只耗光 CI 时长）。"""
+        cache = ScreenerCache(tmp_path / "s.db")
+
+        def boom(code):
+            raise RuntimeError("source down")
+
+        with pytest.raises(RuntimeError, match="连续"):
+            compute_dividends_for_candidates(
+                ["600900", "600987", "600941"], cache,
+                calc_provider=boom, max_consecutive_failures=2)
+
+    def test_timeout_isolated(self, tmp_path):
+        """provider 卡住 → 单只超时跳过，后续继续。"""
+        cache = ScreenerCache(tmp_path / "s.db")
+
+        def slow(code):
+            if code == "600900":
+                time.sleep(2)
+            return _result(code=code)
+
+        snaps = compute_dividends_for_candidates(
+            ["600900", "600987"], cache, calc_provider=slow, fetch_timeout=0.05)
+        assert [s.code for s in snaps] == ["600987"]

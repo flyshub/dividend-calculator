@@ -11,9 +11,12 @@
 
 参考：backtest_pr.py 的 UA_SLEEP=0.8（东财限流实测经验值）。
 """
+import signal
 import threading
 import time
-from typing import Optional
+from typing import Callable, Optional, TypeVar
+
+T = TypeVar("T")
 
 
 class RateLimiter:
@@ -59,3 +62,29 @@ DEFAULT_RATE_LIMITER = RateLimiter(interval=0.8)
 def batch_wait(limiter: Optional[RateLimiter] = None) -> None:
     """批量循环中的等待点。默认用模块级限流器。"""
     (limiter or DEFAULT_RATE_LIMITER).wait()
+
+
+class FetchTimeout(Exception):
+    """单次取数超时（signal 实现，仅主线程生效）。"""
+
+
+def call_with_timeout(fn: Callable[[], T], timeout_s: float, *, what: str = "") -> T:
+    """在 timeout_s 秒内执行 fn，超时抛 FetchTimeout。
+
+    akshare / mootdx 的取数请求不带 timeout，数据源无响应时整批会挂死
+    （2026-11 事故：月频刷新卡在第一批取数，跑满 3h 被 CI 杀掉）。
+    仅主线程生效；非主线程（线程池、测试）直接执行，不做超时控制。
+    """
+    if timeout_s <= 0 or threading.current_thread() is not threading.main_thread():
+        return fn()
+
+    def _on_alarm(signum, frame):
+        raise FetchTimeout(f"{what or '取数'}超时（>{timeout_s:g}s）")
+
+    old_handler = signal.signal(signal.SIGALRM, _on_alarm)
+    signal.setitimer(signal.ITIMER_REAL, timeout_s)
+    try:
+        return fn()
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, old_handler)

@@ -7,12 +7,17 @@
 """
 from typing import Callable, Optional
 
-from src.screener_rate_limit import batch_wait
+import sys
+
+from src.screener_rate_limit import batch_wait, call_with_timeout
 from src.screener_cache import ScreenerCache, DividendSnapshot
 from src.screening import FunnelCandidate
 
 # 漏斗④ 保留的 verdict（可持续 + 偏弱）
 SUS_VERDICT_KEEP = ("可持续", "偏弱")
+
+# 单股可持续性取数超时（秒）：数据源无响应时降级为「未评估」，不拖死每日任务
+SUS_FETCH_TIMEOUT = 120.0
 
 # 可持续性评估结果缓存（内存，跨股票）
 _sus_cache: dict = {}
@@ -115,13 +120,20 @@ def make_sustainability_evaluator(
         cached_ok = snap is not None and not cache.is_sustainability_stale(code)
         if not cached_ok and assessor is None:
             batch_wait()
-        result = evaluate_sustainability(
-            code, dividend, assessor=assessor,
-            total_shares=candidate.quote.total_shares if candidate.quote else 1.0,
-            dividend_total=dividend.total_dividend,
-            industry=candidate.industry,
-            cache=cache,
-        )
+        try:
+            result = call_with_timeout(
+                lambda: evaluate_sustainability(
+                    code, dividend, assessor=assessor,
+                    total_shares=candidate.quote.total_shares if candidate.quote else 1.0,
+                    dividend_total=dividend.total_dividend,
+                    industry=candidate.industry,
+                    cache=cache,
+                ),
+                SUS_FETCH_TIMEOUT, what=f"{code} 可持续性",
+            )
+        except Exception as exc:  # noqa: BLE001 — 单只失败降级，不中断漏斗
+            print(f"  [可持续性] {code} 取数失败: {exc}", file=sys.stderr)
+            return "未评估"
         return result["verdict"]
 
     return evaluate

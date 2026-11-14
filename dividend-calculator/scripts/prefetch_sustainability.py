@@ -14,6 +14,7 @@ financial_rows / cashflow_rows / dividend_rows / industry / price_change_1y / to
     python scripts/prefetch_sustainability.py --all-a       # 拉全部有股息数据的
 """
 import argparse
+import os
 import sys
 import time
 from pathlib import Path
@@ -57,16 +58,25 @@ def main():
     print(f"预拉可持续性基础数据: {total} 只（限流）", flush=True)
 
     t0 = time.time()
+    failures = 0
     for i, code in enumerate(codes, 1):
-        prefetch_one(code, cache)
+        try:
+            prefetch_one(code, cache)
+        except Exception as exc:  # noqa: BLE001 — 单只失败不影响整批
+            failures += 1
+            print(f"  [{i}/{total}] {code} 预拉失败: {exc}", flush=True)
         if i % 10 == 0 or i == total:
             elapsed = time.time() - t0
             rate = i / elapsed if elapsed > 0 else 0
             eta = (total - i) / rate / 60 if rate > 0 else 0
             print(f"  [{i}/{total}] 耗时 {elapsed/60:.1f} 分, 预计剩余 {eta:.0f} 分", flush=True)
-    print(f"✓ 预拉完成: {total} 只, 耗时 {(time.time()-t0)/60:.1f} 分钟", flush=True)
+    print(f"✓ 预拉完成: {total} 只（失败 {failures}）, 耗时 {(time.time()-t0)/60:.1f} 分钟", flush=True)
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    code = main()
+    # 显式硬退出：mootdx/tdxpy 心跳线程会拖住进程（见 src/screener.py 同款说明）
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)

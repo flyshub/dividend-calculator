@@ -290,41 +290,55 @@ class TestStaleness:
     def test_missing_code_stale(self, cache):
         assert cache.is_quote_stale("999999", max_age_days=1) is True
 
-    def test_prune_stale_rows(self, cache):
-        """prune_stale_rows 删超期（>90 天）+ NULL updated_at 行，保留近期行；quote 不受影响。"""
-        # 超期（100 天前）：dividend 与 finance
+    def test_prune_orphan_rows(self, cache):
+        """prune_orphan_rows 只删股票池已剔除的孤儿行；超期数据保留（不按时间裁剪）。
+
+        2026-11 事故回归：旧实现 prune_stale_rows(90) 按 updated_at 裁剪，月频刷新
+        断跑 3 个月后把 dividend/finance/sustainability 全表清空。
+        """
+        cache.upsert_stock_list([StockListItem(code="600900", name="长江电力", market="sh")])
+        # 池内：200 天未刷新也要保留
         cache.upsert_dividend(DividendSnapshot(code="600900", real_yield=5.2, ttm_yield=5.5,
                                                real_yield_year="2025", ttm_period="p",
                                                dividend_source="mootdx",
-                                               updated_at=self._ts(100)))
-        cache.upsert_finance(FinanceSnapshot(code="600900", roe_latest=15, roe_period="2025",
-                                             net_profit_annual=1e9, payout_ratio=0.5,
-                                             finance_source="ths", updated_at=self._ts(100)))
-        # NULL updated_at：sustainability
-        cache.upsert_sustainability(SustainabilitySnapshot(code="600887", financial_rows="[]",
-                                                           cashflow_rows="[]", dividend_rows="[]",
-                                                           industry="x", price_change_1y=0,
-                                                           top10_holding=0, source="s",
-                                                           updated_at=None))
-        # 近期（10 天前）：dividend 保留
+                                               updated_at=self._ts(200)))
+        # 孤儿（不在 stock_list）的三张快照
         cache.upsert_dividend(DividendSnapshot(code="600887", real_yield=5.2, ttm_yield=5.5,
                                                real_yield_year="2025", ttm_period="p",
                                                dividend_source="mootdx",
                                                updated_at=self._ts(10)))
-        # quote_snapshot 超期但不应被清理（每日全量覆盖，不做时间裁剪）
-        cache.upsert_quote(QuoteSnapshot(code="600900", price=10, pe_ttm=1, pb=1,
+        cache.upsert_finance(FinanceSnapshot(code="600887", roe_latest=15, roe_period="2025",
+                                             net_profit_annual=1e9, payout_ratio=0.5,
+                                             finance_source="ths", updated_at=self._ts(10)))
+        cache.upsert_sustainability(SustainabilitySnapshot(code="600887", financial_rows="[]",
+                                                           cashflow_rows="[]", dividend_rows="[]",
+                                                           industry="x", price_change_1y=0,
+                                                           top10_holding=0, source="s",
+                                                           updated_at=self._ts(10)))
+        # quote_snapshot 不参与清理
+        cache.upsert_quote(QuoteSnapshot(code="600887", price=10, pe_ttm=1, pb=1,
                                          total_shares=1, market_cap=1,
                                          quote_time="t", source="s",
-                                         updated_at=self._ts(100)))
+                                         updated_at=self._ts(10)))
 
-        pruned = cache.prune_stale_rows(max_age_days=90)
-        assert pruned == 3  # 600900-dividend + 600900-finance + 600887-sustainability(NULL)
+        pruned = cache.prune_orphan_rows()
+        assert pruned == 3  # 600887 的 dividend + finance + sustainability
 
-        # 删除后：600900 dividend/finance 不存在，600887 dividend 保留
-        assert cache.is_dividend_stale("600900", max_age_days=90) is True
-        assert cache.is_dividend_stale("600887", max_age_days=90) is False
-        # quote_snapshot 保留（虽超期）
-        assert cache.is_quote_stale("600900", max_age_days=90) is True
+        stats = cache.stats()
+        assert stats["dividend_snapshot"] == 1        # 600900 保留
+        assert stats["finance_snapshot"] == 0
+        assert stats["sustainability_snapshot"] == 0
+        assert stats["quote_snapshot"] == 1           # quote 不动
+        assert cache.get_dividend("600900") is not None
+
+    def test_prune_orphan_rows_empty_universe_noop(self, cache):
+        """stock_list 为空 → 不得清空快照表（避免误判为全市场退市）。"""
+        cache.upsert_dividend(DividendSnapshot(code="600900", real_yield=5.2, ttm_yield=5.5,
+                                               real_yield_year="2025", ttm_period="p",
+                                               dividend_source="mootdx",
+                                               updated_at=self._ts(10)))
+        assert cache.prune_orphan_rows() == 0
+        assert cache.stats()["dividend_snapshot"] == 1
 
 
 class TestSourceTracking:

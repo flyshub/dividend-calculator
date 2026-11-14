@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from src.screener_rate_limit import RateLimiter, batch_wait
+from src.screener_rate_limit import FetchTimeout, RateLimiter, batch_wait, call_with_timeout
 
 
 class TestRateLimiter:
@@ -69,3 +69,22 @@ class TestBatchWait:
         """batch_wait 使用模块级默认限流器（不崩溃）。"""
         batch_wait()
         batch_wait()
+
+
+class TestCallWithTimeout:
+    """单次取数超时（2026-11 事故：数据源无响应把整批挂满 CI 上限）。"""
+
+    def test_returns_value(self):
+        assert call_with_timeout(lambda: 42, 1.0) == 42
+
+    def test_raises_on_timeout(self):
+        with pytest.raises(FetchTimeout):
+            call_with_timeout(lambda: time.sleep(1.0), 0.05, what="测试取数")
+
+    def test_zero_timeout_disables(self):
+        assert call_with_timeout(lambda: "ok", 0) == "ok"
+
+    def test_timer_cleared_after_success(self):
+        """正常返回后不残留定时器（后续 sleep 不被中断）。"""
+        call_with_timeout(lambda: None, 1.0)
+        time.sleep(0.2)

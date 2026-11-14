@@ -137,3 +137,49 @@ class TestComputeFinanceForCandidates:
     def test_empty_codes(self, tmp_path):
         cache = ScreenerCache(tmp_path / "s.db")
         assert compute_finance_for_candidates([], cache) == []
+
+
+class TestFailureIsolation:
+    """单只财务取数失败/超时不得中断整批（issue #123 + 2026-11 事故）。"""
+
+    def test_single_finance_failure_skipped(self, tmp_path):
+        cache = ScreenerCache(tmp_path / "s.db")
+
+        def fin(code):
+            if code == "600900":
+                raise RuntimeError("boom")
+            return _fin()
+
+        snaps = compute_finance_for_candidates(
+            ["600900", "600987"], cache,
+            financial_provider=fin,
+            industry_provider=lambda c: ("电力", "mootdx"))
+        assert [s.code for s in snaps] == ["600987"]
+
+    def test_industry_failure_still_writes(self, tmp_path):
+        """行业取数失败 → 财务照写，is_cyclical 置 None（不写假值）。"""
+        cache = ScreenerCache(tmp_path / "s.db")
+
+        def ind(code):
+            raise RuntimeError("industry down")
+
+        snaps = compute_finance_for_candidates(
+            ["600900"], cache,
+            financial_provider=lambda c: _fin(),
+            industry_provider=ind)
+        assert len(snaps) == 1
+        assert snaps[0].is_cyclical is None
+        assert cache.get_finance("600900").roe_latest == 16.0
+
+    def test_consecutive_failures_abort(self, tmp_path):
+        cache = ScreenerCache(tmp_path / "s.db")
+
+        def boom(code):
+            raise RuntimeError("source down")
+
+        with pytest.raises(RuntimeError, match="连续"):
+            compute_finance_for_candidates(
+                ["600900", "600987", "600941"], cache,
+                financial_provider=boom,
+                industry_provider=lambda c: ("电力", "mootdx"),
+                max_consecutive_failures=2)

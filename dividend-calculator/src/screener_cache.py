@@ -12,7 +12,7 @@ PR 不建表（由 quote.pe_ttm + finance.roe_latest 派生，筛选时实时算
 """
 import sqlite3
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -350,22 +350,26 @@ class ScreenerCache:
             return True
         return (date.today() - updated).days > max_age_days
 
-    def prune_stale_rows(self, max_age_days: int = 90) -> int:
-        """清理超期未刷新的快照行（保留策略：仅保留 N 天内刷新过的）。
+    def prune_orphan_rows(self) -> int:
+        """清理 stock_list 已剔除股票的快照行（孤儿行），返回删除行数。
 
-        覆盖 INSERT OR REPLACE 的死角——上游 stock_list 已剔除、但旧 DB 残留的
-        过时快照行。quote_snapshot 每日全量覆盖，不做时间裁剪（避免月频断跑时误删）。
-        返回删除行数。
+        只按「代码是否还在股票池」裁剪，**不按时间裁剪**：时间裁剪与月频刷新
+        互为死锁——月频断跑时旧数据会被当垃圾删掉（2026-11 事故：90 天裁剪把
+        冻结 3 个月的 dividend/finance/sustainability 全表清空，每日任务第二天
+        起吃空库，漏斗② 180 只 → 0 只）。
+        stock_list 为空时不做任何删除（避免误判为「全市场退市」）。
+        quote_snapshot 每日全量覆盖，不参与清理。
         """
-        cutoff = (date.today() - timedelta(days=max_age_days)).isoformat()
-        tables = ("stock_list", "dividend_snapshot", "finance_snapshot",
-                  "sustainability_snapshot")
+        tables = ("dividend_snapshot", "finance_snapshot", "sustainability_snapshot")
         total = 0
         with self._conn() as conn:
+            has_universe = conn.execute("SELECT 1 FROM stock_list LIMIT 1").fetchone()
+            if not has_universe:
+                return 0
             for table in tables:
                 cur = conn.execute(
-                    f"DELETE FROM {table} WHERE updated_at IS NULL OR date(updated_at) < ?",
-                    (cutoff,),
+                    f"DELETE FROM {table} "
+                    "WHERE code NOT IN (SELECT code FROM stock_list)"
                 )
                 total += cur.rowcount
             conn.commit()

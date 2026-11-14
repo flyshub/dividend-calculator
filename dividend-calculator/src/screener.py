@@ -14,6 +14,7 @@
 """
 import argparse
 import csv
+import os
 import sys
 from pathlib import Path
 from typing import List
@@ -178,13 +179,13 @@ def main():
     )
     rows = build_output_rows(result)
     write_csv(rows, args.output)
-
-    # 数据保留策略：清理超 90 天未刷新的快照行（幂等，无 stale 行则 0 删除）
-    pruned = cache.prune_stale_rows()
-    if pruned:
-        print(f"  清理 {pruned} 条超期快照行（保留 {90} 天）", file=sys.stderr)
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    code = main()
+    # 显式硬退出：mootdx/tdxpy 会留下非 daemon 的心跳线程，正常退出会被拖死
+    # （2026-11 事故：每日任务输出结果后挂到 6h 上限才被杀，故障表现成「超时」）。
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)
