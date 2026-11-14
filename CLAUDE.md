@@ -96,18 +96,19 @@ N 因子 = 50% / 股利支付率，区间 [1.0, 2.0]（支付率 ≥50% → N=1.
 
 ### 数据保留策略（选股器）
 
-选股器每日产出 CSV/JSON/DB，按 **90 天保留周期**自动清理：
+CSV/JSON 按 **90 天保留周期**自动清理；DB 快照表**不做时间裁剪**（两者互不相关，勿混改）：
 
 - **CSV / 按日 JSON**：`scripts/export_screener_json.py` 每次运行时删除日期 < 保留期（默认 90 天，`--retention-days` 可覆盖）的过期 CSV 与孤儿按日 JSON；`history.json` 由全量重扫天然截断。解析失败的文件**跳过不删**（宁留不误删）
-- **DB（screener.db）**：`ScreenerCache.prune_stale_rows()` 清理超 90 天未刷新的 `stock_list`/`dividend_snapshot`/`finance_snapshot`/`sustainability_snapshot` 行；`quote_snapshot` 每日全量覆盖，不做时间裁剪
-- **Release seed DB 历史备份**：每日 CI 覆盖上传 `screener.db` 到 Release `screener-seed` 前，先把当前版（上一日结果）另存为 `screener_YYYYMMDD.db` 历史版（命名取**下载日期**，与旧 DB 内容解耦，运行空档多久都不被立即剪掉），**保留最近 7 天**后自动清理过期备份。备份段独立容错——备份失败仅告警，绝不阻断当日 DB 上传
+- **DB（screener.db）**：只做**孤儿行清理**——`ScreenerCache.prune_orphan_rows()` 删除 `dividend_snapshot`/`finance_snapshot`/`sustainability_snapshot` 中代码已不在 `stock_list` 的行；`stock_list` 为空时不动（防误判全市场退市）。**严禁按 `updated_at` 裁剪**：月频刷新断跑时旧数据会被当垃圾删掉，2026-11 事故即由此而来（股息/财务/可持续性三表在每日任务里被整表清空，漏斗② 180 只 → 0 只）。清理只在 `scripts/fill_screener_data.py` 刷新成功后执行，每日任务不碰它没刷新的表
+- **Release seed DB 历史备份**：每日 CI 覆盖上传 `screener.db` 到 Release `screener-seed` 前，先把当前版（上一日结果）另存为 `screener_YYYYMMDD.db` 历史版（命名取**下载日期**，与旧 DB 内容解耦，运行空档多久都不被立即剪掉），**保留最近 7 天**后自动清理过期备份。备份段独立容错——备份失败仅告警，绝不阻断当日 DB 上传。上传前有守卫：`dividend_snapshot` < 1000 行则拒绝覆盖 seed
 - **git 历史即回滚层**：被清理的 CSV/JSON 仍可从 git log 取回，更早数据无需在线保留
 
-改保留天数时，需同时更新 `export_screener_json.py` 的 `RETENTION_DAYS` 与 `screener_cache.py`/`screener.py` 的 `prune_stale_rows` 默认值（双端一致，防漂移）。Release 备份的 7 天窗口在 `screener_daily.yml` 的 Upload 步（`cutoff=date -u -d '7 days ago'`），改窗口时同步改此处文档。
+改 CSV/JSON 保留天数时，需同时更新 `export_screener_json.py` 的 `RETENTION_DAYS` 与此处文档。Release 备份的 7 天窗口在 `screener_daily.yml` 的 Upload 步（`cutoff=date -u -d '7 days ago'`），改窗口时同步改此处文档。
 
 ### A+H 股两地上市
 
 对于中远海控、中国铝业等 A+H 股，**必须用总股本**（含全部股份），不能用流通股本：
+
 - 腾讯行情 **Index 72**：仅A股股本/流通股本 ❌
 - 腾讯行情 **Index 73**：总股本 ✓
 
