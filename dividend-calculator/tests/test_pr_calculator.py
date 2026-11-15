@@ -12,6 +12,8 @@ from src.pr_calculator import (
     compute_tsr,
     classify_valuation,
     classify_industry,
+    judge_pr,
+    select_judge_roe,
 )
 
 
@@ -319,3 +321,40 @@ class TestComputeTSR:
         # PB ≤ 0 视为数据异常，不计算
         assert compute_tsr(10.0, None, False, 5.0, 0.0) is None
         assert compute_tsr(10.0, None, False, 5.0, -1.0) is None
+
+
+# ---- judge_pr（页面档位与选股器漏斗③ 的唯一判定口径）----
+
+class TestJudgePr:
+    def test_cyclical_uses_5y_median(self):
+        # 平安 2026-11：PE 9.88 / roe_latest 14.0 / 中位数 13.2 → 0.75
+        roe, pr, zone = judge_pr(9.88, 14.0, 13.2, True)
+        assert roe == 13.2
+        assert pr == 0.75
+        assert zone == "合理偏低"
+
+    def test_non_cyclical_uses_latest(self):
+        roe, pr, zone = judge_pr(9.88, 14.0, 13.2, False)
+        assert roe == 14.0
+        assert pr == 0.71
+        assert zone == "合理偏低"
+
+    def test_low_payout_bank_not_penalized(self):
+        """低支付率不进判据：兴业银行 PE 5.59 / ROE 9.15 → 0.61（修正 PR 会到 1.22 被剔除）。"""
+        _roe, pr, zone = judge_pr(5.59, 9.15, 10.64, False)
+        assert pr == 0.61
+        assert zone == "合理偏低"
+
+    def test_cyclical_without_median_falls_back(self):
+        assert judge_pr(9.88, 14.0, None, True) == (14.0, 0.71, "合理偏低")
+
+    def test_missing_inputs_undetermined(self):
+        assert judge_pr(None, 14.0, 13.2, False) == (14.0, None, "无法判定")
+        assert judge_pr(10.0, 0.0, None, False)[2] == "无法判定"
+        assert judge_pr(10.0, None, None, False)[2] == "无法判定"
+        assert judge_pr(10.0, -3.0, None, False)[2] == "无法判定"
+
+    def test_select_judge_roe(self):
+        assert select_judge_roe(14.0, 13.2, True) == 13.2
+        assert select_judge_roe(14.0, 13.2, False) == 14.0
+        assert select_judge_roe(14.0, None, True) == 14.0

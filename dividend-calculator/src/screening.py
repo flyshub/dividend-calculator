@@ -14,9 +14,9 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Sequence
 
 from src.pr_calculator import (
-    classify_valuation,
     compute_basic_pr,
     compute_tsr,
+    judge_pr,
 )
 from src.screener_cache import DividendSnapshot, FinanceSnapshot, QuoteSnapshot
 
@@ -111,9 +111,9 @@ def default_pr_evaluator(candidate: FunnelCandidate) -> PrValuation:
     quote, fin = candidate.quote, candidate.finance
     if quote is None or quote.pe_ttm is None or fin is None or fin.roe_latest is None:
         return PrValuation(pr=None, valuation_zone="无法判定")
-    roe = fin.roe_5y_median if (fin.is_cyclical and fin.roe_5y_median is not None) else fin.roe_latest
-    pr_val = compute_basic_pr(quote.pe_ttm, roe)
-    return PrValuation(pr=pr_val, valuation_zone=classify_valuation(pr_val))
+    _roe, pr_val, zone = judge_pr(quote.pe_ttm, fin.roe_latest,
+                                  fin.roe_5y_median, fin.is_cyclical)
+    return PrValuation(pr=pr_val, valuation_zone=zone)
 
 
 def run_funnel(

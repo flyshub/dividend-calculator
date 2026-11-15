@@ -445,6 +445,35 @@ test('computePr 周期股 PB-市赚率用 5 年 ROE 中位数', () => {
   assert.equal(nonCyc.pr_pb, 16.00);
 });
 
+test('computePr 判定档位用基础 PR，支付率低不抬档（2026-11 银行回归）', () => {
+  // PE 5.59 / ROE 9.15 → 基础 PR 0.61 合理偏低；若按修正 PR（N=2）会变 1.22 合理被剔除
+  const r = Calc.computePr({ pe_ttm: 5.59, pb: 0.6, roe_latest: 9.15, roe_5y_median: 10.64,
+                             is_cyclical: false, net_profit_annual: 100, dividend_total: 12.9 });
+  assert.equal(r.pr_basic, 0.61);
+  assert.equal(r.pr_judge, 0.61);
+  assert.equal(r.roe_judge, 9.15);
+  assert.equal(r.valuation_zone, '合理偏低');
+  assert.ok(r.pr_corrected > 1.0);  // 修正 PR 仍是 1.22，但只展示
+});
+
+test('judgePR 周期股用 5 年 ROE 中位数判档（页面与选股器同口径）', () => {
+  // 平安: PE 9.88, roe_latest 14.0, 5年中位数 13.2 → 0.75 合理偏低（非 0.71）
+  const j = Calc.judgePR(9.88, 14.0, 13.2, true);
+  assert.equal(j.roe, 13.2);
+  assert.equal(j.pr, 0.75);
+  assert.equal(j.zone, '合理偏低');
+  // 非周期股用最新 ROE
+  const k = Calc.judgePR(9.88, 14.0, 13.2, false);
+  assert.equal(k.roe, 14.0);
+  assert.equal(k.pr, 0.71);
+});
+
+test('judgePR 缺 PE / ROE ≤ 0 → 无法判定', () => {
+  assert.equal(Calc.judgePR(null, 14.0, 13.2, false).zone, '无法判定');
+  assert.equal(Calc.judgePR(10, 0, null, false).zone, '无法判定');
+  assert.equal(Calc.judgePR(10, null, null, false).zone, '无法判定');
+});
+
 test('computePr 周期股但无 5 年中位数时回退最新 ROE', () => {
   const r = Calc.computePr({ pe_ttm: 10, pb: 4, roe_latest: 5, roe_5y_median: null, is_cyclical: true, net_profit_annual: 100, dividend_total: 50 });
   assert.equal(r.pr_pb, 16.00);  // 回退 roe_latest=5

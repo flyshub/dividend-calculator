@@ -134,6 +134,8 @@
         tsr: Calculator.computeTsr(fin.roeLatest, fin.roe5yMedian, indClass.isCyclical,
                                    yields[0], quote.pb),
         valuation_zone: pr.valuation_zone,
+        pr_judge: pr.pr_judge,
+        roe_judge: pr.roe_judge,
         pr_warning: prWarning,
         pe_ttm: quote.pe_ttm,
         pb: quote.pb,

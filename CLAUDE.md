@@ -68,6 +68,8 @@ N 因子 = 50% / 股利支付率，区间 [1.0, 2.0]（支付率 ≥50% → N=1.
 
 > 🚨 **选股判据（漏斗③、`screening.default_pr_evaluator`、`screener_pr.compute_pr`）一律用基础市赚率 PE_TTM/ROE**，与 V2 回测 L3（`docs/BACKTEST_METHODOLOGY.md` §3.5）同口径。**修正市赚率只做页面展示，不进判据**：N 是作者自认经验公式，低支付率会把 PR 抬到 2 倍（银行支付率 21–31% → N≈2），而 0.5/1.0/3.0 阈值是在基础 PR 上标定的。2026-11-15 事故：财务回补填入 payout 后全员切到修正 PR，银行/保险整批跌出 ③（平安 0.71→1.03），生产实际跑成了回测里最差的「剔金融」变体（超额 -38.68%）。改这一条前先看回测。
 
+> 📌 **判定口径单一真相 = `pr_calculator.judge_pr(pe, roe_latest, roe_5y_median, is_cyclical) → (roe, pr, zone)`**。单股页（`pr.py` 的 `valuation_zone`、`pr_judge`/`roe_judge` 字段 + `site/js/calculator.js::judgePR`）与选股器（`screening.default_pr_evaluator`、`screener_pr.compute_pr`）全部经此函数；禁止任何调用点自行 `classify_valuation(...)` 选 PR 值，否则页面与选股器会再次给出不同结论（2026-11-15 前：页面 0.97「合理偏低」vs 选股器 1.03「合理」）。
+
 > 🎯 **漏斗③ 只收「低估 / 合理偏低」是设计选择，不是数据缺陷**。2026-11 实测 164 只 >5% 股息候选里，③ 淘汰的 111 只中 77 只落「合理」（PR 1-3）、27 只「高估」、仅 7 只「无法判定」（财务快照缺失，已从 13% 覆盖率回补到 97%）。看到 ③ 数量远小于 ②，先看日志的「漏斗③ 淘汰原因」分桶，不要误以为是取数问题。
 
 > ⚠️ 回测数字以 docs/BACKTEST_REPORT_V3.md 为准：页面回测提示、估值提示语、docstring 中的超额/跑输数字（+4%/~0%/-5.3% 等）散布在多处，改回测结论时**先更新报告，再同步所有引用点**。

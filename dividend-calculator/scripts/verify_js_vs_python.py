@@ -31,7 +31,8 @@ FIELDS_NUMERIC = [
     "total_dividend", "dividend_yield_before_tax",
     "dividend_yield_after_tax_10", "dividend_yield_after_tax_20",
     "ttm_dividend", "dividend_yield_ttm_before_tax",
-    "pr_basic", "pr_corrected", "pr_pb", "tsr", "payout_ratio", "n_factor",
+    "pr_basic", "pr_corrected", "pr_pb", "pr_judge", "roe_judge",
+    "tsr", "payout_ratio", "n_factor",
     "roe_latest", "roe_5y_median", "net_profit_latest_period", "net_profit_annual",
     "sustainability_triggered", "sustainability_score", "sustainability_score_100",
     # 衍生指标拍平（来自 sustainability.metrics）——防止双端在 FCF/coverage 公式上发散
@@ -168,7 +169,8 @@ def compute_python(raw: dict) -> dict:
     from src.datasource.base import StockInfo
     from src.pr_calculator import (
         compute_basic_pr, compute_corrected_pr, compute_n_factor,
-        compute_pb_pr, compute_tsr, classify_valuation, classify_industry,
+        compute_pb_pr, compute_tsr, classify_industry,
+        judge_pr,
     )
 
     quote = raw["quote"]
@@ -220,13 +222,15 @@ def compute_python(raw: dict) -> dict:
     pr_basic = pr_corrected = pr_pb = None
     zone = "无法判定"
     roe = fin["roe_latest"]
+    pr_judge = roe_judge = None
     if not is_loss and quote["pe_ttm"] is not None and roe is not None and roe > 0:
         pr_basic = compute_basic_pr(quote["pe_ttm"], roe)
         pr_corrected = compute_corrected_pr(quote["pe_ttm"], roe, n_factor)
         # 周期股 PB-市赚率用 5 年 ROE 中位数（对齐 JS computePr）
         roe_for_pb = fin["roe_5y_median"] if (is_cyclical and fin["roe_5y_median"] is not None) else roe
         pr_pb = compute_pb_pr(quote["pb"], roe_for_pb)
-        zone = classify_valuation(pr_corrected if pr_corrected is not None else pr_basic)
+        # 判定口径：基础 PR + 周期股 5 年中位数 ROE（与 JS judgePR / 选股器共用）
+        roe_judge, pr_judge, zone = judge_pr(quote["pe_ttm"], roe, fin["roe_5y_median"], is_cyclical)
 
     total_market_cap = quote["price"] * total_shares
     yld = (total_div / total_market_cap * 100) if total_market_cap > 0 else 0.0
@@ -275,6 +279,8 @@ def compute_python(raw: dict) -> dict:
         "pr_basic": pr_basic,
         "pr_corrected": pr_corrected,
         "pr_pb": pr_pb,
+        "pr_judge": pr_judge,
+        "roe_judge": roe_judge,
         # 估值不变下的股东总回报率（对齐 JS app.js computeFromRaw 的 pr.tsr）
         "tsr": compute_tsr(fin["roe_latest"], fin["roe_5y_median"], is_cyclical, yld, quote["pb"]),
         "valuation_zone": zone,

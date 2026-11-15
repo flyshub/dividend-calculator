@@ -23,6 +23,8 @@ module.exports = function formatResult(r) {
     pr_pb: r.pr.pr_pb,
     tsr: r.pr.tsr,
     valuation_zone: r.pr.valuation_zone,
+    pr_judge: r.pr.pr_judge,
+    roe_judge: r.pr.roe_judge,
     pr_warning: r.pr.pr_warning,
     payout_ratio: r.pr.payout_ratio,
     n_factor: r.pr.n_factor,

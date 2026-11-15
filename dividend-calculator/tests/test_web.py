@@ -238,7 +238,7 @@ def test_serialize_pr_result_all_fields():
         "net_profit_latest_period", "net_profit_annual", "dividend_total",
         "payout_ratio", "n_factor", "industry", "is_cyclical", "is_tech",
         "is_growth", "is_loss_stock", "pr_warning", "pe_pb_source", "finance_source",
-        "industry_source", "errors", "roe_period",
+        "industry_source", "errors", "roe_period", "pr_judge", "roe_judge",
     }
     assert set(data.keys()) == expected_keys
 

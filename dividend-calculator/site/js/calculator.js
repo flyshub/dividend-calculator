@@ -546,6 +546,18 @@
     return Math.max(1.0, Math.min(2.0, raw));
   }
 
+  function judgePR(peTtm, roeLatest, roe5yMedian, isCyclical) {
+    // 选股判定口径：基础 PR = PE_TTM / ROE（与 V2 回测 L3 同口径），
+    // 修正 PR 只展示不进判据。与 Python pr_calculator.judge_pr 逐字一致。
+    // ROE 取值复用 selectRoe（周期股用 5 年中位数，与 TSR/PB-PR 同一规则）。
+    var roe = selectRoe(roeLatest, roe5yMedian, isCyclical);
+    if (peTtm == null || roe == null || roe <= 0) {
+      return { roe: roe, pr: null, zone: '无法判定' };
+    }
+    var pr = computeBasicPR(peTtm, roe);
+    return { roe: roe, pr: pr, zone: classifyValuation(pr) };
+  }
+
   function classifyValuation(pr) {
     // 阈值基于 PR 历史回测（2016-2024 沪深300，见 docs/BACKTEST_REPORT.md）：
     // 低估(≤0.5)与合理偏低(0.5-1)超额 +4%+，合理(1-3)接近中性，高估(>3)跑输 5%+。
@@ -594,6 +606,7 @@
     }
 
     var prBasic = null, prCorrected = null, prPb = null;
+    var prJudge = null, roeJudge = null;
     var valuationZone = '无法判定';
     if (!isLossStock && pe != null && roe != null && roe > 0) {
       // 周期股 PB-市赚率用 5 年 ROE 中位数（对齐 Python：周期股单年 ROE 失真）
@@ -601,7 +614,12 @@
       prBasic = computeBasicPR(pe, roe);
       prCorrected = computeCorrectedPR(pe, roe, nFactor);
       prPb = computePbPR(pb, roeForPb);
-      valuationZone = classifyValuation(prCorrected != null ? prCorrected : prBasic);
+      // 判定档位与选股器漏斗③ 同口径（基础 PR + 周期股 5 年中位数 ROE），
+      // 修正 PR 仅展示（阈值 0.5/1.0/3.0 是在基础 PR 上标定的）
+      var judged = judgePR(pe, roe, input.roe_5y_median, !!input.is_cyclical);
+      prJudge = judged.pr;
+      roeJudge = judged.roe;
+      valuationZone = judged.zone;
     }
 
     return {
@@ -609,6 +627,8 @@
       pr_corrected: prCorrected,
       pr_pb: prPb,
       valuation_zone: valuationZone,
+      pr_judge: prJudge,
+      roe_judge: roeJudge,
       roe_period: roePeriod != null ? String(roePeriod) + '年报' : null,
       payout_ratio: payoutRatio,
       n_factor: nFactor,
@@ -1145,6 +1165,7 @@
     computeNFactor: computeNFactor,
     computeTsr: computeTsr,
     selectRoe: selectRoe,
+    judgePR: judgePR,
     classifyValuation: classifyValuation,
     classifyIndustry: classifyIndustry,
     computePr: computePr,

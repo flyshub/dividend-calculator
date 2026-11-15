@@ -127,3 +127,35 @@ def classify_industry(industry: str) -> Tuple[bool, bool, bool, str]:
         warning = ""
 
     return is_cyclical, is_tech, is_growth, warning
+
+
+# ---------------------------------------------------------------------------
+# 判定口径（页面档位 与 选股器漏斗③ 共用，唯一真相）
+# ---------------------------------------------------------------------------
+
+def select_judge_roe(roe_latest: Optional[float], roe_5y_median: Optional[float],
+                     is_cyclical: bool) -> Optional[float]:
+    """判定口径 ROE：周期股用 5 年 ROE 中位数（单年失真平滑），否则最新年报 ROE。"""
+    if is_cyclical and roe_5y_median is not None:
+        return roe_5y_median
+    return roe_latest
+
+
+def judge_pr(pe_ttm: Optional[float], roe_latest: Optional[float],
+             roe_5y_median: Optional[float] = None,
+             is_cyclical: bool = False) -> Tuple[Optional[float], Optional[float], str]:
+    """选股判定口径 → (判定用 ROE, 基础 PR, 估值档位)。
+
+    基础 PR = PE_TTM / ROE，与 V2 回测 L3（docs/BACKTEST_METHODOLOGY.md §3.5
+    「L3: 基础 PR ≤ 1.0」）同口径；0.5/1.0/3.0 的档位阈值也是在这上面标定的。
+    修正 PR（N×PE/ROE）不进判据：N 是市赚率作者自认的经验公式，低支付率会把 PR
+    放大到 2 倍，与阈值口径不匹配（2026-11 银行/保险整批跌出漏斗③即因此）。
+
+    页面档位（pr.py / site/js）与选股器（screening.py / screener_pr.py）都调本函数，
+    保证「页面说低估」等价于「选股器收下」。
+    """
+    roe = select_judge_roe(roe_latest, roe_5y_median, is_cyclical)
+    if pe_ttm is None or roe is None or roe <= 0:
+        return roe, None, "无法判定"
+    pr = compute_basic_pr(pe_ttm, roe)
+    return roe, pr, classify_valuation(pr)

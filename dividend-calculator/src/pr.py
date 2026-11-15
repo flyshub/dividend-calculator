@@ -29,6 +29,7 @@ from .pr_calculator import (
     compute_n_factor,
     classify_valuation,
     classify_industry,
+    judge_pr,
 )
 from .eastmoney_fetcher import fetch_industry as fetch_eastmoney_industry
 
@@ -50,7 +51,8 @@ class PRResult:
     pr_corrected: Optional[float]        # 修正PR = N × PE_TTM / ROE
     pr_pb: Optional[float]               # PB-PR = PB / ROE² × 100
 
-    # 估值档位（优先用修正PR；N≥1 故修正PR≥基础PR，判定更保守；无修正PR时回退基础PR）
+    # 估值档位：判定口径 = 基础 PR（周期股用 5 年 ROE 中位数），与选股器漏斗③ 共用
+    # pr_calculator.judge_pr。修正 PR 仅页面参考，不进判据。
     valuation_zone: str                   # 低估 / 合理偏低 / 合理 / 高估
 
     # 中间计算数据
@@ -79,6 +81,8 @@ class PRResult:
     errors: List[str] = field(default_factory=list)  # 采集过程中的非致命错误
     # 口径标注：PE-TTM 与 ROE 时间窗口差异（评审 P0-2，见 DATA_RELIABILITY.md §3）
     roe_period: Optional[str] = None      # ROE 对应报告期，如 '2025年报'（PE 为 TTM 含最新季报）
+    pr_judge: Optional[float] = None      # 判定用 PR（= 基础 PR，ROE 见 roe_judge）
+    roe_judge: Optional[float] = None     # 判定用 ROE（周期股为 5 年中位数）
 
 
 # ---------------------------------------------------------------------------
@@ -528,6 +532,8 @@ def calculate_pr(
     pr_basic = None
     pr_corrected = None
     pr_pb = None
+    pr_judge = None
+    roe_judge = None
     valuation_zone = "无法判定"
 
     roe_for_calc = roe_latest  # 主用最新年报 ROE
@@ -541,9 +547,10 @@ def calculate_pr(
         pr_corrected = compute_corrected_pr(pe_ttm, roe_for_calc, n_factor)
         pr_pb = compute_pb_pr(pb, roe_for_pb)
 
-        # 估值档位：优先用修正PR（如有），否则用基础PR
-        judge_pr = pr_corrected if pr_corrected is not None else pr_basic
-        valuation_zone = classify_valuation(judge_pr)
+        # 估值档位：与选股器漏斗③ 共用 judge_pr（基础 PR + 周期股 5 年中位数 ROE）。
+        # 修正 PR 只展示，不参与判定——阈值 0.5/1.0/3.0 是在基础 PR 上标定的。
+        roe_judge, pr_judge, valuation_zone = judge_pr(
+            pe_ttm, roe_latest, roe_5y_median, is_cyclical)
 
     # 数据完整性软校验（审查 #4）：越界只追加 errors，不否决结果
     all_errors.extend(_check_pr_fields(pe_ttm, pb, roe_latest, net_profit_annual, payout_ratio))
@@ -555,6 +562,8 @@ def calculate_pr(
         pr_corrected=pr_corrected,
         pr_pb=pr_pb,
         valuation_zone=valuation_zone,
+        pr_judge=pr_judge,
+        roe_judge=roe_judge,
         pe_ttm=pe_ttm,
         pb=pb,
         roe_latest=roe_latest,
