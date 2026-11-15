@@ -16,8 +16,6 @@ from typing import Callable, Dict, List, Optional, Sequence
 from src.pr_calculator import (
     classify_valuation,
     compute_basic_pr,
-    compute_corrected_pr,
-    compute_n_factor,
     compute_tsr,
 )
 from src.screener_cache import DividendSnapshot, FinanceSnapshot, QuoteSnapshot
@@ -94,9 +92,19 @@ def compute_real_yield(total_dividend: Optional[float], market_cap: Optional[flo
 
 
 def default_pr_evaluator(candidate: FunnelCandidate) -> PrValuation:
-    """默认 PR 评估（纯计算），口径对齐单股页 pr.py:460/468：
-    - ROE 取值：周期股用 5 年 ROE 中位数（单年 ROE 失真，多年平滑），否则最新年报 ROE
-    - 优先修正 PR = N×PE_TTM/ROE（N=0.5/股利支付率，截断[1,2]）；payout_ratio 缺失回退基础 PR
+    """默认 PR 评估（纯计算）：**基础 PR = PE_TTM / ROE**。
+
+    口径与 V2 回测（docs/BACKTEST_METHODOLOGY.md §3.5「L3: 基础 PR ≤ 1.0」，
+    src/backtest_factors.py::pr）一致——单股页/回测/选股器三者的判据都是基础 PR。
+
+    ROE 取值：周期股用 5 年 ROE 中位数（单年 ROE 失真，多年平滑），否则最新年报 ROE。
+
+    修正 PR（N×PE/ROE，N=0.5/支付率）不进入选股判据：N 是市赚率作者自认的经验
+    公式、README 明示「仅适用 ROE 稳定且分红大方的价值股」，低支付率会把 N 放大到
+    2（银行 21–31% → PR 翻倍），而 0.5/1.0/3.0 的档位阈值是在**基础 PR** 上标定的，
+    两者不可混用（2026-11-15：财务回补填入 payout 后全员切到修正 PR，银行/保险整批
+    跌出 ③，等于在跑回测里最差的「剔金融」变体，超额 -38.68%）。修正 PR 仍由单股页
+    展示，并附适用性警示。
 
     缺 PE 或 ROE → 无法判定（不调网络，与既有纯缓存路径一致）。
     """
@@ -104,9 +112,7 @@ def default_pr_evaluator(candidate: FunnelCandidate) -> PrValuation:
     if quote is None or quote.pe_ttm is None or fin is None or fin.roe_latest is None:
         return PrValuation(pr=None, valuation_zone="无法判定")
     roe = fin.roe_5y_median if (fin.is_cyclical and fin.roe_5y_median is not None) else fin.roe_latest
-    n = compute_n_factor(fin.payout_ratio)
-    pr_val = (compute_corrected_pr(quote.pe_ttm, roe, n) if n is not None
-              else compute_basic_pr(quote.pe_ttm, roe))
+    pr_val = compute_basic_pr(quote.pe_ttm, roe)
     return PrValuation(pr=pr_val, valuation_zone=classify_valuation(pr_val))
 
 

@@ -54,8 +54,8 @@ class TestEvaluatePrBatch:
         results = evaluate_pr_batch(["600900"], cache)
         assert results == []  # 缺 ROE 跳过
 
-    def test_uses_corrected_pr(self, tmp_path):
-        """口径对齐漏斗③：payout_ratio=0.25 → N=2 → 修正 PR=1.0（合理偏低），非基础 PR=0.5（低估）。"""
+    def test_uses_basic_pr_ignoring_payout(self, tmp_path):
+        """口径对齐漏斗③与 V2 回测：payout_ratio=0.25 不再放大 PR，仍是基础 PR=0.5（低估）。"""
         from src.screener_cache import FinanceSnapshot, QuoteSnapshot
         cache = ScreenerCache(tmp_path / "s.db")
         cache.upsert_quote(QuoteSnapshot(code="600900", name="x", price=10, pe_ttm=8.0,
@@ -65,8 +65,8 @@ class TestEvaluatePrBatch:
                                              net_profit_annual=1e9, payout_ratio=0.25,
                                              finance_source="东财"))
         results = evaluate_pr_batch(["600900"], cache)
-        assert results[0]["pr"] == 1.0
-        assert results[0]["valuation_zone"] == "合理偏低"  # 修正 PR 生效：0.5(低估) → 1.0(合理偏低)
+        assert results[0]["pr"] == 0.5
+        assert results[0]["valuation_zone"] == "低估"  # 低支付率不再把 0.5 抬到 1.0
         assert results[0]["roe_used"] == 16.0  # 非周期股用 roe_latest
 
     def test_cyclical_uses_roe_5y_median(self, tmp_path):

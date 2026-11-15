@@ -192,13 +192,17 @@ class TestFunnel3Pr:
         result = run_funnel([c], FunnelConfig(pr_zone=("合理",)))
         assert result.stage_counts[2] == 1
 
-    def test_corrected_pr_affects_funnel_zone(self):
-        # payout 0.25 → N=2.0 → 修正 PR = 2×8/16 = 1.0 → 合理偏低（基础 PR 0.5 会判低估）
+    def test_low_payout_not_penalized_in_funnel_zone(self):
+        """低支付率不放大 PR（2026-11-15 回归）：payout 0.25 的银行仍按基础 PR 判档。
+
+        曾经用修正 PR（N=2）→ PR 1.0「合理偏低」、门槛边缘；现在 PR=0.5「低估」，
+        与 V2 回测 L3（基础 PR ≤1.0）同口径。
+        """
         c = _candidate(finance=_finance(payout=0.25))
         result = run_funnel([c])
         assert result.stage_counts[2] == 1
-        assert c.pr == pytest.approx(1.0)
-        assert c.valuation_zone == "合理偏低"
+        assert c.pr == pytest.approx(0.5)
+        assert c.valuation_zone == "低估"
 
     def test_cyclical_median_affects_funnel_zone(self):
         # 周期股：roe_latest 16 → PR 0.5 低估；中位数 8 → PR 1.0 合理偏低（仍过默认档）
@@ -306,20 +310,20 @@ class TestDefaultPrEvaluator:
 
     # ---- 修正 PR（评审 P1-2：漏斗③ 对齐单股页 pr.py:468 优先修正 PR）----
 
-    def test_corrected_pr_used_when_payout_present(self):
-        # payout 0.25 → N=2.0 → 修正 PR = 2×8/16 = 1.0（基础 PR 仅 0.5）
+    def test_payout_does_not_change_pr(self):
+        """支付率不进选股判据：payout 有值时 PR 仍是 PE/ROE（回测口径）。"""
         val = default_pr_evaluator(_candidate(finance=_finance(payout=0.25)))
-        assert val.pr == pytest.approx(1.0)
-        assert val.valuation_zone == "合理偏低"
+        assert val.pr == pytest.approx(0.5)
+        assert val.valuation_zone == "低估"
 
-    def test_basic_pr_fallback_when_payout_missing(self):
-        # payout None → N=None → 回退基础 PR = 8/16 = 0.5
+    def test_basic_pr_when_payout_missing(self):
+        # payout None → 基础 PR = 8/16 = 0.5（与有 payout 时同值）
         val = default_pr_evaluator(_candidate(finance=_finance(payout=None)))
         assert val.pr == pytest.approx(0.5)
         assert val.valuation_zone == "低估"
 
-    def test_payout_50pct_n_factor_one(self):
-        # payout 0.5 → N=1.0 → 修正 PR == 基础 PR
+    def test_payout_50pct_same_as_basic(self):
+        # payout 0.5：修正 PR 等于基础 PR，判据不受口径切换影响
         val = default_pr_evaluator(_candidate(finance=_finance(payout=0.5)))
         assert val.pr == pytest.approx(0.5)
 
