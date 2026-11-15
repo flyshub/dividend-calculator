@@ -128,12 +128,7 @@ jobs:
           DB=dividend-calculator/data/screener.db
           # 0) 守卫：库被误清空时拒绝上传。2026-11 事故：每日任务把只剩行情的库
           #    覆盖到 seed，次日漏斗② 180 只 → 0 只，且亏空随备份滚动无法回退。
-          N=$(python -c "import sqlite3;print(sqlite3.connect('$DB').execute('SELECT count(*) FROM dividend_snapshot').fetchone()[0])")
-          echo "dividend_snapshot 行数: $N"
-          if [ "$N" -lt 1000 ]; then
-            echo "::error::dividend_snapshot 只有 $N 行（<1000），拒绝上传，避免污染 seed"
-            exit 1
-          fi
+          python dividend-calculator/scripts/check_seed_guard.py --db "$DB"
           # 1) 覆盖前先把 Release 当前版（上一日结果）存为历史备份。
           #    备份用「下载日期」命名（非旧 DB 数据日期）：无论运行空档多久，
           #    刚建的备份日期=今天，不会被下方 cutoff 立即剪掉（防"空档即剪"）。

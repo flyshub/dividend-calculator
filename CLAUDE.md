@@ -101,8 +101,11 @@ N 因子 = 50% / 股利支付率，区间 [1.0, 2.0]（支付率 ≥50% → N=1.
 CSV/JSON 按 **90 天保留周期**自动清理；DB 快照表**不做时间裁剪**（两者互不相关，勿混改）：
 
 - **CSV / 按日 JSON**：`scripts/export_screener_json.py` 每次运行时删除日期 < 保留期（默认 90 天，`--retention-days` 可覆盖）的过期 CSV 与孤儿按日 JSON；`history.json` 由全量重扫天然截断。解析失败的文件**跳过不删**（宁留不误删）
-- **DB（screener.db）**：只做**孤儿行清理**——`ScreenerCache.prune_orphan_rows()` 删除 `dividend_snapshot`/`finance_snapshot`/`sustainability_snapshot` 中代码已不在 `stock_list` 的行；`stock_list` 为空时不动（防误判全市场退市）。**严禁按 `updated_at` 裁剪**：月频刷新断跑时旧数据会被当垃圾删掉，2026-11 事故即由此而来（股息/财务/可持续性三表在每日任务里被整表清空，漏斗② 180 只 → 0 只）。清理只在 `scripts/fill_screener_data.py` 刷新成功后执行，每日任务不碰它没刷新的表
-- **Release seed DB 历史备份**：每日 CI 覆盖上传 `screener.db` 到 Release `screener-seed` 前，先把当前版（上一日结果）另存为 `screener_YYYYMMDD.db` 历史版（命名取**下载日期**，与旧 DB 内容解耦，运行空档多久都不被立即剪掉），**保留最近 7 天**后自动清理过期备份。备份段独立容错——备份失败仅告警，绝不阻断当日 DB 上传。上传前有守卫：`dividend_snapshot` < 1000 行则拒绝覆盖 seed
+- **DB（screener.db）**：只做**孤儿行清理**——`ScreenerCache.prune_orphan_rows()` 删除 `dividend_snapshot`/`finance_snapshot`/`sustainability_snapshot` 中代码已不在 `stock_list` 的行；`stock_list` 为空时不动（防误判全市场退市）。**严禁按 `updated_at` 裁剪**：月频刷新断跑时旧数据会被当垃圾删掉，2026-11 事故即由此而来（股息/财务/可持续性三表在每日任务里被整表清空，漏斗② 180 只 → 0 只）。清理有两个入口：`scripts/merge_shard_rows.py`（CI 分片合并后、上传前——分片模式永不满足
+  `fill_screener_data.py` 的「整轮成功」条件，清理只能挂在合并后）与 `scripts/fill_screener_data.py`
+  （本地全量、未被 `--max-runtime-minutes` 截断时）。两者都要求 `stock_list` ≥ 1000 只
+  （`MIN_UNIVERSE_FOR_PRUNE`），否则视为股票池写坏而跳过；每日任务不碰它没刷新的表
+- **Release seed DB 历史备份**：每日 CI 覆盖上传 `screener.db` 到 Release `screener-seed` 前，先把当前版（上一日结果）另存为 `screener_YYYYMMDD.db` 历史版（命名取**下载日期**，与旧 DB 内容解耦，运行空档多久都不被立即剪掉），**保留最近 7 天**后自动清理过期备份。备份段独立容错——备份失败仅告警，绝不阻断当日 DB 上传。上传前有守卫：`scripts/check_seed_guard.py` 检查 `dividend_snapshot` < 1000 行则拒绝覆盖 seed（日频/月频共用，有单测）
 - **git 历史即回滚层**：被清理的 CSV/JSON 仍可从 git log 取回，更早数据无需在线保留
 
 ### 数据刷新管线（分片）
@@ -114,9 +117,10 @@ CSV/JSON 按 **90 天保留周期**自动清理；DB 快照表**不做时间裁�
 - **幂等可续跑**：刷过的行变成「新鲜」（30 天窗口），下一轮自动跳过。因此 6 小时一次的 cron 只在 `check_stale_coverage.py` 判断确有过期行时才启动分片，无缺口时空转约 2 分钟
 - **分片互不重叠**：`shard_codes()` 按排序后的代码切 i/n 段，各片并集等于全量（有单测）
 - **分片产物必须同名唯一**：各片导出 `shard-<n>.json`。若都叫 `shard.json`，`download-artifact` 的 `merge-multiple` 会把同名文件**拼接**成一个非法 JSON（run 43593390858 合并失败的根因）
-- **财务步有聚合护栏**：取数全部返回 None 时不会抛异常也不写行（静默冻结）。因此「尝试 200 只仍零写入」即判定数据源失效并中止——正常覆盖率仅约 14%，零写入只可能是数据源整体不可用（2026-11：CI 上同花顺取数失效，690 只跑 18 分钟、`finance_snapshot` 零更新）
+- **财务步有聚合护栏**：取数全部返回 None 时不会抛异常也不写行（静默冻结）。因此「尝试 `effective_mass_failure_min(本轮代码数)` 只仍零写入」即判定数据源失效并中止，门槛 = `min(200, max(20, 代码数/2))`：固定 200 在分片里永不触发（每片 ~86 只财务代码，2026-11-14 run 43593390858 财务零写入、8 片全绿并照常上传）。`attempted` 只计真正发起的取数，所以批次几乎全被缓存跳过时护栏不会触发（此时旧行完好，符合预期）。正常覆盖率 ~97%，零写入只可能是数据源整体不可用
 - **合并只覆盖导出的行**：某片失败/未处理的代码，主库原值保留（宁旧不缺）
 - 单只取数超时（`call_with_timeout`，90s/120s）+ 单只异常跳过 + 连续 30 只失败中止本轮；三个 CLI 都 `os._exit` 硬退出（tdxpy 心跳线程会拖住进程）
+- **退出码语义**：`fill_screener_data` 返回 2 = 被 `--max-runtime-minutes` 截断（部分完成，本片导出仍会执行）；workflow 把 2 映射为 `::warning::`，其它非零码仍走失败路径。合并步 `merge_shard_rows.py` 在合并后做孤儿行清理（`--skip-prune` 可跳过）
 
 改 CSV/JSON 保留天数时，需同时更新 `export_screener_json.py` 的 `RETENTION_DAYS` 与此处文档。Release 备份的 7 天窗口在 `screener_daily.yml` 的 Upload 步（`cutoff=date -u -d '7 days ago'`），改窗口时同步改此处文档。
 

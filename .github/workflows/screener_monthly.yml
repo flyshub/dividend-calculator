@@ -115,10 +115,20 @@ jobs:
         timeout-minutes: 110
         continue-on-error: true
         run: |
+          # 退出码 2 = 被时长上限截断（本片已刷部分已落库，余下下一轮续跑），
+          # 只告警不失败；其它非零退出码（如数据源整体失效）交给 continue-on-error 留痕。
+          set +e
           python scripts/fill_screener_data.py --dividend \
             --shard ${{ matrix.shard }}/${{ env.SHARDS }} \
             --export-rows shard-${{ matrix.shard }}.json \
             --max-runtime-minutes 100
+          code=$?
+          if [ "$code" = "2" ]; then
+            echo "::warning::shard ${{ matrix.shard }} 股息刷新被截断，本轮部分完成"
+          elif [ "$code" != "0" ]; then
+            echo "::error::shard ${{ matrix.shard }} 股息刷新失败（退出码 $code）"
+            exit "$code"
+          fi
 
       - name: Refresh finance (shard ${{ matrix.shard }}/${{ env.SHARDS }})
         if: ${{ (inputs.mode || 'all') != 'dividend' }}
@@ -126,10 +136,18 @@ jobs:
         timeout-minutes: 60
         continue-on-error: true
         run: |
+          set +e
           python scripts/fill_screener_data.py --finance \
             --shard ${{ matrix.shard }}/${{ env.SHARDS }} \
             --export-rows shard-${{ matrix.shard }}.json \
             --max-runtime-minutes 45
+          code=$?
+          if [ "$code" = "2" ]; then
+            echo "::warning::shard ${{ matrix.shard }} 财务刷新被截断，本轮部分完成"
+          elif [ "$code" != "0" ]; then
+            echo "::error::shard ${{ matrix.shard }} 财务刷新失败（退出码 $code）"
+            exit "$code"
+          fi
 
       # 文件名必须各片唯一：download-artifact merge-multiple 遇到同名文件会拼接成
       # 一个非法 JSON（2026-11-14 run 43593390858 即因此合并失败）
@@ -191,13 +209,9 @@ jobs:
       - name: Upload refreshed screener.db to Release
         run: |
           set -euo pipefail
-          # 守卫：刷新失败留下空库时拒绝上传（同 screener_daily.yml）
-          N=$(python -c "import sqlite3;print(sqlite3.connect('dividend-calculator/data/screener.db').execute('SELECT count(*) FROM dividend_snapshot').fetchone()[0])")
-          echo "dividend_snapshot 行数: $N"
-          if [ "$N" -lt 1000 ]; then
-            echo "::error::dividend_snapshot 只有 $N 行（<1000），拒绝上传，避免污染 seed"
-            exit 1
-          fi
+          # 守卫：刷新失败留下空库时拒绝上传（同 screener_daily.yml，脚本共用）
+          python dividend-calculator/scripts/check_seed_guard.py \
+            --db dividend-calculator/data/screener.db
           gh release upload screener-seed \
             --repo ${{ github.repository }} \
             dividend-calculator/data/screener.db \

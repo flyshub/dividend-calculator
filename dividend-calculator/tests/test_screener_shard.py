@@ -135,3 +135,35 @@ class TestStaleCounts:
         counts = cache.stale_counts(max_age_days=30)
         assert counts["dividend_snapshot"] == (2, 1)
         assert counts["finance_snapshot"] == (0, 0)
+
+
+class TestDeadlineTruncation:
+    """被 --max-runtime-minutes 截断时必须可辨识（review 2026-11-15：
+    原先截断后仍 os._exit(0)，CI 分不清「跑完」与「跑了一部分」）。"""
+
+    def test_fill_reports_truncation(self, tmp_path):
+        cache = ScreenerCache(tmp_path / "s.db")
+        calls = []
+
+        def fn(batch, c):
+            calls.append(len(batch))
+
+        # deadline 在过去 → 第一批之前就收尾
+        done, truncated = fill._fill(cache, _codes(120), "股息", fn, deadline=1.0)
+        assert (done, truncated) == (0, True)
+        assert calls == []
+
+    def test_fill_complete_is_not_truncated(self, tmp_path):
+        cache = ScreenerCache(tmp_path / "s.db")
+        done, truncated = fill._fill(cache, _codes(60), "股息", lambda b, c: None, deadline=0.0)
+        assert (done, truncated) == (60, False)
+
+    def test_main_returns_2_when_truncated(self, tmp_path, monkeypatch, capsys):
+        cache = ScreenerCache(tmp_path / "s.db")
+        monkeypatch.setattr(fill, "ScreenerCache", lambda *a, **k: cache)
+        monkeypatch.setattr(cache, "get_stock_codes", lambda: _codes(10))
+        monkeypatch.setattr("src.screener_dividend.compute_dividends_for_candidates",
+                            lambda batch, c: None)
+        code = fill.main(["--dividend", "--max-runtime-minutes", "-1"])
+        assert code == 2
+        assert "::warning::" in capsys.readouterr().out

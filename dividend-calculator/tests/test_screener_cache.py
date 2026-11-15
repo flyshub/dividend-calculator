@@ -321,7 +321,7 @@ class TestStaleness:
                                          quote_time="t", source="s",
                                          updated_at=self._ts(10)))
 
-        pruned = cache.prune_orphan_rows()
+        pruned = cache.prune_orphan_rows(min_universe=1)
         assert pruned == 3  # 600887 的 dividend + finance + sustainability
 
         stats = cache.stats()
@@ -337,7 +337,17 @@ class TestStaleness:
                                                real_yield_year="2025", ttm_period="p",
                                                dividend_source="mootdx",
                                                updated_at=self._ts(10)))
-        assert cache.prune_orphan_rows() == 0
+        assert cache.prune_orphan_rows(min_universe=1) == 0
+        assert cache.stats()["dividend_snapshot"] == 1
+
+    def test_prune_orphan_rows_tiny_universe_noop(self, cache):
+        """股票池被写坏（只有几百只）时不得按「不在池里」删除全市场快照。"""
+        cache.upsert_stock_list([StockListItem(code="600900", name="长江电力", market="sh")])
+        cache.upsert_dividend(DividendSnapshot(code="600887", real_yield=5.2, ttm_yield=5.5,
+                                               real_yield_year="2025", ttm_period="p",
+                                               dividend_source="mootdx",
+                                               updated_at=self._ts(10)))
+        assert cache.prune_orphan_rows() == 0        # 默认门槛 1000，池里只有 1 只
         assert cache.stats()["dividend_snapshot"] == 1
 
 

@@ -18,6 +18,9 @@ from typing import Dict, List, Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent  # 项目根（dividend-calculator/）
 
+# 孤儿行清理要求的最小股票池规模：低于此数视为股票池被写坏，宁可不清理
+MIN_UNIVERSE_FOR_PRUNE = 1000
+
 @dataclass(frozen=True)
 class QuoteSnapshot:
     code: str
@@ -369,21 +372,24 @@ class ScreenerCache:
                 out[table] = (int(total), int(stale))
         return out
 
-    def prune_orphan_rows(self) -> int:
+    def prune_orphan_rows(self, min_universe: int = MIN_UNIVERSE_FOR_PRUNE) -> int:
         """清理 stock_list 已剔除股票的快照行（孤儿行），返回删除行数。
 
         只按「代码是否还在股票池」裁剪，**不按时间裁剪**：时间裁剪与月频刷新
         互为死锁——月频断跑时旧数据会被当垃圾删掉（2026-11 事故：90 天裁剪把
         冻结 3 个月的 dividend/finance/sustainability 全表清空，每日任务第二天
         起吃空库，漏斗② 180 只 → 0 只）。
-        stock_list 为空时不做任何删除（避免误判为「全市场退市」）。
+        stock_list 为空或不足 min_universe 只时不做任何删除：股票池被写坏
+        （只剩几百只）时按「不在池里」删除会误删全市场快照，与 2026-11 事故同性质。
+        min_universe 只挡「明显残缺」的股票池，不校验它是否最新——stock_list 由
+        初始化脚本写入、行情刷新不碰它，所以残缺只会来自写坏。
         quote_snapshot 每日全量覆盖，不参与清理。
         """
         tables = ("dividend_snapshot", "finance_snapshot", "sustainability_snapshot")
         total = 0
         with self._conn() as conn:
-            has_universe = conn.execute("SELECT 1 FROM stock_list LIMIT 1").fetchone()
-            if not has_universe:
+            universe = conn.execute("SELECT COUNT(*) FROM stock_list").fetchone()[0]
+            if universe < min_universe:
                 return 0
             for table in tables:
                 cur = conn.execute(

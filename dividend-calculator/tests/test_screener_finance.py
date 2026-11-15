@@ -11,7 +11,8 @@ from unittest.mock import patch
 import pytest
 
 from src.screener_cache import DividendSnapshot, FinanceSnapshot, ScreenerCache
-from src.screener_finance import compute_finance_for_candidates
+from src.screener_finance import (compute_finance_for_candidates,
+                                  effective_mass_failure_min)
 
 
 @pytest.fixture(autouse=True)
@@ -188,7 +189,7 @@ class TestFailureIsolation:
         """取数全部返回 None（无异常）但数量够多 → 判定数据源失效并中止。
 
         2026-11 事故：CI 上同花顺取数失效，690 只跑完 18 分钟、finance_snapshot
-        零更新，静默冻结。正常覆盖率 ~14%，批量零写入只可能是数据源整体不可用。
+        零更新，静默冻结。正常覆盖率高，批量零写入只可能是数据源整体不可用。
         """
         cache = ScreenerCache(tmp_path / "s.db")
         codes = [f"60{i:04d}" for i in range(5)]
@@ -205,7 +206,7 @@ class TestFailureIsolation:
         assert cache.get_finance(codes[0]) is None
 
     def test_few_none_does_not_abort(self, tmp_path):
-        """少量无数据是常态（覆盖率 ~14%），不应中止。"""
+        """少量无数据是常态（现存行未覆盖的少数股票），不应中止。"""
         cache = ScreenerCache(tmp_path / "s.db")
         codes = [f"60{i:04d}" for i in range(4)]
 
@@ -218,3 +219,37 @@ class TestFailureIsolation:
             industry_provider=lambda c: ("电力", "mootdx"),
             mass_failure_min=10)
         assert [s.code for s in snaps] == [codes[-1]]
+
+
+class TestEffectiveMassFailureMin:
+    """零写入护栏门槛按批次规模缩放（2026-11-15 review 缺陷：分片永不触发）。"""
+
+    def test_full_market_uses_configured_threshold(self):
+        assert effective_mass_failure_min(5559) == 200
+
+    def test_shard_sized_batch_scales_to_half(self):
+        # CI 每片 ~86 只财务代码 → 门槛 43（固定 200 永不触发）
+        assert effective_mass_failure_min(86) == 43
+
+    def test_tiny_batch_keeps_floor(self):
+        assert effective_mass_failure_min(10) == 20
+
+    def test_empty_batch_returns_configured(self):
+        assert effective_mass_failure_min(0) == 200
+
+    def test_configured_is_upper_bound(self):
+        assert effective_mass_failure_min(5559, configured=50) == 50
+
+    def test_shard_batch_all_none_aborts_without_explicit_threshold(self, tmp_path):
+        """回归：分片规模（40 只）用默认参数也要中止——这正是 11-14 漏掉的那次。"""
+        cache = ScreenerCache(tmp_path / "s.db")
+        codes = [f"60{i:04d}" for i in range(40)]
+
+        def no_data(code):
+            return (None, None, None, None, "", ["无数据"], None)
+
+        with pytest.raises(RuntimeError, match="门槛 20"):
+            compute_finance_for_candidates(
+                codes, cache,
+                financial_provider=no_data,
+                industry_provider=lambda c: ("电力", "mootdx"))

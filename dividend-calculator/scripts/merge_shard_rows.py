@@ -17,6 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.screener_cache import (  # noqa: E402
+    MIN_UNIVERSE_FOR_PRUNE,
     ScreenerCache,
     DividendSnapshot,
     FinanceSnapshot,
@@ -43,6 +44,10 @@ def main():
     parser = argparse.ArgumentParser(description="合并分片快照到 screener.db")
     parser.add_argument("files", nargs="+", help="分片导出的 JSON 文件")
     parser.add_argument("--db", default="", help="目标库路径（默认 data/screener.db）")
+    parser.add_argument("--skip-prune", action="store_true",
+                        help="跳过孤儿行清理（调试/需要保留旧快照时使用）")
+    parser.add_argument("--min-universe", type=int, default=MIN_UNIVERSE_FOR_PRUNE,
+                        help=f"清理要求的最小股票池规模（默认 {MIN_UNIVERSE_FOR_PRUNE}）")
     args = parser.parse_args()
 
     div, fin = _load(args.files)
@@ -53,6 +58,13 @@ def main():
         cache.upsert_finance(FinanceSnapshot(**row))
     print(f"合并完成: dividend {len(div)} 行, finance {len(fin)} 行（来源 {len(args.files)} 个分片）",
           flush=True)
+
+    # 孤儿行清理放在这里：CI 的分片刷新永远不满足「整轮成功」条件（--shard 模式跳过
+    # prune），清理只能挂在合并之后——此时股票池是完整的，且刚刷完一轮。
+    # 只按「代码是否还在 stock_list」裁剪，stock_list 为空时不动（防误判全市场退市）。
+    if not args.skip_prune:
+        pruned = cache.prune_orphan_rows(min_universe=args.min_universe)
+        print(f"清理孤儿行: {pruned} 条（stock_list 已剔除的代码）", flush=True)
     return 0
 
 
