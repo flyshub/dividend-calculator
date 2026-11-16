@@ -84,7 +84,7 @@ def compute_tsr(roe_latest: Optional[float], roe_5y_median: Optional[float],
     漏斗③ 先例），中位数缺失回退 roe_latest。ROE 为负（亏损股）照算，
     警示由展示层负责；PB ≤ 0 视为数据异常返回 None。
     """
-    roe = roe_5y_median if (is_cyclical and roe_5y_median is not None) else roe_latest
+    roe = select_judge_roe(roe_latest, roe_5y_median, is_cyclical)
     if roe is None or real_yield_pct is None or pb is None or pb <= 0:
         return None
     return round((roe - real_yield_pct * pb) + real_yield_pct, 2)

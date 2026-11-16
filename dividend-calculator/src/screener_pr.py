@@ -6,16 +6,11 @@ evaluate_pr_batch（纯缓存批量评估，供 scripts/fill_screener_data.py �
 from typing import Callable, List, Optional
 
 from src.pr import PRResult
-from src.pr_calculator import judge_pr, select_judge_roe
+from src.pr_calculator import judge_pr
 from src.screener_cache import FinanceSnapshot, ScreenerCache
 
 # 估值四档中选股器保留的两档（V2 回测证实 PR≤1 有超额）
 PR_ZONE_KEEP = ("合理偏低", "低估")
-
-
-def _select_roe(fin: FinanceSnapshot) -> Optional[float]:
-    """周期股用 5 年 ROE 中位数（抗单年失真），其余用最新年报 ROE —— 与 judge_pr 一致。"""
-    return select_judge_roe(fin.roe_latest, fin.roe_5y_median, fin.is_cyclical)
 
 
 def compute_pr(pe_ttm: Optional[float], fin: FinanceSnapshot) -> Optional[float]:
@@ -51,9 +46,9 @@ def evaluate_pr_batch(
                 or fin is None or fin.roe_latest is None):
             # 缺 ROE/PE → 跳过（不调网络）
             continue
-        from src.pr_calculator import classify_valuation
-        pr_val = compute_pr(quote.pe_ttm, fin)
-        zone = classify_valuation(pr_val)
+        # 判定与选股器/页面共用 judge_pr：档位不在此处另算，避免第二条判定路径
+        roe_used, pr_val, zone = judge_pr(
+            quote.pe_ttm, fin.roe_latest, fin.roe_5y_median, fin.is_cyclical)
         results.append({
             "code": code,
             "pr": pr_val,
@@ -61,6 +56,6 @@ def evaluate_pr_batch(
             "pass_pr": zone in pr_zone,
             "industry": None,  # 缓存无行业
             "roe_latest": fin.roe_latest,
-            "roe_used": _select_roe(fin),  # 实际参与 PR 计算的 ROE（周期股为中位数）
+            "roe_used": roe_used,  # 实际参与判定的 ROE（周期股为中位数）
         })
     return results
