@@ -9,8 +9,9 @@ from typing import Callable, Optional
 
 import sys
 
-from src.screener_rate_limit import batch_wait, call_with_timeout
+from src.screener_rate_limit import batch_wait
 from src.screener_cache import ScreenerCache, DividendSnapshot
+from src.screener_fetch import DEFAULT_MAX_CONSECUTIVE_FAILURES, fetch_or_default
 from src.screening import FunnelCandidate
 
 # 漏斗④ 保留的 verdict（可持续 + 偏弱）
@@ -101,15 +102,22 @@ def make_sustainability_evaluator(
     cache: ScreenerCache,
     *,
     assessor: Optional[Callable[[str], object]] = None,
+    max_consecutive_failures: int = DEFAULT_MAX_CONSECUTIVE_FAILURES,
 ) -> Callable[[FunnelCandidate], str]:
     """构造漏斗④ 的可持续性评估回调（数据获取层）：限流 + 缓存复用 + 评估。
 
     返回单股 verdict 字符串。缓存命中（未过期）时跳过限流等待（零网络）；
     未命中且未注入 assessor 时按数据源限流等待（与既有批量评估一致）。
     同时把快照行业补进候选（纯缓存路径无行业，供输出行使用）。
+
+    容错与另两条取数路径同源（src.screener_fetch）：单只失败降级为「未评估」，
+    连续 N 只超时/异常则中止本轮——此前这里没有计数器，数据源整体失效时
+    整轮都在「未评估」上空转。
     """
+    consecutive_failures = 0
 
     def evaluate(candidate: FunnelCandidate) -> str:
+        nonlocal consecutive_failures
         code = candidate.code
         dividend = candidate.dividend
         if dividend is None:
@@ -120,21 +128,29 @@ def make_sustainability_evaluator(
         cached_ok = snap is not None and not cache.is_sustainability_stale(code)
         if not cached_ok and assessor is None:
             batch_wait()
-        try:
-            result = call_with_timeout(
-                lambda: evaluate_sustainability(
-                    code, dividend, assessor=assessor,
-                    total_shares=candidate.quote.total_shares if candidate.quote else 1.0,
-                    dividend_total=dividend.total_dividend,
-                    industry=candidate.industry,
-                    cache=cache,
-                ),
-                SUS_FETCH_TIMEOUT, what=f"{code} 可持续性",
-            )
-        except Exception as exc:  # noqa: BLE001 — 单只失败降级，不中断漏斗
-            print(f"  [可持续性] {code} 取数失败: {exc}", file=sys.stderr)
-            return "未评估"
-        return result["verdict"]
+        verdict = fetch_or_default(
+            code,
+            lambda: evaluate_sustainability(
+                code, dividend, assessor=assessor,
+                total_shares=candidate.quote.total_shares if candidate.quote else 1.0,
+                dividend_total=dividend.total_dividend,
+                industry=candidate.industry,
+                cache=cache,
+            )["verdict"],
+            label="可持续性",
+            timeout_s=SUS_FETCH_TIMEOUT,
+            default="未评估",
+        )
+        if verdict == "未评估" and not cached_ok:
+            consecutive_failures += 1
+            if consecutive_failures >= max_consecutive_failures:
+                raise RuntimeError(
+                    f"可持续性取数连续 {consecutive_failures} 只无结果，"
+                    "判定数据源不可用，中止本轮"
+                )
+        else:
+            consecutive_failures = 0
+        return verdict
 
     return evaluate
 

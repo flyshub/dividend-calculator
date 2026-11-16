@@ -246,3 +246,33 @@ class TestMakeEvaluator:
             # 缓存命中走注入路径：行业来自快照
             assert mock_assess.call_args.kwargs["industry"] == "电力"
         assert c.industry == "电力"
+
+
+class TestEvaluatorAbort:
+    """漏斗④ 取数此前没有计数器：数据源整体失效时整轮在「未评估」上空转。"""
+
+    def test_consecutive_failures_abort(self):
+        def boom(code):
+            raise TimeoutError("dead source")
+
+        ev = make_sustainability_evaluator(
+            None, assessor=boom, max_consecutive_failures=3)
+        assert ev(_candidate()) == "未评估"
+        assert ev(_candidate()) == "未评估"
+        with pytest.raises(RuntimeError, match="可持续性取数连续 3 只无结果"):
+            ev(_candidate())
+
+    def test_success_resets_counter(self):
+        state = {"n": 0}
+
+        def alternating(code):
+            state["n"] += 1
+            if state["n"] % 2 == 1:
+                raise TimeoutError("flaky")
+            return _FakeResult("可持续")
+
+        ev = make_sustainability_evaluator(
+            None, assessor=alternating, max_consecutive_failures=2)
+        for _ in range(6):
+            reset_sus_cache()          # 避免内存 verdict 缓存跳过 assessor
+            ev(_candidate())           # 失败与成功交替 → 永不连续 2 次

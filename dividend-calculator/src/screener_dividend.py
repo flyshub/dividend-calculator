@@ -9,9 +9,14 @@ from typing import Callable, List, Optional
 
 from src.dividend import DividendResult, calculate_true_dividend_yield
 from src.screener_cache import DividendSnapshot, ScreenerCache
+from src.screener_fetch import (
+    DEFAULT_MAX_CONSECUTIVE_FAILURES,
+    FetchPolicy,
+    fetch_each,
+)
 
-# 单批容错：连续 N 只取数失败视为数据源不可用，中止本轮（避免 5559 只逐个超时耗光 CI 时长）
-MAX_CONSECUTIVE_FAILURES = 30
+# 单批容错：连续 N 只取数失败视为数据源不可用（实现收在 screener_fetch）
+MAX_CONSECUTIVE_FAILURES = DEFAULT_MAX_CONSECUTIVE_FAILURES
 
 # calculate_true_dividend_yield 的 provider 类型
 DivProvider = Optional[
@@ -56,12 +61,12 @@ def compute_dividends_for_candidates(
 
     逐股拉取受限流控制（RateLimiter），避免触发数据源限流。
     增量复用：已有且未过期的 dividend_snapshot 直接复用，不重拉。
-    容错：单只失败（超时/数据源异常）记日志跳过，连续 N 只失败则中止本轮。
+    容错：单只失败（超时/数据源异常）记日志跳过，连续 N 只失败则中止本轮
+    ——判据实现收在 src.screener_fetch（与财务/可持续性共用一份）。
     """
-    from src.screener_rate_limit import batch_wait, call_with_timeout
-    snapshots: List[DividendSnapshot] = []
-    consecutive_failures = 0
-    for code in codes:
+    from src.screener_rate_limit import batch_wait
+
+    def cached(code: str) -> Optional[DividendSnapshot]:
         # 增量复用：缓存未过期且 total_dividend 完整则跳过重拉。
         # total_dividend 缺失（如旧 DB 迁移 ALTER TABLE 补列后未回填）→ 强制重拉，
         # 否则股息率实时化逻辑永远拿不到分红总额（#82）。
@@ -71,26 +76,25 @@ def compute_dividends_for_candidates(
             and not cache.is_dividend_stale(code)
             and existing.total_dividend is not None
         ):
-            snapshots.append(existing)
-            continue
-        batch_wait()  # 限流：控制请求间隔
-        try:
-            result = call_with_timeout(
-                lambda: compute_dividend(code, calc_provider=calc_provider),
-                fetch_timeout, what=f"{code} 股息",
-            )
-        except Exception as exc:  # noqa: BLE001 — 单只失败不影响整批
-            consecutive_failures += 1
-            print(f"  [股息] {code} 取数失败: {exc}", file=sys.stderr)
-            if consecutive_failures >= max_consecutive_failures:
-                raise RuntimeError(
-                    f"股息取数连续 {consecutive_failures} 只失败，判定数据源不可用，中止本轮"
-                ) from exc
-            continue
-        consecutive_failures = 0
-        if result is None:
-            continue
+            return existing
+        return None
+
+    def save(result: DividendResult) -> DividendSnapshot:
         snap = to_dividend_snapshot(result)
         cache.upsert_dividend(snap)
-        snapshots.append(snap)
-    return snapshots
+        return snap
+
+    outcome = fetch_each(
+        codes,
+        lambda code: compute_dividend(code, calc_provider=calc_provider),
+        label="股息",
+        policy=FetchPolicy(
+            timeout_s=fetch_timeout,
+            max_consecutive_failures=max_consecutive_failures,
+        ),
+        cached=cached,
+        is_empty=lambda result: result is None,
+        save=save,
+        before_request=batch_wait,  # 限流：控制请求间隔
+    )
+    return outcome.items
