@@ -48,159 +48,20 @@ def get_stock_info(stock_input: str) -> Optional[StockInfo]:
 
 
 # ────────────────────────────────────────────────────────────────
-# 月度K线数据（走势图用，尚未提取到 adapter）
+# 月度K线数据（走势图用）
 # ────────────────────────────────────────────────────────────────
 
-def _get_monthly_prices_mootdx(stock_code: str) -> list:
-    """通过 mootdx 通达信协议获取月度收盘价，全球可用。
-
-    mootdx bars 为不复权原始价：close 与 close_nominal 同值（兜底降级链路，
-    价格走势含除权跳空，股息率总额法口径不受影响）。"""
-    try:
-        from .datasource.mootdx_source import get_quotes_client
-        client = get_quotes_client()
-        df = client.bars(symbol=stock_code, frequency=6, offset=120)
-        if df is None or df.empty:
-            return []
-
-        results = []
-        for _, row in df.iterrows():
-            try:
-                date_str = str(row.get('datetime', ''))[:10]
-                close = float(row['close'])
-                if close <= 0:
-                    continue
-                results.append(MonthlyPrice(date=date_str, close=close, close_nominal=close))
-            except (ValueError, KeyError, TypeError):
-                continue
-
-        results.sort(key=lambda r: r.date)
-        logger.debug("mootdx 获取月度价格 %s: %d 条", stock_code, len(results))
-        return results
-    except Exception as e:
-        logger.warning("mootdx 获取月度价格失败 %s: %s", stock_code, e)
-        return []
-
-
-def _get_monthly_prices_tencent(stock_code: str) -> list:
-    """通过腾讯 K 线接口获取月度收盘价，双口径：前复权（close，画图）+ 不复权
-    （close_nominal，走势图股息率总额法的名义价口径——前复权价在高送转公司被
-    回溯调整，与除权时点名义分红直接相除口径错配）。
-    不复权请求失败仅 close_nominal=None（该段股息率 null，价格线仍可画）。"""
-    try:
-        from .tencent_quote import fetch_kline_rows
-        rows = fetch_kline_rows(stock_code, period="month", count=120)
-        if not rows:
-            logger.warning("腾讯K线接口无 qfqmonth 数据: %s", stock_code)
-            return []
-
-        # 不复权序列按日期建索引（仅失败/空时降级为空映射）；逐行防护——
-        # 单行脏数据（长度不足/非数字）只丢该行，不破坏前复权主链路
-        nominal_rows = fetch_kline_rows(stock_code, period="month", count=120, fq="") or []
-        nominal_map = {}
-        for row in nominal_rows:
-            try:
-                nominal_map[row[0]] = float(row[2])
-            except (ValueError, IndexError, TypeError):
-                continue
-
-        results = []
-        for row in rows:
-            try:
-                date_str = row[0]
-                results.append(MonthlyPrice(
-                    date=date_str,
-                    close=float(row[2]),
-                    close_nominal=nominal_map.get(date_str),
-                ))
-            except (ValueError, IndexError, TypeError):
-                continue
-
-        logger.debug("腾讯K线获取月度价格 %s: %d 条", stock_code, len(results))
-        return results
-    except Exception as e:
-        logger.warning("腾讯K线获取月度价格失败 %s: %s", stock_code, e)
-        return []
-
-
-def _get_monthly_prices_eastmoney(stock_code: str, count: int = 120) -> list:
-    """东财 push2his 月度 K 线（备选源，腾讯 WAF 限频时的退路）。
-
-    双口径同腾讯：fqt=1 前复权（画图）+ fqt=0 不复权（走势图股息率名义价）。
-    东财 klt=103 返回全历史（平安 235 个月、格力 355 个月），按 count 截取最近
-    count 个月，与腾讯 120 根窗口保持一致。字段 f51=日期、f53=收盘。
-    不复权请求失败仅 close_nominal=None（该段股息率 null，价格线仍可画）。"""
-    try:
-        import requests
-
-        market = "1" if stock_code.startswith("6") else "0"
-        base = (
-            "https://push2his.eastmoney.com/api/qt/stock/kline/get"
-            f"?secid={market}.{stock_code}&fields1=f1,f2,f3&fields2=f51,f53"
-            "&klt=103&beg=0&end=20500101&fqt="
-        )
-        headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://quote.eastmoney.com/"}
-
-        def _fetch(fqt: str) -> dict:
-            resp = requests.get(base + fqt, headers=headers, timeout=10)
-            if resp.status_code != 200:
-                return {}
-            payload = (resp.json() or {}).get("data") or {}
-            out = {}
-            for line in payload.get("klines") or []:
-                parts = str(line).split(",")
-                if len(parts) < 2:
-                    continue
-                try:
-                    out[parts[0]] = float(parts[1])
-                except ValueError:
-                    continue
-            return out
-
-        qfq = _fetch("1")
-        if not qfq:
-            logger.warning("东财K线接口无月度数据: %s", stock_code)
-            return []
-        try:
-            nominal = _fetch("0")
-        except Exception as e:  # 不复权仅影响股息率，不该拖垮价格线
-            logger.debug("东财不复权月度价获取失败 %s: %s", stock_code, e)
-            nominal = {}
-
-        results = []
-        for date_str in sorted(qfq)[-count:]:
-            close = qfq[date_str]
-            if close <= 0:
-                continue
-            results.append(MonthlyPrice(
-                date=date_str,
-                close=close,
-                close_nominal=nominal.get(date_str),
-            ))
-
-        logger.debug("东财K线获取月度价格 %s: %d 条", stock_code, len(results))
-        return results
-    except Exception as e:
-        logger.warning("东财K线获取月度价格失败 %s: %s", stock_code, e)
-        return []
-
-
 def _get_monthly_prices(stock_code: str) -> list:
-    """获取近120个月（10年）月度收盘价（前复权），多数据源自动降级"""
-    results = _get_monthly_prices_tencent(stock_code)
-    if results:
-        return results
+    """近 120 个月月度收盘价（前复权），多源降级由 monthly_prices 决定。
 
-    results = _get_monthly_prices_eastmoney(stock_code)
-    if results:
-        return results
-
-    results = _get_monthly_prices_mootdx(stock_code)
-    if results:
-        return results
-
-    logger.warning("所有数据源均无法获取 %s 的月度价格", stock_code)
-    return []
+    源的顺序与实现都在 src/monthly_prices.py（腾讯 → 东财 → mootdx）；
+    此处只保留调用点，返回实际用上的来源写进日志（数据铁律：来源可追溯）。
+    """
+    from .monthly_prices import fetch_monthly_prices
+    rows, source = fetch_monthly_prices(stock_code)
+    if rows:
+        logger.debug("月度价格来源 %s: %s（%d 条）", stock_code, source, len(rows))
+    return rows
 
 
 # ────────────────────────────────────────────────────────────────
