@@ -358,3 +358,62 @@ class TestSourceTracking:
                                          quote_time="t", source="腾讯"))
         got = cache.get_quote("600900")
         assert got.source == "腾讯"  # 数据铁律：来源标注
+
+
+def _div(code):
+    from src.screener_cache import DividendSnapshot
+    return DividendSnapshot(code=code, real_yield=3.0, ttm_yield=3.0,
+                            real_yield_year="2025", ttm_period="2025Q4",
+                            total_dividend=1e9)
+
+
+def _fin(code):
+    return FinanceSnapshot(code=code, roe_period="2025", net_profit_annual=1e9,
+                           payout_ratio=0.3, roe_latest=12.0)
+
+
+class TestFreshCodes:
+    """「新鲜」的唯一定义在缓存层：调用方不再自己比 updated_at 字符串。"""
+
+    def _cache(self, tmp_path):
+        return ScreenerCache(tmp_path / "s.db")
+
+    def test_today_rows_are_fresh_at_zero_days(self, tmp_path):
+        cache = self._cache(tmp_path)
+        cache.upsert_dividend(_div("600900"))
+        assert cache.fresh_codes("dividend_snapshot", ["600900"], max_age_days=0) == {"600900"}
+
+    def test_missing_and_old_rows_are_not_fresh(self, tmp_path):
+        cache = self._cache(tmp_path)
+        cache.upsert_dividend(_div("600900"))
+        cache.upsert_dividend(_div("600519"))
+        with cache._conn() as conn:
+            conn.execute("UPDATE dividend_snapshot SET updated_at='2020-01-01' WHERE code='600519'")
+            conn.commit()
+        assert cache.fresh_codes(
+            "dividend_snapshot", ["600900", "600519", "000002"], max_age_days=0
+        ) == {"600900"}
+
+    def test_empty_code_list(self, tmp_path):
+        assert self._cache(tmp_path).fresh_codes("finance_snapshot", []) == set()
+
+    def test_large_code_list_chunks(self, tmp_path):
+        cache = self._cache(tmp_path)
+        codes = [f"{i:06d}" for i in range(1200)]
+        for c in codes[:600]:
+            cache.upsert_finance(_fin(c))
+        fresh = cache.fresh_codes("finance_snapshot", codes, max_age_days=0)
+        assert len(fresh) == 600
+
+
+class TestSnapshotTableDeclarations:
+    def test_refresh_tables_subset_of_snapshot_tables(self):
+        from src.screener_cache import REFRESH_TABLES, SNAPSHOT_TABLES
+        assert set(REFRESH_TABLES) <= set(SNAPSHOT_TABLES)
+        assert "quote_snapshot" not in SNAPSHOT_TABLES
+
+    def test_stale_counts_accepts_table_subset(self, tmp_path):
+        from src.screener_cache import REFRESH_TABLES
+        cache = ScreenerCache(tmp_path / "s.db")
+        counts = cache.stale_counts(max_age_days=30, tables=REFRESH_TABLES)
+        assert set(counts) == set(REFRESH_TABLES)

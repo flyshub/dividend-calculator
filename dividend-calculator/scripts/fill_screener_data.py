@@ -119,9 +119,8 @@ def fill_finance(cache: ScreenerCache, codes: List[str], deadline: float = 0.0):
     truncated = _fill(cache, codes, "财务", compute_finance_for_candidates, deadline)[1]
     # 取数全部返回 None 时不会有异常、也不会写行——静默冻结（2026-11：CI 上
     # 同花顺/akshare 取数失效，690 只跑完后 finance_snapshot 一行未更新）。这里显式告警。
-    today = time.strftime("%Y-%m-%d")
-    fresh = sum(1 for c in codes
-                if (s := cache.get_finance(c)) is not None and s.updated_at == today)
+    # 「新鲜」由缓存层定义（fresh_codes），脚本不再自己比较 updated_at 字符串。
+    fresh = len(cache.fresh_codes("finance_snapshot", codes, max_age_days=0))
     if codes and fresh == 0:
         print(f"::warning::财务取数 {len(codes)} 只无一写入新行（数据源不可用？finance_snapshot 未更新）",
               flush=True)

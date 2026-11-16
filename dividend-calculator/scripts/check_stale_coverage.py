@@ -16,7 +16,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.screener_cache import ScreenerCache  # noqa: E402
+from src.screener_cache import REFRESH_TABLES, ScreenerCache  # noqa: E402
 
 # 触发刷新的最小过期行数（低于此值视为正常波动）
 MIN_STALE = 200
@@ -31,13 +31,14 @@ def main():
     args = parser.parse_args()
 
     cache = ScreenerCache()
-    counts = cache.stale_counts(max_age_days=args.max_age_days)
+    # 只有随机缺失可补的表参与判定（REFRESH_TABLES 在缓存层声明）
+    counts = cache.stale_counts(max_age_days=args.max_age_days, tables=REFRESH_TABLES)
     need = 0
     for table, (total, stale) in counts.items():
         threshold = max(MIN_STALE, int(total * STALE_RATIO))
         flag = "需要刷新" if stale > threshold else "OK"
         print(f"{table}: 过期 {stale}/{total}（阈值 {threshold}）→ {flag}", flush=True)
-        if table in ("dividend_snapshot", "finance_snapshot") and stale > threshold:
+        if stale > threshold:
             need = 1
     print(f"need_refresh={need}", flush=True)
 

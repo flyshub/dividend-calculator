@@ -21,6 +21,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent  # 项目根（dividend-ca
 # 孤儿行清理要求的最小股票池规模：低于此数视为股票池被写坏，宁可不清理
 MIN_UNIVERSE_FOR_PRUNE = 1000
 
+# 需要按时间判过期的快照表（quote 每日全量覆盖，不在此列）
+SNAPSHOT_TABLES = ("dividend_snapshot", "finance_snapshot", "sustainability_snapshot")
+
+# 参与「是否需要补刷」判定的表：可持续性靠股息+财务+行情现算，不单独触发刷新
+REFRESH_TABLES = ("dividend_snapshot", "finance_snapshot")
+
 @dataclass(frozen=True)
 class QuoteSnapshot:
     code: str
@@ -353,16 +359,17 @@ class ScreenerCache:
             return True
         return (date.today() - updated).days > max_age_days
 
-    def stale_counts(self, max_age_days: int = 30) -> dict:
+    def stale_counts(self, max_age_days: int = 30, tables=SNAPSHOT_TABLES) -> dict:
         """各快照表 {(总行数, 过期行数)}，CI 据此判断是否需要补刷。
 
         与 is_dividend_stale 等判定同语义：updated_at 为 NULL 或早于 max_age_days
-        前视为过期（date() 比较，忽略时分秒）。
+        前视为过期（date() 比较，忽略时分秒）。哪些表算数由 SNAPSHOT_TABLES /
+        REFRESH_TABLES 声明，调用方不再自己挑表名。
         """
         cutoff = (date.today() - timedelta(days=max_age_days)).isoformat()
         out = {}
         with self._conn() as conn:
-            for table in ("dividend_snapshot", "finance_snapshot", "sustainability_snapshot"):
+            for table in tables:
                 total, stale = conn.execute(
                     f"SELECT count(*), "
                     f"coalesce(sum(CASE WHEN updated_at IS NULL OR date(updated_at) < ? "
@@ -385,7 +392,7 @@ class ScreenerCache:
         初始化脚本写入、行情刷新不碰它，所以残缺只会来自写坏。
         quote_snapshot 每日全量覆盖，不参与清理。
         """
-        tables = ("dividend_snapshot", "finance_snapshot", "sustainability_snapshot")
+        tables = SNAPSHOT_TABLES
         total = 0
         with self._conn() as conn:
             universe = conn.execute("SELECT COUNT(*) FROM stock_list").fetchone()[0]
@@ -400,9 +407,32 @@ class ScreenerCache:
             conn.commit()
         return total
 
+    def fresh_codes(self, table: str, codes: List[str],
+                    max_age_days: int = 0) -> set:
+        """给定代码里在该表内仍然新鲜的子集。
+
+        「新鲜」的定义只在这里：updated_at 可解析且距今不超过 max_age_days。
+        调用方（补刷脚本、告警）不再自己比 `updated_at == today` 字符串。
+        """
+        if not codes:
+            return set()
+        cutoff = (date.today() - timedelta(days=max_age_days)).isoformat()
+        out = set()
+        codes = list(codes)
+        with self._conn() as conn:
+            for i in range(0, len(codes), 500):  # SQLite 变量上限保护
+                chunk = codes[i:i + 500]
+                marks = ",".join("?" * len(chunk))
+                rows = conn.execute(
+                    f"SELECT code FROM {table} WHERE code IN ({marks}) "
+                    f"AND updated_at IS NOT NULL AND date(updated_at) >= ?",
+                    (*chunk, cutoff),
+                ).fetchall()
+                out.update(r[0] for r in rows)
+        return out
+
     def stats(self) -> dict:
         """各快照表行数（供初始化/运维脚本统计）。"""
-        tables = ("stock_list", "quote_snapshot", "dividend_snapshot",
-                  "finance_snapshot", "sustainability_snapshot")
+        tables = ("stock_list", "quote_snapshot") + SNAPSHOT_TABLES
         with self._conn() as conn:
             return {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in tables}
