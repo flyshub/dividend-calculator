@@ -127,6 +127,8 @@ CSV/JSON 按 **90 天保留周期**自动清理；DB 快照表**不做时间裁�
 - **合并只覆盖导出的行**：某片失败/未处理的代码，主库原值保留（宁旧不缺）
 - 单只取数超时（`call_with_timeout`，90s/120s）+ 单只异常跳过 + 连续 30 只失败中止本轮；三个 CLI 都 `os._exit` 硬退出（tdxpy 心跳线程会拖住进程）
 - **退出码语义**：`fill_screener_data` 返回 2 = 被 `--max-runtime-minutes` 截断（部分完成，本片导出仍会执行）；workflow 把 2 映射为 `::warning::`，其它非零码仍走失败路径。合并步 `merge_shard_rows.py` 在合并后做孤儿行清理（`--skip-prune` 可跳过）
+- **超时数值**：分片 job 180 分钟（股息步 110 + 财务步 60 + 上传），merge 120 分钟，prepare 15 分钟。早期方案写的「月频 150 分钟」在改分片后被上面这组具体值取代——单 job 150 分钟装不下 695 只×2 类取数，故按步骤拆
+- **分片失败必须让 job 失败**：两个刷新步是 `continue-on-error`（截断不中断本片），副作用是 `needs.shard.result` 永远 success，merge 的告警条件形同虚设。因此分片末尾有 `Mark shard failed` 步，按 `steps.*.outcome` 在产物上传后补回失败语义
 
 改 CSV/JSON 保留天数时，需同时更新 `export_screener_json.py` 的 `RETENTION_DAYS` 与此处文档。Release 备份的 7 天窗口在 `screener_daily.yml` 的 Upload 步（`cutoff=date -u -d '7 days ago'`），改窗口时同步改此处文档。
 

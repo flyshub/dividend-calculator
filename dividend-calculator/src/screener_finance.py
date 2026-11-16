@@ -1,7 +1,8 @@
 """选股器财务数据获取（issue #122）。
 
 对候选池逐股拉取财务（ROE/净利润/支付率/周期标记）写 finance_snapshot（缓存层）。
-复用 pr.py::_get_financial（mootdx F10 → akshare 同花顺降级链）与 _get_industry。
+复用 pr.py::_get_financial（东财 F10 → mootdx → 同花顺降级链：CI 上只有东财可用，
+TDX 7709 被封、*.10jqka 对机房 IP 403、akshare 已移除该同花顺接口）与 _get_industry。
 漏斗③ 的判定与 PR 计算已收进 src.screening（ADR-0001），本模块只负责取数与缓存。
 """
 import sys

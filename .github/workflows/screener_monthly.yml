@@ -110,6 +110,7 @@ jobs:
           path: dividend-calculator/data
 
       - name: Refresh dividend (shard ${{ matrix.shard }}/${{ env.SHARDS }})
+        id: refresh_dividend
         if: ${{ (inputs.mode || 'all') != 'finance' }}
         working-directory: dividend-calculator
         timeout-minutes: 110
@@ -131,6 +132,7 @@ jobs:
           fi
 
       - name: Refresh finance (shard ${{ matrix.shard }}/${{ env.SHARDS }})
+        id: refresh_finance
         if: ${{ (inputs.mode || 'all') != 'dividend' }}
         working-directory: dividend-calculator
         timeout-minutes: 60
@@ -158,6 +160,15 @@ jobs:
           path: dividend-calculator/shard-${{ matrix.shard }}.json
           if-no-files-found: warn
           retention-days: 1
+
+      # 两个刷新步都是 continue-on-error（截断/单只失败不该中断本片），副作用是
+      # 步骤失败不再让 job 失败 → merge 的告警条件 needs.shard.result != 'success'
+      # 永不成立，只剩没人看的 ::error:: 注解。这里在产物上传后补回失败语义。
+      - name: Mark shard failed
+        if: always() && (steps.refresh_dividend.outcome == 'failure' || steps.refresh_finance.outcome == 'failure')
+        run: |
+          echo "::error::shard ${{ matrix.shard }} 刷新步骤失败，标记 job 失败以触发告警"
+          exit 1
 
   # 3) 合并分片结果 → 预拉可持续性 → 上传
   merge:
