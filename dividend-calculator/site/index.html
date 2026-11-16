@@ -911,7 +911,7 @@
       </div>
 
       <div class="result-card full hidden" id="chart-card">
-        <div class="label">股价与股息率走势</div>
+        <div class="label">前复权股价与股息率走势</div>
         <div id="chart-container"></div>
         <p id="chart-note" class="note note--sm"></p>
       </div>
@@ -1134,32 +1134,15 @@
         }
       }
 
-      // Ex-dividend markers
-      var exDivMarkers = [];
-      for (var j = 0; j < dividends.length; j++) {
-        var rec = dividends[j];
-        if (!rec.ex_dividend_date) continue;
-        var closestPrice = null;
-        for (var k = 0; k < yieldData.length; k++) {
-          if (yieldData[k].date >= rec.ex_dividend_date) {
-            closestPrice = yieldData[k].price;
-            break;
-          }
-        }
-        if (closestPrice === null && yieldData.length > 0) {
-          closestPrice = yieldData[yieldData.length - 1].price;
-        }
-        if (closestPrice !== null) {
-          exDivMarkers.push({
-            name: rec.report_time + ': 10派' + rec.dividend_per_10 + '元',
-            coord: [rec.ex_dividend_date, closestPrice]
-          });
-        }
-      }
+      // Ex-dividend markers（x 必须是轴上的月末日期，见 calculator.buildExDivMarkers）
+      var exDivMarkers = Calculator.buildExDivMarkers(prices, dividends);
 
-      var title = apiData.stock_name
-        ? apiData.stock_name + '（' + apiData.stock_code + '）近十年股价与股息率走势'
-        : apiData.stock_code + ' 近十年股价与股息率走势';
+      var spanText = dates.length
+        ? dates[0].slice(0, 7) + '–' + dates[dates.length - 1].slice(0, 7)
+        : '';
+      var title = (apiData.stock_name
+        ? apiData.stock_name + '（' + apiData.stock_code + '）'
+        : apiData.stock_code + ' ') + spanText + ' 股价与股息率走势';
 
       return {
         title: {
@@ -1179,8 +1162,8 @@
             var yrData = idx >= 0 && idx < yieldData.length ? yieldData[idx] : null;
             for (var i = 0; i < params.length; i++) {
               var p = params[i];
-              if (p.seriesName === '收盘价') {
-                html += '<br/>' + p.marker + ' 收盘价: ' + Number(p.value).toFixed(2) + ' 元';
+              if (p.seriesName === '前复权股价') {
+                html += '<br/>' + p.marker + ' 前复权收盘价: ' + Number(p.value).toFixed(2) + ' 元';
               } else if (p.seriesName.indexOf('股息率') === 0) {
                 var fyLabel = yrData && yrData.fiscalYear ? '（' + yrData.fiscalYear + '年度）' : '';
                 /* yield=null（股本/名义价缺失，宁缺毋假）→ 显示「数据不足」而非 NaN */
@@ -1193,7 +1176,7 @@
           }
         },
         legend: {
-          data: ['收盘价', '股息率(最新完整财年)'],
+          data: ['前复权股价', '股息率(最新完整财年)'],
           bottom: 5,
           textStyle: { fontSize: 12, color: C_MUTED }
         },
@@ -1217,7 +1200,7 @@
         yAxis: [
           {
             type: 'value',
-            name: '股价(元)',
+            name: '前复权股价(元)',
             nameTextStyle: { fontSize: 11, color: C_PRICE },
             axisLabel: { fontSize: 11, color: C_MUTED },
             axisLine: { show: true, lineStyle: { color: C_PRICE } },
@@ -1234,7 +1217,7 @@
         ],
         series: [
           {
-            name: '收盘价',
+            name: '前复权股价',
             type: 'line',
             data: priceValues,
             yAxisIndex: 0,
@@ -1337,7 +1320,9 @@
           };
           window.addEventListener('resize', chartResizeHandler);
 
-          note.textContent = '股价数据来自公开市场行情，截至' + apiData.data_date;
+          note.textContent = '价格线为前复权价（已按分红送转回溯调整，非当年实际成交价）；'
+            + '股息率 = 该财年现金分红总额 ÷ 当月总市值，≥5% 的月份以底色标出，三角为除权除息月。'
+            + '股价数据来自公开市场行情，截至' + apiData.data_date;
         })
         .catch(function(err) {
           console.warn('图表数据获取失败:', err);

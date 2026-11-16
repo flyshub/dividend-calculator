@@ -854,3 +854,68 @@ test('fetchTop10Holding 后缀 SH/BJ/SZ (#40)', async () => {
     global.fetch = orig;
   }
 });
+
+// ---- buildExDivMarkers（走势图除权标记）----
+/* 2026-11 审计：旧内联实现在 index.html 里用 ex_dividend_date 作 coord.x，而 x 轴
+ * 是月末类目 → 该类目不在轴上，标记无法定位；窗口外的历史除权事件也被钉在图表首月
+ * 的价格上产生越界标记。下面钉住新契约。 */
+function monthPrices() {
+  return [
+    { date: '2026-01-30', close: 10.0, close_nominal: 12.0 },
+    { date: '2026-02-27', close: 11.0, close_nominal: 13.0 },
+    { date: '2026-04-30', close: 9.5, close_nominal: 11.5 },
+  ];
+}
+
+test('buildExDivMarkers x 落在轴上的月末日期，而非月中除权日', () => {
+  const recs = [
+    { ex_dividend_date: '2026-02-16', dividend_per_10: 5, report_time: '2025年报',
+      transfer_per_10: 0, total_shares: 1e9 },
+  ];
+  const out = Calc.buildExDivMarkers(monthPrices(), recs);
+  assert.equal(out.length, 1);
+  assert.deepEqual(out[0].coord, ['2026-02-27', 11.0]);  // 除权日之后第一个月末
+  assert.equal(out[0].name, '2025年报: 10派5元');
+});
+
+test('buildExDivMarkers 窗口外的除权事件不产生标记', () => {
+  const recs = [
+    { ex_dividend_date: '2015-07-01', dividend_per_10: 3, report_time: '2014年报', transfer_per_10: 0 },
+    { ex_dividend_date: '2030-07-01', dividend_per_10: 3, report_time: '2029年报', transfer_per_10: 0 },
+  ];
+  assert.equal(Calc.buildExDivMarkers(monthPrices(), recs).length, 0);
+});
+
+test('buildExDivMarkers 纯送转不写「10派0元」，派+送转同时呈现', () => {
+  const recs = [
+    { ex_dividend_date: '2026-04-10', dividend_per_10: 0, report_time: '2025年报', transfer_per_10: 10 },
+    { ex_dividend_date: '2026-04-20', dividend_per_10: 5, report_time: '2025中期分配', transfer_per_10: 4 },
+    { ex_dividend_date: '2026-04-25', dividend_per_10: 0, report_time: '空行', transfer_per_10: 0 },
+  ];
+  const out = Calc.buildExDivMarkers(monthPrices(), recs);
+  assert.equal(out.length, 2);
+  assert.equal(out[0].name, '2025年报: 10送转10');
+  assert.equal(out[1].name, '2025中期分配: 10派5元10送转4');
+});
+
+test('buildExDivMarkers 空输入安全', () => {
+  assert.deepEqual(Calc.buildExDivMarkers([], [{ ex_dividend_date: '2026-02-16', dividend_per_10: 5 }]), []);
+  assert.deepEqual(Calc.buildExDivMarkers(monthPrices(), null), []);
+});
+
+// ---- 走势图股息率口径：末月与主卡（总额法）同口径 ----
+test('computeDividendYields 末月 = 分红总额 ÷ (月末价 × 当前总股本)（与主卡同口径）', () => {
+  /* 主卡 = 财年现金分红总额 ÷ 当前总市值。图表末月必须与之一致，
+   * 否则用户会看到「图 3.9%、卡片 3.6%」两个数。非送转股本变动（增发/回购注销）
+   * 会让历史月份偏离每股口径（约等于股本变动比例），但末月不偏离。 */
+  const S_AT_PAY = 2.0e8;   // 派息时股本
+  const S_NOW = 2.4e8;      // 当前股本（增发 20%，非送转）
+  const recs = [
+    { ex_dividend_date: '2025-07-10', dividend_per_10: 8, report_time: '2024年报',
+      plan_notice_date: '2025-04-30', total_shares: S_AT_PAY, transfer_per_10: 0 },
+  ];
+  const prices = [{ date: '2026-06-30', close: 20.0, close_nominal: 25.0 }];
+  const out = Calc.computeDividendYields(prices, recs, S_NOW);
+  assert.equal(out[0].yield, round2(0.8 * S_AT_PAY / (25.0 * S_NOW) * 100));
+  assert.notEqual(out[0].yield, round2(0.8 / 25.0 * 100));  // 与每股口径不同（增发导致）
+});

@@ -265,6 +265,41 @@
     });
   }
 
+  /* 走势图除权除息标记。
+   * x 必须落在月K线的类目轴上（月末日期），除权日是月中日 → 定位到「除权日所在
+   * 或之后的第一个月末」。旧实现用 ex_dividend_date 当 coord.x，该类目不在轴上，
+   * 标记无法定位；窗口外（早于首月 / 晚于末月）的事件也无法画，直接跳过。
+   * 纯送转行（dp=0, transfer>0）同样构成除权事件，文案不写「10派0元」。
+   * 返回 [{name, coord:[月末日期, 前复权收盘价]}] */
+  function buildExDivMarkers(monthlyPrices, dividendRecords) {
+    if (!monthlyPrices || !monthlyPrices.length || !dividendRecords) return [];
+    var first = monthlyPrices[0].date;
+    var last = monthlyPrices[monthlyPrices.length - 1].date;
+    var out = [];
+    for (var i = 0; i < dividendRecords.length; i++) {
+      var rec = dividendRecords[i];
+      var ex = rec.ex_dividend_date;
+      if (!ex) continue;
+      var dp = Number(rec.dividend_per_10) || 0;
+      var tr = Number(rec.transfer_per_10) || 0;
+      if (!(dp > 0) && !(tr > 0)) continue;
+      if (ex < first || ex > last) continue; /* 窗口外：无对应月份，画不出 */
+      var idx = -1;
+      for (var k = 0; k < monthlyPrices.length; k++) {
+        if (monthlyPrices[k].date >= ex) { idx = k; break; }
+      }
+      if (idx < 0) continue;
+      var bits = [];
+      if (dp > 0) bits.push('10派' + dp + '元');
+      if (tr > 0) bits.push('10送转' + tr);
+      out.push({
+        name: (rec.report_time || '') + ': ' + bits.join(''),
+        coord: [monthlyPrices[idx].date, monthlyPrices[idx].close],
+      });
+    }
+    return out;
+  }
+
   /* TTM 股息率（#19）：近 12 个月（按除权除息日）实际派发现金分红。
    * 对齐 Python utils.compute_ttm_dividend。返回 {ttm_dividend, period, count, source} */
   function computeTtmDividend(rows, totalShares, asOfDate) {
@@ -1157,6 +1192,7 @@
     toChartDividendRecords: toChartDividendRecords,
     parseDividendRecords: parseDividendRecords,
     computeDividendYields: computeDividendYields,
+    buildExDivMarkers: buildExDivMarkers,
     computeTtmDividend: computeTtmDividend,
     parseFinancials: parseFinancials,
     computeBasicPR: computeBasicPR,
