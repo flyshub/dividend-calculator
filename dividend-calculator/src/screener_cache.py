@@ -11,7 +11,7 @@
 PR 不建表（由 quote.pe_ttm + finance.roe_latest 派生，筛选时实时算）。
 """
 import sqlite3
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -92,6 +92,32 @@ class StockListItem:
     updated_at: str = field(default_factory=lambda: date.today().isoformat())
 
 
+@dataclass(frozen=True)
+class _TableSpec:
+    """一张快照表的声明：列清单从 dataclass 派生，避免手抄四遍。
+
+    DDL 仍在 _SCHEMA（类型声明需要 SQL 类型）；两者顺序一致由
+    tests/test_screener_cache.py::TestTableSpec 钉住。
+    """
+
+    name: str
+    row_type: type
+    bool_fields: tuple = ()   # SQLite INTEGER → bool 的列
+
+    @property
+    def columns(self) -> tuple:
+        return tuple(f.name for f in fields(self.row_type))
+
+    def row(self, values):
+        obj = self.row_type(*values)
+        if self.bool_fields:
+            obj = replace(obj, **{
+                name: bool(getattr(obj, name))
+                for name in self.bool_fields if getattr(obj, name) is not None
+            })
+        return obj
+
+
 class ScreenerCache:
     """data/screener.db 的读写 + 增量过期判定。"""
 
@@ -155,15 +181,21 @@ class ScreenerCache:
             ).fetchall()
         return [r[0] for r in rows]
 
+    # ---- 表声明（列清单从 dataclass 派生，DDL 见 _SCHEMA）----
+
+    _TABLES = {
+        "stock_list": _TableSpec("stock_list", StockListItem),
+        "quote_snapshot": _TableSpec("quote_snapshot", QuoteSnapshot),
+        "dividend_snapshot": _TableSpec("dividend_snapshot", DividendSnapshot),
+        "finance_snapshot": _TableSpec("finance_snapshot", FinanceSnapshot,
+                                       bool_fields=("is_cyclical",)),
+        "sustainability_snapshot": _TableSpec("sustainability_snapshot", SustainabilitySnapshot),
+    }
+
     # ---- stock_list ----
 
     def upsert_stock_list(self, items: List[StockListItem]):
-        with self._conn() as conn:
-            conn.executemany(
-                "INSERT OR REPLACE INTO stock_list (code, name, market, updated_at) "
-                "VALUES (?, ?, ?, ?)",
-                [(i.code, i.name, i.market, i.updated_at) for i in items],
-            )
+        self._upsert_rows("stock_list", items)
 
     def get_stock_codes(self) -> List[str]:
         """全 A 股票代码（升序）。"""
@@ -201,25 +233,13 @@ class ScreenerCache:
     # ---- quote_snapshot ----
 
     def upsert_quote(self, q: QuoteSnapshot):
-        self.upsert_quotes([q])
+        self._upsert_rows("quote_snapshot", [q])
 
     def upsert_quotes(self, quotes: List[QuoteSnapshot]):
-        with self._conn() as conn:
-            conn.executemany(
-                "INSERT OR REPLACE INTO quote_snapshot "
-                "(code, name, price, pe_ttm, pb, total_shares, market_cap, quote_time, source, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [(q.code, q.name, q.price, q.pe_ttm, q.pb, q.total_shares, q.market_cap,
-                  q.quote_time, q.source, q.updated_at) for q in quotes],
-            )
+        self._upsert_rows("quote_snapshot", quotes)
 
     def get_quote(self, code: str) -> Optional[QuoteSnapshot]:
-        with self._conn() as conn:
-            row = conn.execute(
-                "SELECT code, name, price, pe_ttm, pb, total_shares, market_cap, quote_time, source, updated_at "
-                "FROM quote_snapshot WHERE code=?", (code,)
-            ).fetchone()
-        return QuoteSnapshot(*row) if row else None
+        return self._get_row("quote_snapshot", code)
 
     def is_quote_stale(self, code: str, max_age_days: int = 1) -> bool:
         """行情按 max_age_days 判定过期（默认每日刷新）。"""
@@ -228,22 +248,10 @@ class ScreenerCache:
     # ---- dividend_snapshot ----
 
     def upsert_dividend(self, d: DividendSnapshot):
-        with self._conn() as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO dividend_snapshot "
-                "(code, real_yield, ttm_yield, real_yield_year, ttm_period, total_dividend, ttm_dividend, dividend_source, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (d.code, d.real_yield, d.ttm_yield, d.real_yield_year, d.ttm_period,
-                 d.total_dividend, d.ttm_dividend, d.dividend_source, d.updated_at),
-            )
+        self._upsert_rows("dividend_snapshot", [d])
 
     def get_dividend(self, code: str) -> Optional[DividendSnapshot]:
-        with self._conn() as conn:
-            row = conn.execute(
-                "SELECT code, real_yield, ttm_yield, real_yield_year, ttm_period, total_dividend, ttm_dividend, dividend_source, updated_at "
-                "FROM dividend_snapshot WHERE code=?", (code,)
-            ).fetchone()
-        return DividendSnapshot(*row) if row else None
+        return self._get_row("dividend_snapshot", code)
 
     def is_dividend_stale(self, code: str, max_age_days: int = 30) -> bool:
         """股息按 max_age_days 判定过期（默认低频/年报季）。"""
@@ -251,98 +259,80 @@ class ScreenerCache:
 
     # ---- finance_snapshot ----
 
-    _FINANCE_SELECT = (
-        "SELECT code, roe_latest, roe_period, net_profit_annual, payout_ratio, "
-        "roe_5y_median, is_cyclical, finance_source, updated_at "
-    )
-
-    @staticmethod
-    def _finance_from_row(row) -> FinanceSnapshot:
-        f = FinanceSnapshot(*row)
-        if f.is_cyclical is not None:  # SQLite INTEGER → bool（保持 dataclass 契约）
-            f = replace(f, is_cyclical=bool(f.is_cyclical))
-        return f
-
     def upsert_finance(self, f: FinanceSnapshot):
-        with self._conn() as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO finance_snapshot "
-                "(code, roe_latest, roe_period, net_profit_annual, payout_ratio, "
-                " roe_5y_median, is_cyclical, finance_source, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (f.code, f.roe_latest, f.roe_period, f.net_profit_annual,
-                 f.payout_ratio, f.roe_5y_median, f.is_cyclical,
-                 f.finance_source, f.updated_at),
-            )
+        self._upsert_rows("finance_snapshot", [f])
 
     def get_finance(self, code: str) -> Optional[FinanceSnapshot]:
-        with self._conn() as conn:
-            row = conn.execute(
-                self._FINANCE_SELECT + "FROM finance_snapshot WHERE code=?", (code,)
-            ).fetchone()
-        return self._finance_from_row(row) if row else None
+        return self._get_row("finance_snapshot", code)
 
     def is_finance_stale(self, code: str, max_age_days: int = 30) -> bool:
         return self._is_stale("finance_snapshot", code, max_age_days)
+
+    # ---- sustainability_snapshot ----
+
+    def upsert_sustainability(self, s: SustainabilitySnapshot):
+        self._upsert_rows("sustainability_snapshot", [s])
+
+    def get_sustainability(self, code: str) -> Optional[SustainabilitySnapshot]:
+        return self._get_row("sustainability_snapshot", code)
+
+    def is_sustainability_stale(self, code: str, max_age_days: int = 30) -> bool:
+        """可持续性预缓存按 max_age_days 判定过期（默认 30 天，覆盖财报季）。"""
+        return self._is_stale("sustainability_snapshot", code, max_age_days)
 
     # ---- 批量读（性能优化：一次读全表，替代逐股查询）----
 
     def get_all_quotes(self) -> Dict[str, QuoteSnapshot]:
         """一次读全表行情 → {code: QuoteSnapshot}。"""
-        with self._conn() as conn:
-            rows = conn.execute(
-                "SELECT code, name, price, pe_ttm, pb, total_shares, market_cap, quote_time, source, updated_at "
-                "FROM quote_snapshot").fetchall()
-        return {r[0]: QuoteSnapshot(*r) for r in rows}
+        return self._all_rows("quote_snapshot")
 
     def get_all_dividends(self) -> Dict[str, DividendSnapshot]:
         """一次读全表股息 → {code: DividendSnapshot}。"""
-        with self._conn() as conn:
-            rows = conn.execute(
-                "SELECT code, real_yield, ttm_yield, real_yield_year, ttm_period, total_dividend, ttm_dividend, dividend_source, updated_at "
-                "FROM dividend_snapshot").fetchall()
-        return {r[0]: DividendSnapshot(*r) for r in rows}
+        return self._all_rows("dividend_snapshot")
 
     def get_all_finance(self) -> Dict[str, FinanceSnapshot]:
         """一次读全表财务 → {code: FinanceSnapshot}。"""
-        with self._conn() as conn:
-            rows = conn.execute(self._FINANCE_SELECT + "FROM finance_snapshot").fetchall()
-        return {r[0]: self._finance_from_row(r) for r in rows}
+        return self._all_rows("finance_snapshot")
 
     def get_all_sustainability(self) -> Dict[str, SustainabilitySnapshot]:
         """一次读全表可持续性快照 → {code: SustainabilitySnapshot}。"""
-        with self._conn() as conn:
-            rows = conn.execute(
-                "SELECT code, financial_rows, cashflow_rows, dividend_rows, industry, "
-                "price_change_1y, top10_holding, source, updated_at "
-                "FROM sustainability_snapshot").fetchall()
-        return {r[0]: SustainabilitySnapshot(*r) for r in rows}
+        return self._all_rows("sustainability_snapshot")
 
-    # ---- sustainability_snapshot ----
+    # ---- 通用读写（表声明驱动，新增表只加一条 _TABLES 记录）----
 
-    def upsert_sustainability(self, s: SustainabilitySnapshot):
+    def _spec(self, table: str) -> "_TableSpec":
+        try:
+            return self._TABLES[table]
+        except KeyError:
+            raise ValueError(f"未声明的快照表: {table}") from None
+
+    def _upsert_rows(self, table: str, rows: List):
+        if not rows:
+            return
+        spec = self._spec(table)
+        cols = ", ".join(spec.columns)
+        marks = ", ".join("?" * len(spec.columns))
         with self._conn() as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO sustainability_snapshot "
-                "(code, financial_rows, cashflow_rows, dividend_rows, industry, "
-                " price_change_1y, top10_holding, source, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (s.code, s.financial_rows, s.cashflow_rows, s.dividend_rows, s.industry,
-                 s.price_change_1y, s.top10_holding, s.source, s.updated_at),
+            conn.executemany(
+                f"INSERT OR REPLACE INTO {spec.name} ({cols}) VALUES ({marks})",
+                [tuple(getattr(r, c) for c in spec.columns) for r in rows],
             )
 
-    def get_sustainability(self, code: str) -> Optional[SustainabilitySnapshot]:
+    def _get_row(self, table: str, code: str):
+        spec = self._spec(table)
         with self._conn() as conn:
             row = conn.execute(
-                "SELECT code, financial_rows, cashflow_rows, dividend_rows, industry, "
-                "price_change_1y, top10_holding, source, updated_at "
-                "FROM sustainability_snapshot WHERE code=?", (code,)
+                f"SELECT {', '.join(spec.columns)} FROM {spec.name} WHERE code=?", (code,)
             ).fetchone()
-        return SustainabilitySnapshot(*row) if row else None
+        return spec.row(row) if row else None
 
-    def is_sustainability_stale(self, code: str, max_age_days: int = 30) -> bool:
-        """可持续性预缓存按 max_age_days 判定过期（默认 30 天，覆盖财报季）。"""
-        return self._is_stale("sustainability_snapshot", code, max_age_days)
+    def _all_rows(self, table: str) -> Dict[str, object]:
+        spec = self._spec(table)
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT {', '.join(spec.columns)} FROM {spec.name}"
+            ).fetchall()
+        return {r[0]: spec.row(r) for r in rows}
 
     # ---- helpers ----
 

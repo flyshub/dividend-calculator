@@ -417,3 +417,38 @@ class TestSnapshotTableDeclarations:
         cache = ScreenerCache(tmp_path / "s.db")
         counts = cache.stale_counts(max_age_days=30, tables=REFRESH_TABLES)
         assert set(counts) == set(REFRESH_TABLES)
+
+
+class TestTableSpec:
+    """表的列清单由 dataclass 派生；DDL 顺序必须与之一致，否则整行解包错位。"""
+
+    def test_schema_column_order_matches_dataclass(self, tmp_path):
+        from dataclasses import fields
+        from src.screener_cache import ScreenerCache
+        cache = ScreenerCache(tmp_path / "s.db")
+        for table, spec in ScreenerCache._TABLES.items():
+            with cache._conn() as conn:
+                ddl_cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
+            assert ddl_cols == list(spec.columns), table
+            assert list(spec.columns) == [f.name for f in fields(spec.row_type)], table
+
+    def test_unknown_table_rejected(self, tmp_path):
+        import pytest as _pytest
+        from src.screener_cache import ScreenerCache
+        with _pytest.raises(ValueError, match="未声明的快照表"):
+            ScreenerCache(tmp_path / "s.db")._get_row("no_such_table", "600900")
+
+    def test_all_tables_are_declared(self, tmp_path):
+        from src.screener_cache import ScreenerCache
+        cache = ScreenerCache(tmp_path / "s.db")
+        assert set(cache.tables()) == set(ScreenerCache._TABLES)
+
+    def test_bool_roundtrip(self, tmp_path):
+        """is_cyclical INTEGER → bool 的转换只有一处（_TableSpec.bool_fields）。"""
+        from src.screener_cache import ScreenerCache
+        cache = ScreenerCache(tmp_path / "s.db")
+        cache.upsert_finance(FinanceSnapshot(code="601318", roe_latest=13.2,
+                                             roe_period="2025", net_profit_annual=1e9,
+                                             payout_ratio=0.3, is_cyclical=True))
+        assert cache.get_finance("601318").is_cyclical is True
+        assert cache.get_all_finance()["601318"].is_cyclical is True
