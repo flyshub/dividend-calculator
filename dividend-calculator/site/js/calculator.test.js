@@ -919,3 +919,82 @@ test('computeDividendYields 末月 = 分红总额 ÷ (月末价 × 当前总股�
   assert.equal(out[0].yield, round2(0.8 * S_AT_PAY / (25.0 * S_NOW) * 100));
   assert.notEqual(out[0].yield, round2(0.8 / 25.0 * 100));  // 与每股口径不同（增发导致）
 });
+
+// ---- 月度价格多源降级（腾讯 → 东财 push2his）----
+/* 2026-11-16 实测：腾讯 fqkline 限频时返回 WAF HTML，fetch 拿到非 JSON →
+ * 走势图取不到数据。东财 klt=103 作退路，双口径与腾讯一致。 */
+function stubFetch(handler) {
+  const orig = global.fetch;
+  const urls = [];
+  global.fetch = function (url) {
+    urls.push(String(url));
+    return handler(String(url));
+  };
+  return { urls, restore: () => { global.fetch = orig; } };
+}
+
+test('fetchMonthlyPrices 腾讯成功时不打东财', async () => {
+  const st = stubFetch(u => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve({
+      data: { sh601318: { qfqmonth: [['2026-10-30', '0', '53.80']], month: [['2026-10-30', '0', '62.40']] } },
+    }),
+  }));
+  try {
+    const rows = await DS.fetchMonthlyPrices('601318', 120);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].close, 53.8);
+    assert.equal(rows[0].close_nominal, 62.4);
+    assert.ok(!st.urls.some(u => u.includes('push2his')));
+  } finally { st.restore(); }
+});
+
+test('fetchMonthlyPrices 腾讯抛错（WAF HTML→JSON 解析失败）→ 东财双口径', async () => {
+  const st = stubFetch(u => {
+    if (u.includes('push2his')) {
+      const qfq = u.endsWith('fqt=1');
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          data: { klines: qfq ? ['2026-10-30,53.80', '2026-11-28,55.10'] : ['2026-10-30,62.40', '2026-11-28,55.10'] },
+        }),
+      });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.reject(new SyntaxError('Unexpected token <')) });
+  });
+  try {
+    const rows = await DS.fetchMonthlyPrices('601318', 120);
+    assert.deepEqual(rows.map(r => r.date), ['2026-10-30', '2026-11-28']);
+    assert.deepEqual(rows.map(r => r.close), [53.8, 55.1]);          // 前复权
+    assert.deepEqual(rows.map(r => r.close_nominal), [62.4, 55.1]);  // 不复权
+  } finally { st.restore(); }
+});
+
+test('fetchMonthlyPrices 腾讯返回空数组 → 东财；东财不复权失败仍出价格线', async () => {
+  const st = stubFetch(u => {
+    if (u.includes('push2his')) {
+      if (u.endsWith('fqt=1')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: { klines: ['2026-11-28,55.10', '2026-10-30,0'] } }) });
+      }
+      return Promise.resolve({ ok: false, status: 502, json: () => Promise.resolve({}) });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: {} }) });
+  });
+  try {
+    const rows = await DS.fetchMonthlyPrices('601318', 120);
+    assert.equal(rows.length, 1);            // 非正价被丢弃
+    assert.equal(rows[0].close, 55.1);
+    assert.equal(rows[0].close_nominal, null);  // 宁缺毋假
+  } finally { st.restore(); }
+});
+
+test('fetchMonthlyPricesEastmoney 按 months 截取最近 N 根', async () => {
+  const klines = [];
+  for (let i = 1; i <= 20; i++) klines.push(`20${String(10 + i).padStart(2, '0')}-01-31,${i}.0`);
+  const st = stubFetch(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ data: { klines } }) }));
+  try {
+    const rows = await DS.fetchMonthlyPricesEastmoney('000651', 5);
+    assert.equal(rows.length, 5);
+    assert.equal(rows[rows.length - 1].close, 20);  // 升序，取最近
+  } finally { st.restore(); }
+});

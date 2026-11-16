@@ -146,7 +146,7 @@ CSV/JSON 按 **90 天保留周期**自动清理；DB 快照表**不做时间裁�
 | 数据          | 主数据源                                          | 备用                               |
 | ----------- | --------------------------------------------- | -------------------------------- |
 | 实时价格 + 总股本  | 腾讯行情                                          | 新浪(价) → mootdx finance           |
-| K线（走势图）     | 腾讯 fqkline                                    | mootdx bars                      |
+| K线（走势图）     | 腾讯 fqkline                                    | 东财 push2his klt=103 → mootdx bars |
 | PE_TTM / PB | 腾讯行情                                          | akshare 同花顺(EPS 推算) → 东方财富 push2 |
 | 总股本         | 腾讯 Index 73                                   | mootdx finance                   |
 | 除权除息 / 分红   | akshare fhps_detail_em（东财 datacenter，按报告期判财年） | akshare cninfo → mootdx xdxr     |

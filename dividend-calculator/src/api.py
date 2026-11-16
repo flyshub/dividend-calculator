@@ -123,9 +123,75 @@ def _get_monthly_prices_tencent(stock_code: str) -> list:
         return []
 
 
+def _get_monthly_prices_eastmoney(stock_code: str, count: int = 120) -> list:
+    """东财 push2his 月度 K 线（备选源，腾讯 WAF 限频时的退路）。
+
+    双口径同腾讯：fqt=1 前复权（画图）+ fqt=0 不复权（走势图股息率名义价）。
+    东财 klt=103 返回全历史（平安 235 个月、格力 355 个月），按 count 截取最近
+    count 个月，与腾讯 120 根窗口保持一致。字段 f51=日期、f53=收盘。
+    不复权请求失败仅 close_nominal=None（该段股息率 null，价格线仍可画）。"""
+    try:
+        import requests
+
+        market = "1" if stock_code.startswith("6") else "0"
+        base = (
+            "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+            f"?secid={market}.{stock_code}&fields1=f1,f2,f3&fields2=f51,f53"
+            "&klt=103&beg=0&end=20500101&fqt="
+        )
+        headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://quote.eastmoney.com/"}
+
+        def _fetch(fqt: str) -> dict:
+            resp = requests.get(base + fqt, headers=headers, timeout=10)
+            if resp.status_code != 200:
+                return {}
+            payload = (resp.json() or {}).get("data") or {}
+            out = {}
+            for line in payload.get("klines") or []:
+                parts = str(line).split(",")
+                if len(parts) < 2:
+                    continue
+                try:
+                    out[parts[0]] = float(parts[1])
+                except ValueError:
+                    continue
+            return out
+
+        qfq = _fetch("1")
+        if not qfq:
+            logger.warning("东财K线接口无月度数据: %s", stock_code)
+            return []
+        try:
+            nominal = _fetch("0")
+        except Exception as e:  # 不复权仅影响股息率，不该拖垮价格线
+            logger.debug("东财不复权月度价获取失败 %s: %s", stock_code, e)
+            nominal = {}
+
+        results = []
+        for date_str in sorted(qfq)[-count:]:
+            close = qfq[date_str]
+            if close <= 0:
+                continue
+            results.append(MonthlyPrice(
+                date=date_str,
+                close=close,
+                close_nominal=nominal.get(date_str),
+            ))
+
+        logger.debug("东财K线获取月度价格 %s: %d 条", stock_code, len(results))
+        return results
+    except Exception as e:
+        logger.warning("东财K线获取月度价格失败 %s: %s", stock_code, e)
+        return []
+
+
 def _get_monthly_prices(stock_code: str) -> list:
     """获取近120个月（10年）月度收盘价（前复权），多数据源自动降级"""
     results = _get_monthly_prices_tencent(stock_code)
+    if results:
+        return results
+
+    results = _get_monthly_prices_eastmoney(stock_code)
     if results:
         return results
 

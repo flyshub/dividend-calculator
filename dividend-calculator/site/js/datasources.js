@@ -56,7 +56,50 @@
    * 与除权时点名义分红直接相除会口径错配）。不复权请求失败时 close_nominal=null
    * （股息率该段断线，价格线仍可画，宁缺毋假）。
    * 返回 [{date:'YYYY-MM-DD', close, close_nominal}] 升序 */
+  /* ── 东财月度K线（push2his，腾讯 WAF 限频时的退路）──
+   * 实测腾讯 fqkline 限频时返回 WAF HTML 页面而非 JSON（2026-11-16），该源整体失效；
+   * 东财 klt=103 返回全历史（平安 235 个月），按 months 取最近 N 根，与腾讯窗口一致。
+   * 双口径同腾讯：fqt=1 前复权 + fqt=0 不复权（CORS 已验证，Origin 直接回显）。 */
+  function fetchMonthlyPricesEastmoney(stockCode, months) {
+    months = months || 120;
+    var secid = (stockCode[0] === '6' ? '1.' : '0.') + stockCode;
+    function get(fqt) {
+      var url = 'https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=' + secid +
+        '&fields1=f1,f2,f3&fields2=f51,f53&klt=103&beg=0&end=20500101&fqt=' + fqt;
+      return jsonFetch(url).then(function (d) {
+        var map = {};
+        var list = ((d || {}).data || {}).klines || [];
+        list.forEach(function (line) {
+          var p = String(line).split(',');
+          var v = Number(p[1]);
+          if (p.length >= 2 && isFinite(v) && v > 0) map[p[0]] = v;
+        });
+        return map;
+      });
+    }
+    return Promise.all([
+      get(1),
+      get(0).catch(function () { return {}; }),
+    ]).then(function (res) {
+      var qfq = res[0], nominal = res[1];
+      var dates = Object.keys(qfq).sort().slice(-months);
+      return dates.map(function (date) {
+        return { date: date, close: qfq[date], close_nominal: nominal[date] != null ? nominal[date] : null };
+      });
+    });
+  }
+
+  /* 月度价格：腾讯 → 东财（单一出口，调用方不感知数据源） */
   function fetchMonthlyPrices(stockCode, months) {
+    return fetchMonthlyPricesTencent(stockCode, months).then(function (rows) {
+      if (rows && rows.length) return rows;
+      return fetchMonthlyPricesEastmoney(stockCode, months);
+    }).catch(function () {
+      return fetchMonthlyPricesEastmoney(stockCode, months);
+    });
+  }
+
+  function fetchMonthlyPricesTencent(stockCode, months) {
     months = months || 120;
     var prefix = stockCode[0] === '6' ? 'sh' : 'sz';
     var key = prefix + stockCode;
@@ -273,6 +316,8 @@
   return {
     fetchTencentQuote: fetchTencentQuote,
     fetchMonthlyPrices: fetchMonthlyPrices,
+    fetchMonthlyPricesTencent: fetchMonthlyPricesTencent,
+    fetchMonthlyPricesEastmoney: fetchMonthlyPricesEastmoney,
     fetchDividendRecords: fetchDividendRecords,
     fetchFinancials: fetchFinancials,
     fetchCashflow: fetchCashflow,
