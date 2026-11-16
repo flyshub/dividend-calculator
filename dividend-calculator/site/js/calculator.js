@@ -708,7 +708,7 @@
   var SUS_WARN = { payout_over_100: 1.0, price_drop: -0.30, special_div: 2.0, holding: 0.50, high_payout: 0.80 };
   var FINANCE_INDUSTRIES = ['银行', '保险'];
   var DEFENSIVE_INDUSTRIES = [
-    '公用事业', '电力', '水务', '燃气', '高速公路', '铁路', '港口', '机场',
+    '公用事业', '电力行业', '水务', '燃气', '高速公路', '铁路', '港口', '机场',
     '食品饮料', '白酒', '乳品', '家电', '医药', '超市', '运营商', '电信',
   ];
 
@@ -1212,5 +1212,7 @@
     CYCLICAL_INDUSTRIES: CYCLICAL_INDUSTRIES,
     TECH_INDUSTRIES: TECH_INDUSTRIES,
     GROWTH_INDUSTRIES: GROWTH_INDUSTRIES,
+    DEFENSIVE_INDUSTRIES: DEFENSIVE_INDUSTRIES,
+    FINANCE_INDUSTRIES: FINANCE_INDUSTRIES,
   };
 }));

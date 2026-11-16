@@ -78,6 +78,10 @@ N 因子 = 50% / 股利支付率，区间 [1.0, 2.0]（支付率 ≥50% → N=1.
 
 > 修正市赚率仅适用 ROE 稳定+分红大方的价值股；周期/科技/成长股不适用（页面按周期>科技>成长优先级警示）。周期股 PB-市赚率用 5 年 ROE 中位数（抗单年失真）；漏斗③ 对周期股用 5 年 ROE 中位数算基础 PR。
 
+> 📌 **行业关键词唯一来源 = `src/industry_policy.py`**（周期/科技/成长/防御/金融五组 + 两个分类函数）。`pr_calculator`、`sustainability_calculator` 只做 import，页面镜像是 `site/js/calculator.js` 顶部同名数组。词条一律是**子串匹配**，所以取「能唯一指认该行业的最短专名」：`'电力行业'` 而不是 `'电力'`（否则东财标签「电力设备-电源设备-太阳能」会被误判成防御性行业——#149 实测过的真实漂移，已修正 JS），`'化工'` 则要保留（东财「基础化工-化学制品」靠它）。新增关键词只改 industry_policy，双端一致性由 `scripts/policy_parity.check_industry_keywords` 兜底（`verify_js_vs_python.py` 每次运行都会打印 `[policy]` 段落）。
+
+> 📌 **页面阈值唯一来源 = `site/js/policy.js` 的 `PR_ZONE_CUTOFFS`**，其数值镜像 `pr_calculator` 的 `PR_UNDERVALUED_MAX / PR_FAIR_LOW_MAX / PR_FAIR_MAX`（回测 `backtest_pr.PR_BUCKETS` 的边界与标签也由这三个常量派生）。页面文案不写死阈值：静态段落用 `<span data-policy="fair_low|undervalued|fair_max" data-format="int|one-decimal">` 占位由 policy.js 填充，脚本拼装文字用 `PRPolicy.zoneLegend()`。改阈值只需改 Python 常量 + policy.js 镜像，`check_pr_cutoffs` 会在 CI 里拦住漏改。
+
 ## 关键约束
 
 ### 🚫 数据铁律（最高优先级）

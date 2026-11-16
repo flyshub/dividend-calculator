@@ -6,6 +6,7 @@
   <title>真实股息率计算器</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232e5be6'/%3E%3Ctext x='16' y='22' font-size='17' text-anchor='middle' fill='%23fff' font-family='-apple-system,sans-serif'%3E息%3C/text%3E%3C/svg%3E">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <script src="js/policy.js"></script>
   <script src="js/calculator.js"></script>
   <script src="js/datasources.js"></script>
   <script src="js/app.js"></script>
@@ -987,7 +988,7 @@
             <div id="pr-roe" class="value value--lg"></div>
           </div>
         </div>
-        <div class="tip tip--backtest">回测提示（2016-2024 沪深300）：市赚率用于<b>避贵</b> + <b>选低估值</b>——PR&gt;3 组年均跑输基准 5pct+，PR≤1（低估+合理偏低）超额 +4%+，最低 PR 组有 alpha（+6.2%，行业中性化后仍成立）。</div>
+        <div class="tip tip--backtest">回测提示（2016-2024 沪深300）：市赚率用于<b>避贵</b> + <b>选低估值</b>——PR&gt;<span data-policy="fair_max" data-format="int">3</span> 组年均跑输基准 5pct+，PR≤<span data-policy="fair_low" data-format="int">1</span>（低估+合理偏低）超额 +4%+，最低 PR 组有 alpha（+6.2%，行业中性化后仍成立）。</div>
         <div class="tip tip--applicability">
           <div class="tip__title">适用性 · 修正市赚率（N 因子版）</div>
           <ul class="appl-list">
@@ -1461,7 +1462,7 @@
       h += '</div>';
       h += '<div class="tip tip--backtest">';
       h += '<div class="tip__title">估值与口径</div>';
-      h += '<div class="formula-line">估值区间（判定口径）: <b>' + (d.valuation_zone || '无') + '</b>（市赚率≤0.5低估，0.5-1.0合理偏低，1.0-3.0合理，&gt;3.0高估）</div>';
+      h += '<div class="formula-line">估值区间（判定口径）: <b>' + (d.valuation_zone || '无') + '</b>（' + PRPolicy.zoneLegend() + '）</div>';
       h += '<div class="formula-line">判定用: <b>' + fmtNum(d.roe_judge, 2) + '% → ' + fmtNum(d.pr_judge, 3) + '</b>' + (d.is_cyclical && d.roe_5y_median != null ? '（周期股用 5 年 ROE 中位数）' : '（最新年报 ROE）') + '——与选股器漏斗③ 同一口径</div>';
       h += '<div class="formula-line">口径: PE 为 TTM（含最新季报），ROE 为最新年报（' + (d.roe_period || '未知报告期') + '）——ROE 仅定期披露无实时值，与 PE 组合是市赚率公式的定义口径</div>';
       h += '</div>';

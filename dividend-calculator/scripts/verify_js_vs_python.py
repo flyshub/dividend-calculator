@@ -410,6 +410,20 @@ def close(a, b):
     return a == b
 
 
+def policy_parity_problems() -> list:
+    """结构性校验：关键词集合与档位切点的双端一致性（issues #149 / #151）。
+
+    字段值比对看不见「集合成员差异」与「页面文案写死阈值」，这两类由
+    scripts/policy_parity.py 独立检查。
+    """
+    from scripts.policy_parity import check_industry_keywords, check_pr_cutoffs
+
+    site = PROJECT_ROOT / "site" / "js"
+    calculator_js = (site / "calculator.js").read_text(encoding="utf-8")
+    policy_js = (site / "policy.js").read_text(encoding="utf-8")
+    return check_industry_keywords(calculator_js) + check_pr_cutoffs(policy_js)
+
+
 def main():
     codes = sys.argv[1:] or ["600900", "600987", "600919", "600887", "600019", "601012"]
     print(f"对比股票: {codes}")
@@ -467,6 +481,16 @@ def main():
             print(f"\n[{code}] {js.get('stock_name')} — OK  (股息率 {round(js.get('dividend_yield_before_tax', 0) or 0, 4)}%)")
 
     print("\n" + ("✔ 全部字段一致" if ok else "✘ 存在差异，见上"))
+
+    print("\n[policy] 行业关键词 / 估值档位切点双端一致性")
+    problems = policy_parity_problems()
+    if problems:
+        ok = False
+        for p in problems:
+            print(f"  ✘ {p}")
+    else:
+        print("  ✔ 一致")
+
     return 0 if ok else 1
 
 

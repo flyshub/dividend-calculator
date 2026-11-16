@@ -43,6 +43,14 @@ import pandas as pd
 warnings.filterwarnings("ignore")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.pr_calculator import (  # noqa: E402  档位切点唯一来源（issue #151）
+    PR_FAIR_LOW_MAX,
+    PR_FAIR_MAX,
+    PR_UNDERVALUED_MAX,
+)
+
 DB_PATH = PROJECT_ROOT / "data" / "backtest.db"
 CONSTITUENTS_CSV = PROJECT_ROOT / "data" / "csi300.csv"  # 历史成分源，首次自动下载
 CONSTITUENTS_URL = "https://raw.githubusercontent.com/unliftedq/index-constitution/master/history/csi300.csv"
@@ -362,11 +370,21 @@ def analyze_panel(points: list) -> dict:
 # P1 增强（issue #53 T6/T7）：绝对 PR 区间 + 行业中性化
 # ---------------------------------------------------------------------------
 
+# 档位边界与标签由 src/pr_calculator 的切点派生（issue #151）：改阈值只改一处，
+# 回测报告的分组口径自动跟随，不会与页面档位说两套话。
+def _cut(x: float) -> str:
+    return f"{x:g}"
+
+
 PR_BUCKETS = [
-    ("低估(≤0.5)", 0.0, 0.5),
-    ("合理偏低(0.5-1)", 0.5, 1.0),
-    ("合理(1-3)", 1.0, 3.0),
-    ("高估(>3)", 3.0, float("inf")),
+    (f"低估(≤{_cut(PR_UNDERVALUED_MAX)})",
+     0.0, PR_UNDERVALUED_MAX),
+    (f"合理偏低({_cut(PR_UNDERVALUED_MAX)}-{_cut(PR_FAIR_LOW_MAX)})",
+     PR_UNDERVALUED_MAX, PR_FAIR_LOW_MAX),
+    (f"合理({_cut(PR_FAIR_LOW_MAX)}-{_cut(PR_FAIR_MAX)})",
+     PR_FAIR_LOW_MAX, PR_FAIR_MAX),
+    (f"高估(>{_cut(PR_FAIR_MAX)})",
+     PR_FAIR_MAX, float("inf")),
 ]
 
 

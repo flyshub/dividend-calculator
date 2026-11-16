@@ -6,28 +6,14 @@
 """
 from typing import Optional, Tuple
 
-CYCLICAL_INDUSTRIES = {
-    "煤炭", "钢铁", "有色金属", "石油", "化工", "航运", "建材",
-    "水泥", "玻璃", "造纸", "养殖", "房地产", "工程机械", "船舶",
-    "化肥", "农药", "化纤", "橡胶", "塑料",
-    "证券", "券商", "保险",
-}
-
-TECH_INDUSTRIES = {
-    "半导体", "软件", "互联网", "计算机", "通信", "电子",
-    "芯片", "人工智能", "云计算", "大数据",
-}
-
-# 成长行业：高利润增速 + 高再投资（低分红）。修正市赚率对成长股不适用——
-# 高成长需留存利润，分红率低导致 N 因子被压到 2.0、修正 PR 失真（丁宁原版定义）。
-# 与 TECH 去重（半导体/芯片/人工智能等归科技）。
-GROWTH_INDUSTRIES = {
-    "新能源", "光伏", "太阳能", "锂电", "储能", "风电", "氢能", "新能源汽车",
-    "军工", "国防", "机器人", "工业机器人", "智能驾驶", "卫星导航",
-    "生物医药", "创新药", "CXO", "医疗器械", "医美",
-    "新材料", "碳纤维", "复合材料",
-    "算力", "数据中心", "大模型",
-}
+# 行业关键词与判定来自 src/industry_policy.py（唯一来源，issue #149）。
+# 此处保留同名导入，兼容既有 `from src.pr_calculator import CYCLICAL_INDUSTRIES`。
+from src.industry_policy import (  # noqa: E402  （常量区后置导入，保持文件原结构）
+    CYCLICAL_INDUSTRIES,
+    GROWTH_INDUSTRIES,
+    TECH_INDUSTRIES,
+    classify_pr_industry,
+)
 
 
 def compute_basic_pr(pe_ttm: Optional[float], roe: Optional[float]) -> Optional[float]:
@@ -120,9 +106,7 @@ def classify_industry(industry: str) -> Tuple[bool, bool, bool, str]:
 
     优先级：周期 > 科技 > 成长（重叠时只报最优先的一类）。
     """
-    is_cyclical = any(kw in industry for kw in CYCLICAL_INDUSTRIES)
-    is_tech = any(kw in industry for kw in TECH_INDUSTRIES)
-    is_growth = any(kw in industry for kw in GROWTH_INDUSTRIES)
+    is_cyclical, is_tech, is_growth = classify_pr_industry(industry)
 
     if is_cyclical:
         warning = "该股属于周期行业，修正市赚率仅供参考；建议优先参考PB-市赚率"

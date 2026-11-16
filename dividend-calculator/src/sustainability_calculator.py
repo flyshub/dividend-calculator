@@ -67,10 +67,6 @@ WARN_SPECIAL_DIV_MULTIPLE = 2.0  # 当年分红 > 近3年均值 × 2.0（避免�
 WARN_HOLDING_CONCENTRATION = 0.50  # 前十大持股 > 50%
 WARN_HIGH_PAYOUT = 0.80        # 高派息门槛（情境画像用）
 
-# 银行/保险行业关键词
-FINANCE_INDUSTRIES = ("银行", "保险")
-
-
 # ---------------------------------------------------------------------------
 # 输入数据结构（纯函数消费，与数据源字段名解耦）
 # ---------------------------------------------------------------------------
@@ -449,28 +445,20 @@ def check_warning_flags(latest: AnnualFinancial,
 # 编排：assess_sustainability
 # ---------------------------------------------------------------------------
 
-# 防御性行业（现金流稳定，高分红可持续性更强）
-# 关键词用专名（#42 L3）：'电力行业' 而非 '电力'，避免 '电力设备' 被误判防御；
-# '化工行业' 而非 '化工'，避免 '化学制药' 被误判周期。
-DEFENSIVE_INDUSTRIES = (
-    "公用事业", "电力行业", "水务", "燃气", "高速公路", "铁路", "港口", "机场",
-    "食品饮料", "白酒", "乳品", "家电", "医药", "超市", "运营商", "电信",
-)
-
-CYCLICAL_INDUSTRIES = (
-    "煤炭", "钢铁", "有色金属", "石油", "化工", "航运", "建材",
-    "水泥", "玻璃", "造纸", "养殖", "房地产", "工程机械", "船舶",
-    "化肥", "农药", "化纤", "橡胶", "塑料",
-    "证券", "券商", "保险",
+# 行业关键词来自 src/industry_policy.py（唯一来源，issue #149）。
+# 历史教训：这里曾用 '电力行业'、JS 用 '电力'，导致「电力设备」在浏览器端被
+# 误判成防御性行业。词条与判定集中在 industry_policy，双端由校验脚本比对。
+from src.industry_policy import (  # noqa: E402
+    CYCLICAL_INDUSTRIES,
+    DEFENSIVE_INDUSTRIES,
+    FINANCE_INDUSTRIES,
+    classify_sustainability_industry,
 )
 
 
 def _classify_industry(industry: str) -> Tuple[bool, bool, bool]:
     """返回 (is_bank, is_cyclical, is_defensive)。"""
-    is_bank = any(kw in industry for kw in FINANCE_INDUSTRIES)
-    is_cyclical = any(kw in industry for kw in CYCLICAL_INDUSTRIES)
-    is_defensive = any(kw in industry for kw in DEFENSIVE_INDUSTRIES)
-    return is_bank, is_cyclical, is_defensive
+    return classify_sustainability_industry(industry)
 
 
 def _score_by_branch(latest: AnnualFinancial, history: DividendHistory,

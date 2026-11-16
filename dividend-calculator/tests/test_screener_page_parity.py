@@ -5,7 +5,8 @@
 页面来源仅 site/，原双端逐字节一致校验已随 src/static/ 一并退役）：
   1. 口径卡列出的四漏斗阈值/区间与 screening.py 默认值一致（改默认值必须同步页面）；
   2. 口径卡确实存在（防误删）；
-  3. 'PR ≤ 1.0' 边界与 classify_valuation 的 1.0 边界一致。
+  3. 'PR ≤ 1.0' 这条边界来自 site/js/policy.js（不再写死在 HTML 散文里），
+     且 policy.js 的切点由 scripts/policy_parity.py 与 pr_calculator 对账。
 """
 from pathlib import Path
 
@@ -46,10 +47,17 @@ def test_pr_zone_and_sus_verdict_match_screening_defaults():
             assert verdict in html, f"{page} 缺少可持续性判定 {verdict}"
 
 
-def test_pr_le_1_boundary_matches_classify_valuation():
-    """口径卡 'PR ≤ 1.0' 与 classify_valuation 的 1.0 边界一致（防边界漂移）。"""
+def test_pr_le_1_boundary_comes_from_policy_module():
+    """PR≤1 的边界改由 policy.js 提供（issue #151），HTML 只留占位。
+
+    双端数值一致性由 scripts/policy_parity.check_pr_cutoffs 负责；
+    这里守的是「页面确实用占位、不再写死整句阈值」。
+    """
     for page in PAGES:
-        assert "PR ≤ 1.0" in _read(page), f"{page} 缺少 PR ≤ 1.0 表述"
+        html = _read(page)
+        assert 'data-policy="fair_low"' in html, f"{page} 未使用 policy.js 占位"
+        assert "PR ≤ 1.0（" not in html, f"{page} 仍写死阈值整句"
+    assert "PR_ZONE_CUTOFFS" in _read("site/js/policy.js")
     # 语义对账：1.0 仍落在 {低估,合理偏低}（含边界），1.01 即离开
     assert classify_valuation(1.0) in DEFAULT_PR_ZONE
     assert classify_valuation(1.01) not in DEFAULT_PR_ZONE
