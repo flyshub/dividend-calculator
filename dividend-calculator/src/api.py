@@ -8,7 +8,7 @@ import logging
 import math
 from typing import Optional, Tuple
 
-from .datasource.base import StockInfo, MonthlyPrice, DividendRecord, HistoricalData
+from .datasource.base import StockInfo, DividendRecord, HistoricalData
 from .datasource import get_data_source_manager
 from .datasource.validation import check_stock_info
 from .tencent_quote import fetch_tencent_quote

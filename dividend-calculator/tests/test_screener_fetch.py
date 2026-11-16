@@ -201,3 +201,26 @@ class TestPolicySingleSource:
         assert sig.parameters["min_ttm"].default == sc.DEFAULT_MIN_TTM
         assert sig.parameters["pr_zone"].default == sc.DEFAULT_PR_ZONE
         assert sig.parameters["sus_verdict"].default == sc.DEFAULT_SUS_VERDICT
+    def test_cli_defaults_flow_into_run_screener(self):
+        """CLI 没传参数时，run_screener 收到的就是 screening 的常量。"""
+        from unittest.mock import patch
+
+        import src.screening as sc
+        import src.screener as scr
+
+        captured = {}
+
+        def fake_run(cache, **kw):
+            captured.update(kw)
+            return scr.FunnelResult(stage_counts=[0, 0, 0, 0], candidates=[])
+
+        with patch.object(scr, "ScreenerCache"), \
+             patch.object(scr, "run_screener", fake_run), \
+             patch.object(scr, "build_output_rows", return_value=[]), \
+             patch.object(scr, "write_csv"), \
+             patch("sys.argv", ["screener"]):
+            assert scr.main() == 0
+        assert captured["min_ttm"] == sc.DEFAULT_MIN_TTM
+        assert captured["min_real"] == sc.DEFAULT_MIN_REAL
+        assert captured["pr_zone"] == sc.DEFAULT_PR_ZONE
+        assert captured["sus_verdict"] == sc.DEFAULT_SUS_VERDICT

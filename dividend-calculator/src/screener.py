@@ -164,12 +164,14 @@ def write_csv(rows: List[dict], output: str):
 def main():
     parser = argparse.ArgumentParser(description="全 A 股息率+市赚率+可持续性选股器")
     parser.add_argument("--output", default="", help="CSV 输出路径（默认 data/screener/screener_<时间戳>.csv；'-'=stdout）")
-    parser.add_argument("--min-ttm-yield", type=float, default=5.0, help="TTM 股息率阈值（默认 5）")
-    parser.add_argument("--min-real-yield", type=float, default=5.0, help="真实股息率阈值（默认 5）")
-    parser.add_argument("--pr-zone", nargs="+", default=["合理偏低", "低估"],
-                        help="保留的估值区间（默认 合理偏低 低估）")
-    parser.add_argument("--sus-verdict", nargs="+", default=["可持续", "偏弱"],
-                        help="保留的可持续性结论（默认 可持续 偏弱）")
+    parser.add_argument("--min-ttm-yield", type=float, default=DEFAULT_MIN_TTM,
+                        help=f"TTM 股息率阈值（默认 {DEFAULT_MIN_TTM:g}）")
+    parser.add_argument("--min-real-yield", type=float, default=DEFAULT_MIN_REAL,
+                        help=f"真实股息率阈值（默认 {DEFAULT_MIN_REAL:g}）")
+    parser.add_argument("--pr-zone", nargs="+", default=list(DEFAULT_PR_ZONE),
+                        help=f"保留的估值区间（默认 {' '.join(DEFAULT_PR_ZONE)}）")
+    parser.add_argument("--sus-verdict", nargs="+", default=list(DEFAULT_SUS_VERDICT),
+                        help=f"保留的可持续性结论（默认 {' '.join(DEFAULT_SUS_VERDICT)}）")
     parser.add_argument("--refresh", choices=["quotes", "dividend", "all", "none"],
                         default="quotes", help="增量刷新范围（默认仅行情）")
     parser.add_argument("--limit", type=int, default=0, help="调试：只扫前 N 只")
