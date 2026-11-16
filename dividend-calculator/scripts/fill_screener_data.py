@@ -17,7 +17,6 @@
 """
 import argparse
 import json
-import os
 import sys
 import time
 from dataclasses import asdict
@@ -182,8 +181,6 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    code = main()
-    # 显式硬退出：mootdx/tdxpy 心跳线程会拖住进程（见 src/screener.py 同款说明）
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(code)
+    from src.cli_exit import hard_exit
+
+    hard_exit(main())

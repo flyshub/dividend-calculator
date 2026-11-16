@@ -14,7 +14,6 @@ financial_rows / cashflow_rows / dividend_rows / industry / price_change_1y / to
     python scripts/prefetch_sustainability.py --all-a       # 拉全部有股息数据的
 """
 import argparse
-import os
 import sys
 import time
 from pathlib import Path
@@ -75,8 +74,6 @@ def main():
 
 
 if __name__ == "__main__":
-    code = main()
-    # 显式硬退出：mootdx/tdxpy 心跳线程会拖住进程（见 src/screener.py 同款说明）
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(code)
+    from src.cli_exit import hard_exit
+
+    hard_exit(main())

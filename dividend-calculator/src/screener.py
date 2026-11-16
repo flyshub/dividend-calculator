@@ -14,7 +14,6 @@
 """
 import argparse
 import csv
-import os
 import sys
 from pathlib import Path
 from typing import List
@@ -193,9 +192,6 @@ def main():
 
 
 if __name__ == "__main__":
-    code = main()
-    # 显式硬退出：mootdx/tdxpy 会留下非 daemon 的心跳线程，正常退出会被拖死
-    # （2026-11 事故：每日任务输出结果后挂到 6h 上限才被杀，故障表现成「超时」）。
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(code)
+    from src.cli_exit import hard_exit
+
+    hard_exit(main())
