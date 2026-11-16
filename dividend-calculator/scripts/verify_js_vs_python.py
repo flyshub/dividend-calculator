@@ -170,7 +170,7 @@ def compute_python(raw: dict) -> dict:
     from src.pr_calculator import (
         compute_basic_pr, compute_corrected_pr, compute_n_factor,
         compute_pb_pr, compute_tsr, classify_industry,
-        judge_pr,
+        judge_pr, select_judge_roe,
     )
 
     quote = raw["quote"]
@@ -227,7 +227,7 @@ def compute_python(raw: dict) -> dict:
         pr_basic = compute_basic_pr(quote["pe_ttm"], roe)
         pr_corrected = compute_corrected_pr(quote["pe_ttm"], roe, n_factor)
         # 周期股 PB-市赚率用 5 年 ROE 中位数（对齐 JS computePr）
-        roe_for_pb = fin["roe_5y_median"] if (is_cyclical and fin["roe_5y_median"] is not None) else roe
+        roe_for_pb = select_judge_roe(roe, fin["roe_5y_median"], is_cyclical)
         pr_pb = compute_pb_pr(quote["pb"], roe_for_pb)
         # 判定口径：基础 PR + 周期股 5 年中位数 ROE（与 JS judgePR / 选股器共用）
         roe_judge, pr_judge, zone = judge_pr(quote["pe_ttm"], roe, fin["roe_5y_median"], is_cyclical)

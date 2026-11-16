@@ -33,11 +33,14 @@ from src.backtest_factors import (
 
 DB_PATH = "data/backtest.db"
 
-# 四层漏斗阈值（对齐 src/screening.py 口径）
-TTM_YIELD_THRESHOLD = 5.0   # TTM 股息率 > 5%
-REAL_YIELD_THRESHOLD = 5.0  # 真实股息率 > 5%
-PR_THRESHOLD = 1.0          # 市赚率 ≤ 1（低估/合理偏低）
-SUSTAINABLE_VERDICTS = ("可持续", "偏弱")
+# 四层漏斗阈值——直接引用 src 的唯一来源（此前是第二份手抄）
+from src.pr_calculator import PR_FAIR_LOW_MAX
+from src.screening import DEFAULT_MIN_REAL, DEFAULT_MIN_TTM, DEFAULT_SUS_VERDICT
+
+TTM_YIELD_THRESHOLD = DEFAULT_MIN_TTM     # TTM 股息率 > 5%
+REAL_YIELD_THRESHOLD = DEFAULT_MIN_REAL   # 真实股息率 > 5%
+PR_THRESHOLD = PR_FAIR_LOW_MAX            # 市赚率 ≤ 1（低估/合理偏低）
+SUSTAINABLE_VERDICTS = DEFAULT_SUS_VERDICT
 
 
 def _d(s: str) -> date:

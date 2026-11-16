@@ -30,6 +30,7 @@ from .pr_calculator import (
     classify_valuation,
     classify_industry,
     judge_pr,
+    select_judge_roe,
 )
 from .eastmoney_fetcher import fetch_industry as fetch_eastmoney_industry
 
@@ -540,7 +541,7 @@ def calculate_pr(
 
     # 周期股 PB-市赚率用 5 年 ROE 中位数（对齐市赚率定义：周期股单年 ROE 失真，
     # 用多年 ROE 平滑；丁宁原版用均值，本项目用中位数抗单年极端值）
-    roe_for_pb = roe_5y_median if (is_cyclical and roe_5y_median is not None) else roe_for_calc
+    roe_for_pb = select_judge_roe(roe_for_calc, roe_5y_median, is_cyclical)
 
     if not is_loss_stock and pe_ttm is not None and roe_for_calc is not None and roe_for_calc > 0:
         pr_basic = compute_basic_pr(pe_ttm, roe_for_calc)

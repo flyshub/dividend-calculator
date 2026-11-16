@@ -20,6 +20,10 @@ from pathlib import Path
 from typing import List
 
 from src.screening import (
+    DEFAULT_MIN_REAL,
+    DEFAULT_MIN_TTM,
+    DEFAULT_PR_ZONE,
+    DEFAULT_SUS_VERDICT,
     FIELDS,
     FunnelCandidate,
     FunnelConfig,
@@ -58,10 +62,10 @@ def _load_stock_list(cache: ScreenerCache) -> List[str]:
 def run_screener(
     cache: ScreenerCache,
     *,
-    min_ttm: float = 5.0,
-    min_real: float = 5.0,
-    pr_zone: List[str] = ("合理偏低", "低估"),
-    sus_verdict: List[str] = ("可持续", "偏弱"),
+    min_ttm: float = DEFAULT_MIN_TTM,
+    min_real: float = DEFAULT_MIN_REAL,
+    pr_zone: List[str] = DEFAULT_PR_ZONE,
+    sus_verdict: List[str] = DEFAULT_SUS_VERDICT,
     refresh_quotes: bool = True,
     limit: int = 0,
 ) -> FunnelResult:

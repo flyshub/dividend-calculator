@@ -8,9 +8,11 @@ from typing import Callable, List, Optional
 from src.pr import PRResult
 from src.pr_calculator import judge_pr
 from src.screener_cache import FinanceSnapshot, ScreenerCache
+from src.screening import DEFAULT_PR_ZONE
 
-# 估值四档中选股器保留的两档（V2 回测证实 PR≤1 有超额）
-PR_ZONE_KEEP = ("合理偏低", "低估")
+# 估值四档中选股器保留的两档（V2 回测证实 PR≤1 有超额）。
+# 别名指向 screening 的常量，避免第二份定义漂移。
+PR_ZONE_KEEP = DEFAULT_PR_ZONE
 
 
 def compute_pr(pe_ttm: Optional[float], fin: FinanceSnapshot) -> Optional[float]:

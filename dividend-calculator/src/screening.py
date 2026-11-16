@@ -20,7 +20,8 @@ from src.pr_calculator import (
 )
 from src.screener_cache import DividendSnapshot, FinanceSnapshot, QuoteSnapshot
 
-# 默认阈值（与 spec #67 / 页面口径卡一致，page-parity 测试引用）
+# 漏斗默认阈值——全项目唯一来源：CLI 默认值、批量评估、回测脚本都从这里取
+# （与 spec #67 / 页面口径卡一致，page-parity 测试引用）
 DEFAULT_MIN_TTM = 5.0
 DEFAULT_MIN_REAL = 5.0
 DEFAULT_PR_ZONE = ("合理偏低", "低估")

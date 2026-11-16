@@ -12,10 +12,10 @@ import sys
 from src.screener_rate_limit import batch_wait
 from src.screener_cache import ScreenerCache, DividendSnapshot
 from src.screener_fetch import DEFAULT_MAX_CONSECUTIVE_FAILURES, fetch_or_default
-from src.screening import FunnelCandidate
+from src.screening import DEFAULT_SUS_VERDICT, FunnelCandidate
 
-# 漏斗④ 保留的 verdict（可持续 + 偏弱）
-SUS_VERDICT_KEEP = ("可持续", "偏弱")
+# 漏斗④ 保留的 verdict（可持续 + 偏弱）——别名指向 screening 的常量
+SUS_VERDICT_KEEP = DEFAULT_SUS_VERDICT
 
 # 单股可持续性取数超时（秒）：数据源无响应时降级为「未评估」，不拖死每日任务
 SUS_FETCH_TIMEOUT = 120.0

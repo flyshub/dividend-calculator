@@ -160,3 +160,44 @@ class TestFetchOrDefault:
 
         assert fetch_or_default("a", boom, label="可持续性",
                                 timeout_s=1.0, default="未评估") == "未评估"
+
+
+class TestPolicySingleSource:
+    """漏斗阈值只有一份定义（src/screening），其余位置引用它。"""
+
+    def test_screener_pr_alias_points_to_screening(self):
+        import src.screening as sc
+        import src.screener_pr as spr
+        assert spr.PR_ZONE_KEEP is sc.DEFAULT_PR_ZONE
+
+    def test_sustainability_alias_points_to_screening(self):
+        import src.screening as sc
+        import src.screener_sustainability as ss
+        assert ss.SUS_VERDICT_KEEP is sc.DEFAULT_SUS_VERDICT
+
+    def test_backtest_engine_uses_screening_thresholds(self):
+        import src.screening as sc
+        import scripts.backtest_engine as be
+        from src.pr_calculator import PR_FAIR_LOW_MAX
+        assert be.TTM_YIELD_THRESHOLD == sc.DEFAULT_MIN_TTM
+        assert be.REAL_YIELD_THRESHOLD == sc.DEFAULT_MIN_REAL
+        assert be.PR_THRESHOLD == PR_FAIR_LOW_MAX == 1.0
+        assert be.SUSTAINABLE_VERDICTS == sc.DEFAULT_SUS_VERDICT
+
+    def test_classify_valuation_uses_named_cutoffs(self):
+        from src.pr_calculator import (
+            PR_FAIR_LOW_MAX, PR_FAIR_MAX, PR_UNDERVALUED_MAX, classify_valuation,
+        )
+        assert classify_valuation(PR_UNDERVALUED_MAX) == "低估"
+        assert classify_valuation(PR_FAIR_LOW_MAX) == "合理偏低"
+        assert classify_valuation(PR_FAIR_MAX) == "合理"
+        assert classify_valuation(PR_FAIR_MAX + 0.01) == "高估"
+
+    def test_screener_cli_defaults_match_screening(self):
+        import inspect
+        import src.screening as sc
+        from src.screener import run_screener
+        sig = inspect.signature(run_screener)
+        assert sig.parameters["min_ttm"].default == sc.DEFAULT_MIN_TTM
+        assert sig.parameters["pr_zone"].default == sc.DEFAULT_PR_ZONE
+        assert sig.parameters["sus_verdict"].default == sc.DEFAULT_SUS_VERDICT

@@ -90,6 +90,13 @@ def compute_tsr(roe_latest: Optional[float], roe_5y_median: Optional[float],
     return round((roe - real_yield_pct * pb) + real_yield_pct, 2)
 
 
+# 估值四档阈值（回测标定：docs/BACKTEST_REPORT_V3.md）。页面文案与回测脚本
+# 引用这里的数字，不再各自硬编码。
+PR_UNDERVALUED_MAX = 0.5    # ≤0.5 低估
+PR_FAIR_LOW_MAX = 1.0       # 0.5–1.0 合理偏低（回测 L3 的入选线）
+PR_FAIR_MAX = 3.0           # 1.0–3.0 合理，>3.0 高估
+
+
 def classify_valuation(pr: Optional[float]) -> str:
     """估值四档分类。
 
@@ -99,11 +106,11 @@ def classify_valuation(pr: Optional[float]) -> str:
     """
     if pr is None:
         return "无法判定"
-    if pr <= 0.5:
+    if pr <= PR_UNDERVALUED_MAX:
         return "低估"
-    if pr <= 1.0:
+    if pr <= PR_FAIR_LOW_MAX:
         return "合理偏低"
-    if pr <= 3.0:
+    if pr <= PR_FAIR_MAX:
         return "合理"
     return "高估"
 
