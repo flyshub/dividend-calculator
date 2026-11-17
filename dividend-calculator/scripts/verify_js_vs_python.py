@@ -41,10 +41,15 @@ FIELDS_NUMERIC = [
     "sustainability_free_cash_flow", "sustainability_debt_ratio",
     "sustainability_interest_coverage", "sustainability_consecutive_years",
     "sustainability_payout_ratio",
+    # 下一年度前瞻股息率：纯函数两端对账
+    "forward_year", "forward_eps", "forward_payout_assumed", "forward_dps",
+    "forward_yield_before_tax", "forward_coverage",
 ]
+
 FIELDS_STR = ["dividend_year", "valuation_zone", "pr_warning", "industry", "is_loss_stock", "explanation",
               "sustainability_verdict", "sustainability_explanation",
               "ttm_period", "ttm_source", "roe_period",
+              "forward_eps_kind", "forward_status", "forward_warnings",
               "is_cyclical", "is_tech", "is_growth"]
 
 
@@ -148,6 +153,18 @@ def fetch_cashflow_rows(code: str) -> list:
     return (d.get("result") or {}).get("data") or []
 
 
+def fetch_forecast_rows(code: str):
+    """东财券商一致预期行：无覆盖 → []，HTTP 异常 → None（与 fetch_earnings_forecast 同语义）。"""
+    url = ("https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_WEB_RESPREDICT"
+           f"&columns=ALL&filter=(SECURITY_CODE%3D%22{code}%22)&pageNumber=1&pageSize=5")
+    try:
+        r = _get(url)
+        d = r.json()
+    except Exception:
+        return None
+    return (d.get("result") or {}).get("data") or []
+
+
 def fetch_raw(code: str) -> dict:
     return {
         "quote": fetch_tencent_quote(code),
@@ -155,6 +172,7 @@ def fetch_raw(code: str) -> dict:
         "financial_rows": fetch_financial_rows(code),
         "cashflow_rows": fetch_cashflow_rows(code),
         "industry": fetch_industry(code),
+        "forecast_rows": fetch_forecast_rows(code),
     }
 
 
@@ -235,6 +253,22 @@ def compute_python(raw: dict) -> dict:
     total_market_cap = quote["price"] * total_shares
     yld = (total_div / total_market_cap * 100) if total_market_cap > 0 else 0.0
 
+    # 4b. 下一年度前瞻股息率：与 JS computeForwardYield 消费同一批原始行
+    from src.forward_yield import (
+        compute_forward_yield, dividend_totals_by_year, net_profit_by_year,
+    )
+    from src.sustainability import parse_financial_rows
+    fwd = compute_forward_yield(
+        price=quote["price"],
+        latest_year=year,
+        yearly_dividend_totals=dividend_totals_by_year(summary.records, total_shares),
+        net_profit_by_year_map=net_profit_by_year(parse_financial_rows(raw["financial_rows"])),
+        forecast_rows=raw.get("forecast_rows"),
+        is_cyclical=is_cyclical,
+        trailing_yield=yld,
+        total_shares=total_shares,
+    )
+
     # 5. 股息可持续性（与 JS assessSustainability 相同算法，纯函数消费相同 raw）
     # JS 端 computeFromRaw 仅在 yields[0] > 4 时调用 assessSustainability，
     # 故 yield ≤ 阈值时 sustainability 为 None（镜像该门控）。
@@ -301,6 +335,17 @@ def compute_python(raw: dict) -> dict:
         "sustainability_verdict": sus_verdict,
         "sustainability_score": sus_score,
         "sustainability_score_100": sus.score_100 if sus else None,
+        # 下一年度前瞻股息率（模型估算，仅展示）
+        "forward_year": fwd.forward_year,
+        "forward_eps": fwd.forward_eps,
+        "forward_eps_kind": fwd.forward_eps_kind,
+        "forward_payout_assumed": fwd.forward_payout_assumed,
+        "forward_dps": fwd.forward_dps,
+        "forward_yield_before_tax": fwd.forward_yield_before_tax,
+        "forward_coverage": fwd.forward_coverage,
+        "forward_status": fwd.forward_status,
+        # 警示集合对账：文案一致性也纳入，防止两端规则漂移
+        "forward_warnings": sorted(fwd.forward_warnings or []),
     }
     # 衍生指标拍平（sus 可能为 None，对应字段也为 None，双端一致）
     sus_m = sus.metrics if sus else {}
@@ -444,6 +489,8 @@ def main():
         if not raw["financial_rows"]:
             print(f"[{code}] 财务数据为空，verify 结果不可信")
             return 2
+        fc = raw.get("forecast_rows")
+        print(f"[{code}] 一致预期: " + ("取数失败" if fc is None else f"{len(fc)} 行"))
 
         # 修正表出口校验（CI 防护）：东财已知错误行（如长电 2015 年度 10派1.2946→4）
         # 必须在取数出口被替换，防止修正表/应用逻辑回归

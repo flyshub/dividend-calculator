@@ -998,3 +998,222 @@ test('fetchMonthlyPricesEastmoney 按 months 截取最近 N 根', async () => {
     assert.equal(rows[rows.length - 1].close, 20);  // 升序，取最近
   } finally { st.restore(); }
 });
+
+// ---- computeForwardYield（对齐 tests/test_forward_yield.py，同输入同期望）----
+const FWD_SHARES = 1.0e9;
+
+function fwdForecast(eps2026 = 66.0, coverage = 20, mark = 'E', base = 2025) {
+  return [{
+    YEAR1: base, YEAR_MARK1: 'A', EPS1: 40.0,  // 40e9 / 1e9 股，与基准年净利一致
+    YEAR2: base + 1, YEAR_MARK2: mark, EPS2: eps2026,
+    RATING_ORG_NUM: coverage,
+  }];
+}
+
+function fwdInputs(over) {
+  const base = {
+    price: 1000.0,
+    totalShares: FWD_SHARES,
+    latestYear: 2025,
+    yearlyDividendTotals: { 2025: 30e9, 2024: 28.5e9, 2023: 27e9 },
+    netProfitByYear: { 2025: 40e9, 2024: 38e9, 2023: 36e9, 2026: 44e9 },
+    forecast_rows: fwdForecast(),
+    isCyclical: false,
+    trailingYield: null,
+  };
+  return Object.assign(base, over || {});
+}
+
+function approx(a, b, eps) {
+  assert.ok(Math.abs(a - b) <= (eps || 1e-9), `${a} != ${b}`);
+}
+
+test('computeForwardYield 正常', () => {
+  const r = Calc.computeForwardYield(fwdInputs());
+  assert.equal(r.forward_year, 2026);
+  assert.equal(r.forward_eps_kind, 'E');
+  approx(r.forward_eps, 66.0);
+  approx(r.forward_payout_assumed, 0.75);
+  approx(r.forward_dps, 49.5);
+  approx(r.forward_yield_before_tax, 4.95);
+  assert.equal(r.forward_coverage, 20);
+  assert.equal(r.forward_status, 'ok');
+  assert.deepEqual(r.forward_warnings, []);
+  assert.equal(r.forward_note, '2026E EPS 66.00 × 支付率 75.0% ÷ 现价 1000.00');
+});
+
+test('computeForwardYield 两年样本取中位数均值', () => {
+  const r = Calc.computeForwardYield(fwdInputs({
+    yearlyDividendTotals: { 2025: 20e9, 2024: 40e9 },
+    netProfitByYear: { 2025: 40e9, 2024: 40e9 },
+  }));
+  approx(r.forward_payout_assumed, 0.75);
+  assert.equal(r.forward_status, 'ok');
+  assert.ok(r.forward_warnings.some(w => w.includes('样本不连续')));
+});
+
+test('computeForwardYield 最新年支付率>100% 仅警示不改变中位数', () => {
+  const r = Calc.computeForwardYield(fwdInputs({
+    yearlyDividendTotals: { 2025: 60e9, 2024: 28e9, 2023: 24e9 },
+    netProfitByYear: { 2025: 26.8e9, 2024: 40e9, 2023: 38e9 },
+  }));
+  approx(r.forward_payout_assumed, 0.70);
+  assert.ok(r.forward_warnings.some(w => w.includes('最新财年支付率 223.9% > 100%')));
+  assert.ok(r.forward_warnings.some(w => w.includes('偏离超 30 个百分点')));
+});
+
+test('computeForwardYield 基线 EPS×股本偏差在不估时仍警示', () => {
+  const r = Calc.computeForwardYield(fwdInputs({
+    yearlyDividendTotals: {},
+    netProfitByYear: { 2025: 40e9, 2024: 38e9, 2023: 36e9 },
+    totalShares: 1.5e9,
+  }));
+  assert.equal(r.forward_status, 'no_payout_history');
+  assert.ok(r.forward_warnings.some(w => w.includes('股本口径可能不一致')));
+});
+
+test('computeForwardYield 支付率趋势偏离>30pct 警示', () => {
+  const r = Calc.computeForwardYield(fwdInputs({
+    yearlyDividendTotals: { 2025: 16e9, 2024: 30e9, 2023: 30e9 },
+    netProfitByYear: { 2025: 40e9, 2024: 40e9, 2023: 40e9 },
+  }));
+  approx(r.forward_payout_assumed, 0.75);
+  assert.ok(r.forward_warnings.some(w => w.includes('分红政策可能变化')));
+  assert.equal(r.forward_status, 'ok');
+});
+
+test('computeForwardYield 中位数>100% 截断为 1.0', () => {
+  const r = Calc.computeForwardYield(fwdInputs({
+    yearlyDividendTotals: { 2025: 50e9, 2024: 45e9, 2023: 40e9 },
+    netProfitByYear: { 2025: 10e9, 2024: 10e9, 2023: 10e9 },
+  }));
+  assert.equal(r.forward_payout_assumed, 1.0);
+  assert.ok(r.forward_warnings.some(w => w.includes('截断为 100%')));
+  approx(r.forward_yield_before_tax, 6.6);
+});
+
+test('computeForwardYield 年报季 L 滞后→目标年 EPS 为 A', () => {
+  const r = Calc.computeForwardYield(fwdInputs({
+    latestYear: 2024,
+    yearlyDividendTotals: { 2024: 30e9, 2023: 28e9, 2022: 26e9 },
+    netProfitByYear: { 2024: 40e9, 2023: 38e9, 2022: 36e9, 2025: 44e9 },
+    forecast_rows: fwdForecast(66.0, 20, 'E', 2025),
+  }));
+  assert.equal(r.forward_year, 2025);
+  assert.equal(r.forward_eps_kind, 'A');
+});
+
+test('computeForwardYield 无完整财年', () => {
+  const r = Calc.computeForwardYield(fwdInputs({ latestYear: null }));
+  assert.equal(r.forward_year, null);
+  assert.equal(r.forward_status, 'no_complete_year');
+});
+
+test('computeForwardYield 无一致预期覆盖', () => {
+  const noCov = Calc.computeForwardYield(fwdInputs({ forecast_rows: [] }));
+  assert.equal(noCov.forward_status, 'no_coverage');
+  assert.equal(noCov.forward_year, 2026);  // 目标财年可确定，UI 显示「FY2026E 无预测」
+  assert.equal(noCov.forward_note, '无机构盈利预测，未做前瞻估算');
+});
+
+test('computeForwardYield 预测取数失败', () => {
+  const failed = Calc.computeForwardYield(fwdInputs({ forecast_rows: null }));
+  assert.equal(failed.forward_status, 'fetch_error');
+  assert.equal(failed.forward_note, '前瞻取数失败（盈利预测），稍后重试');
+});
+
+test('computeForwardYield 预测亏损不估', () => {
+  const r = Calc.computeForwardYield(fwdInputs({ forecast_rows: fwdForecast(-1.09) }));
+  assert.equal(r.forward_year, 2026);
+  assert.equal(r.forward_eps, null);
+  assert.equal(r.forward_status, 'no_positive_eps');
+  assert.equal(r.forward_note, '机构预测 2026 年亏损，不估股息率');
+});
+
+test('computeForwardYield 缺目标年预测', () => {
+  const rows = fwdForecast();
+  rows[0].YEAR2 = 2027;
+  const noTarget = Calc.computeForwardYield(fwdInputs({ forecast_rows: rows }));
+  assert.equal(noTarget.forward_year, 2026);
+  assert.equal(noTarget.forward_status, 'no_target_year');
+  assert.equal(noTarget.forward_note, '无 2026 年盈利预测');
+});
+
+test('computeForwardYield 近年无分红（基准年领先≥2）', () => {
+  const r = Calc.computeForwardYield(fwdInputs({
+    latestYear: 2023,
+    yearlyDividendTotals: { 2023: 10e9 },
+    netProfitByYear: { 2023: 10e9 },
+    forecast_rows: fwdForecast(66.0, 20, 'E', 2025),
+  }));
+  assert.equal(r.forward_status, 'stale');
+  assert.equal(r.forward_year, null);
+  assert.ok(r.forward_note.includes('近年无分红'));
+});
+
+test('computeForwardYield 无净利历史', () => {
+  const noHist = Calc.computeForwardYield(fwdInputs({ netProfitByYear: {} }));
+  assert.equal(noHist.forward_status, 'no_payout_history');
+  assert.equal(noHist.forward_note, '无可用分红历史，不做前瞻');
+});
+
+test('computeForwardYield 缺现价', () => {
+  const noPrice = Calc.computeForwardYield(fwdInputs({ price: null }));
+  assert.equal(noPrice.forward_status, 'missing_inputs');
+  assert.equal(noPrice.forward_note, '缺少现价，不做前瞻');
+});
+
+test('computeForwardYield 周期行业警示', () => {
+  const r = Calc.computeForwardYield(fwdInputs({ isCyclical: true }));
+  assert.ok(r.forward_warnings.some(w => w.includes('周期行业')));
+});
+
+test('computeForwardYield 低覆盖警示', () => {
+  const r = Calc.computeForwardYield(fwdInputs({ forecast_rows: fwdForecast(66.0, 2) }));
+  assert.ok(r.forward_warnings.some(w => w.includes('仅 2 家机构覆盖')));
+});
+
+test('computeForwardYield 与主口径偏离>50% 警示', () => {
+  const r = Calc.computeForwardYield(fwdInputs({ trailingYield: 10.0 }));
+  assert.ok(r.forward_warnings.some(w => w.includes('偏离超 50%')));
+});
+
+test('computeForwardYield 合理上限警示', () => {
+  const r = Calc.computeForwardYield(fwdInputs({
+    price: 100.0,
+    yearlyDividendTotals: { 2025: 50e9, 2024: 45e9, 2023: 40e9 },
+    netProfitByYear: { 2025: 10e9, 2024: 10e9, 2023: 10e9 },
+  }));
+  assert.ok(r.forward_warnings.some(w => w.includes('超合理上限')));
+});
+
+test('computeForwardYield A 类 EPS×股本与净利偏差>3% 警示', () => {
+  const r = Calc.computeForwardYield(fwdInputs({
+    latestYear: 2024,
+    totalShares: 1.2e9,
+    yearlyDividendTotals: { 2024: 30e9, 2023: 28e9, 2022: 26e9 },
+    netProfitByYear: { 2024: 40e9, 2023: 38e9, 2022: 36e9, 2025: 44e9 },
+    forecast_rows: fwdForecast(66.0, 20, 'E', 2025),
+  }));
+  assert.ok(r.forward_warnings.some(w => w.includes('股本口径可能不一致')));
+});
+
+test('parseFinancials 输出 netProfitByYear（仅年报行）', () => {
+  const fin = Calc.parseFinancials([
+    { REPORT_DATE: '2025-12-31', ROEJQ: 15.0, PARENTNETPROFIT: 40e9 },
+    { REPORT_DATE: '2025-09-30', ROEJQ: 11.0, PARENTNETPROFIT: 30e9 },
+    { REPORT_DATE: '2024-12-31', ROEJQ: 14.0, PARENTNETPROFIT: 38e9 },
+  ]);
+  assert.deepEqual(Object.keys(fin.netProfitByYear).sort(), ['2024', '2025']);
+  assert.equal(fin.netProfitByYear[2025], 40e9);
+});
+
+test('parseDividendRecords 输出 yearlyDividendTotals（逐笔登记股本）', () => {
+  const div = Calc.parseDividendRecords([
+    { REPORT_DATE: '2025-12-31', PRETAX_BONUS_RMB: 10.0, ASSIGN_PROGRESS: '实施',
+      EX_DIVIDEND_DATE: '2026-07-01', TOTAL_SHARES: 1.5e9 },
+    { REPORT_DATE: '2025-06-30', PRETAX_BONUS_RMB: 2.0, ASSIGN_PROGRESS: '实施',
+      EX_DIVIDEND_DATE: '2025-12-01', TOTAL_SHARES: null },
+  ], 1.0e9);
+  approx(div.yearlyDividendTotals[2025], 10.0 / 10 * 1.5e9 + 2.0 / 10 * 1.0e9);
+});

@@ -31,6 +31,7 @@
         /* #40: 情境红旗数据（被动高股息/输血式分红），失败传 null 降级，不阻塞主展示 */
         DS.fetchPriceChange1y(input),
         DS.fetchTop10Holding(input),
+        /* 前瞻股息率的一致预期不在此等待：主结果先渲染，预测到达后二次填充（P0-5） */
       ]);
     }).then(function (results) {
       return computeFromRaw({
@@ -41,7 +42,18 @@
         industry: results[4] || '未知行业',
         price_change_1y: results[5],
         top10_holding: results[6],
+        forecast_rows: undefined,  // 非阻塞：由 fetchForward 二次填充
       });
+    });
+  }
+
+  /* 前瞻取数 + 计算（主结果渲染后调用）：失败 → 降级为「取数失败」，不抛出 */
+  function fetchForward(inputs) {
+    if (!inputs || !inputs.stock_code) return Promise.resolve(null);
+    return DS.fetchEarningsForecast(inputs.stock_code).then(function (rows) {
+      return Calculator.computeForwardYield(Object.assign({}, inputs, { forecast_rows: rows }));
+    }).catch(function () {
+      return Calculator.computeForwardYield(Object.assign({}, inputs, { forecast_rows: null }));
     });
   }
 
@@ -99,6 +111,24 @@
       sustainability.explanation = Calculator.explainSustainability(sustainability);
     }
 
+    /* 下一财年前瞻股息率（模型估算，仅展示）：对齐 Python forward_yield.estimate_forward_yield
+     * forecast_rows === undefined 表示"尚未取数"（页面走非阻塞二次填充），不当作取数失败 */
+    var forwardInputs = {
+      stock_code: quote.stock_code,
+      price: quote.price,
+      totalShares: totalShares,
+      latestYear: div.year,
+      trailingYield: yields[0],
+      isCyclical: indClass.isCyclical,
+      yearlyDividendTotals: div.yearlyDividendTotals,
+      netProfitByYear: fin.netProfitByYear,
+    };
+    var forward = raw.forecast_rows === undefined
+      ? null
+      : Calculator.computeForwardYield(Object.assign({}, forwardInputs, {
+        forecast_rows: raw.forecast_rows,
+      }));
+
     return {
       stock_info: {
         stock_code: quote.stock_code,
@@ -125,6 +155,8 @@
           ? ttm.ttm_dividend / totalMarketCap * 100 : null,
         ttm_period: ttm.period,
         ttm_source: ttm.source,
+        /* 下一财年前瞻股息率（模型估算，仅展示，不进入判定） */
+        forward: forward,
       },
       pr: {
         pr_basic: pr.pr_basic,
@@ -153,6 +185,8 @@
         industry: industry,
       },
       sustainability: sustainability,
+      /* 页面非阻塞取数用：预测到达后按同一套输入计算（不进入上面的 JSON 字段） */
+      forward_inputs: forwardInputs,
     };
   }
 
@@ -160,5 +194,6 @@
     normalizeStockCode: normalizeStockCode,
     analyzeStock: analyzeStock,
     computeFromRaw: computeFromRaw,
+    fetchForward: fetchForward,
   };
 }));

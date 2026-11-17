@@ -11,6 +11,7 @@
   - 行业：RPT_F10_BASIC_ORGINFO（datacenter-web，EM2016 东财行业）
   - 前十大股东：RPT_F10_EH_HOLDERS（datacenter/securities，HOLD_NUM_RATIO 占比百分数）
   - 近1年涨跌幅：腾讯 fqkline 前复权日K（web.ifzq.gtimg.cn）
+  - 盈利预测：RPT_WEB_RESPREDICT（datacenter-web，券商一致预期 EPS1..4 + MARK1..4）
 
 严禁虚构数据：数据源不可用即返回空/None，由调用方显式标注缺失。
 """
@@ -62,6 +63,13 @@ _TOP10_URL = (
     "?reportName=RPT_F10_EH_HOLDERS&columns=ALL"
     '&filter=(SECUCODE%3D"{secucode}")&pageNumber=1&pageSize=10'
     "&sortTypes=-1&sortColumns=END_DATE"
+)
+
+# 东财盈利预测一致预期（datacenter-web，与页面直连同源；无覆盖时 result.data = null）
+_FORECAST_URL = (
+    "https://datacenter-web.eastmoney.com/api/data/v1/get"
+    "?reportName=RPT_WEB_RESPREDICT&columns=ALL"
+    '&filter=(SECURITY_CODE%3D"{code}")&pageNumber=1&pageSize=5'
 )
 
 def _fetch_eastmoney_rows(url: str, stock_code: str, label: str) -> List[dict]:
@@ -157,6 +165,50 @@ def _apply_dividend_fixes(rows: List[dict], stock_code: str) -> List[dict]:
     return rows
 
 
+FORECAST_NO_DATA_CODE = 9201  # 东财「返回数据为空」＝真·无覆盖，不是接口故障
+
+
+def _forecast_rows_from_payload(payload) -> Optional[List[dict]]:
+    """一致预期响应三分类：行列表 / []（无覆盖）/ None（取数失败）。
+
+    东财对「无机构覆盖」和「服务端错误」都返回 HTTP 200 + success=false，只能靠
+    code 区分：9201 = 返回数据为空（真实结论）；其他非 0 code（如 9501 参数错误）
+    是接口故障，必须报成取数失败，否则 UI 会把故障说成"无预测"。
+    """
+    if not payload:
+        return None
+    data = (payload.get("result") or {}).get("data")
+    if data:
+        return data
+    if payload.get("success") is True:
+        return []
+    if payload.get("code") == FORECAST_NO_DATA_CODE:
+        return []
+    return None
+
+
+def fetch_earnings_forecast(stock_code: str) -> Optional[List[dict]]:
+    """东财券商一致预期行（RPT_WEB_RESPREDICT）。
+
+    语义与 fetch_dividend_rows 对齐（#38 M5）：网络/HTTP/接口故障 → None（取数失败）；
+    请求成功但无覆盖 → []。字段：EPS1..4 为各年一致预期每股收益，YEAR1..4 为对应
+    财年，YEAR_MARK1..4 为 A（已披露）/E（预测），RATING_ORG_NUM 为覆盖机构数。
+    接口不提供分红预测——支付率需另行推算。
+    """
+    try:
+        resp = requests.get(_FORECAST_URL.format(code=stock_code), headers=_UA, timeout=15)
+        resp.raise_for_status()
+        payload = resp.json()
+    except Exception as e:
+        logger.warning("东财盈利预测接口获取失败 %s: %s", stock_code, e)
+        return None
+    rows = _forecast_rows_from_payload(payload)
+    if rows is None:
+        logger.warning("东财盈利预测接口异常 %s: code=%s %s", stock_code,
+                       payload.get("code"), str(payload.get("message"))[:40])
+    return rows
+
+
 def fetch_industry(stock_code: str) -> str:
     """东财行业字符串（EM2016 优先，降级 INDUSTRYCSRC1）。"""
     rows = _fetch_eastmoney_rows(_INDUSTRY_URL.format(secucode=_secucode(stock_code)),
@@ -214,6 +266,7 @@ __all__ = [
     "fetch_financial_rows",
     "fetch_cashflow_rows",
     "fetch_dividend_rows",
+    "fetch_earnings_forecast",
     "fetch_industry",
     "fetch_top10_holding",
     "fetch_price_change_1y",

@@ -28,6 +28,7 @@ _project_root = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _project_root)
 
 from src.analysis import run_stock_analysis
+from src.forward_yield import ForwardYieldResult
 from src.pr import PRResult
 from src.sustainability_calculator import SustainabilityResult, explain_sustainability
 
@@ -179,6 +180,25 @@ def _format_metrics_lines(metrics: dict) -> list:
     return lines
 
 
+def print_forward_yield(result: ForwardYieldResult):
+    """格式化输出下一年度前瞻股息率（模型估算，仅展示）。"""
+    print("  ── 下一年度前瞻股息率（模型估算）──")
+    if result.forward_yield_before_tax is None:
+        print(f"  不可估[{result.forward_status}]: {result.forward_note}")
+        print()
+        return
+    print(f"  前瞻股息率(含税): {result.forward_yield_before_tax:.2f}%  "
+          f"({result.forward_year}{result.forward_eps_kind})")
+    print(f"  EPS {result.forward_eps:.2f} × 支付率 {result.forward_payout_assumed * 100:.1f}%"
+          f" = 每股 {result.forward_dps:.2f} 元")
+    coverage = f"{result.forward_coverage} 家" if result.forward_coverage is not None else "未知"
+    print(f"  一致预期覆盖: {coverage} | 假设: {result.forward_payout_basis}")
+    for w in result.forward_warnings:
+        print(f"  ⚠️  {w}")
+    print("  注: 仅展示，不进入选股判据（免费源无历史一致预期快照，暂不可回测）")
+    print()
+
+
 def print_sustainability(yield_pct, result: SustainabilityResult):
     """格式化输出股息可持续性评估结果。"""
     print("=" * 60)
@@ -260,6 +280,10 @@ def main():
 
     # 输出
     print_result(result)
+
+    # 下一年度前瞻股息率（模型估算）
+    if analysis.forward_yield is not None:
+        print_forward_yield(analysis.forward_yield)
 
     # 股息可持续性（仅高股息率触发时输出）
     if analysis.sustainability is not None and analysis.sustainability.triggered:

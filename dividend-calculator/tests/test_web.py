@@ -297,3 +297,63 @@ class TestScreenerRoutes:
         with urllib.request.urlopen(f"{_server}/") as r:
             assert r.status == 200
             assert "真实股息率计算器" in r.read().decode("utf-8")
+
+
+# ---------------------------------------------------------------------------
+# /api/pr 前瞻股息率字段（docs/FORWARD_YIELD.md）：键名与页面约定固化
+# ---------------------------------------------------------------------------
+
+class TestForwardYieldRoute:
+    @pytest.fixture(autouse=True)
+    def _server(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), DividendRequestHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+        server.shutdown()
+        server.server_close()
+
+    def _fake_analysis(self, forward):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            pr_result=None,
+            dividend_yield_before_tax=3.44,
+            sustainability=None,
+            forward_yield=forward,
+        )
+
+    def test_pr_payload_includes_forward(self, _server, monkeypatch):
+        import src.web as web_module
+        from src.forward_yield import ForwardYieldResult
+
+        fwd = ForwardYieldResult(
+            forward_status="ok",
+            forward_year=2026, forward_eps=66.8, forward_eps_kind="E",
+            forward_payout_assumed=0.75, forward_dps=50.1,
+            forward_yield_before_tax=3.44, forward_coverage=43,
+            forward_note="2026E EPS 66.80 × 支付率 75.0% ÷ 现价 1457.70",
+        )
+        monkeypatch.setattr(web_module, "run_stock_analysis", lambda code: self._fake_analysis(fwd))
+        monkeypatch.setattr(web_module, "serialize_pr_result", lambda r: {"stock_code": "600519"})
+
+        with urllib.request.urlopen(f"{_server}/api/pr?stock=600519") as r:
+            body = json.loads(r.read().decode("utf-8"))
+
+        assert body["success"] is True
+        forward = body["data"]["forward"]
+        assert forward["forward_status"] == "ok"
+        assert forward["forward_year"] == 2026
+        assert forward["forward_eps_kind"] == "E"
+        assert forward["forward_yield_before_tax"] == 3.44
+        assert forward["forward_coverage"] == 43
+
+    def test_pr_payload_forward_null_when_not_estimated(self, _server, monkeypatch):
+        import src.web as web_module
+
+        monkeypatch.setattr(web_module, "run_stock_analysis", lambda code: self._fake_analysis(None))
+        monkeypatch.setattr(web_module, "serialize_pr_result", lambda r: {"stock_code": "000000"})
+
+        with urllib.request.urlopen(f"{_server}/api/pr?stock=000000") as r:
+            body = json.loads(r.read().decode("utf-8"))
+
+        assert body["data"]["forward"] is None

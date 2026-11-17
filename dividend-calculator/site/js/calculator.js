@@ -106,7 +106,7 @@
 
     var years = Object.keys(yearly).map(Number).sort(function (a, b) { return b - a; });
     if (!years.length) {
-      return { totalDividend: 0, year: null, details: [], explanation: '无有效分红数据', sustainabilityHistory: null };
+      return { totalDividend: 0, year: null, details: [], explanation: '无有效分红数据', sustainabilityHistory: null, yearlyDividendTotals: {} };
     }
 
     var target = null;
@@ -116,7 +116,7 @@
     /* 无年报（无完整财年）→ year=null、总额0，不退回最新有数据年份（对齐 Python
      * dividend_records：latest_year=None → fiscal_total=0） */
     if (!target) {
-      return { totalDividend: 0, year: null, details: [], explanation: '无有效分红数据', sustainabilityHistory: null };
+      return { totalDividend: 0, year: null, details: [], explanation: '无有效分红数据', sustainabilityHistory: null, yearlyDividendTotals: {} };
     }
 
     /* 明细按除权日升序（空串在前），与 Python summary.records 排序一致（#99） */
@@ -143,6 +143,8 @@
       totalDividend: totalDividend, year: String(target.year),
       details: target.details, explanation: explanation,
       sustainabilityHistory: susHistory,
+      /* 前瞻股息率用：{财年: 现金分红总额(元)}，与 Python dividend_totals_by_year 同口径 */
+      yearlyDividendTotals: susHistory.year_amounts || {},
     };
   }
 
@@ -361,7 +363,7 @@
     });
     var yearsSorted = Object.keys(yearAmount).map(Number).sort(function (a, b) { return b - a; });
     if (!yearsSorted.length) {
-      return { consecutive_years: 0, ever_cut: false, latest_year_amount: null, history_mean_amount: null };
+      return { consecutive_years: 0, ever_cut: false, latest_year_amount: null, history_mean_amount: null, year_amounts: {} };
     }
     /* 基准财年：优先传入的 targetYear（须在数据中），否则最新有分红年——对齐 Python target_year */
     var baseYear = (targetYear && yearAmount[targetYear] != null) ? parseInt(targetYear, 10) : yearsSorted[0];
@@ -401,6 +403,7 @@
       latest_year_amount: yearAmount[String(baseYear)] || null,
       history_mean_amount: historyMean,
       history_3y_mean: history3yMean,
+      year_amounts: yearAmount,
     };
   }
 
@@ -409,7 +412,7 @@
    * 可持续性字段（NETCASH_OPERATE_PK/NETCASH_INVEST_PK/LIABILITY/TOTAL_ASSETS_PK/
    * DEBT_ASSET_RATIO/INTEREST_DEBT_RATIO/INTEREST_COVERAGE_RATIO/银行专项）在 columns=ALL 已含。 */
   function parseFinancials(rows) {
-    if (!rows.length) return { roeLatest: null, roe5yMedian: null, roePeriod: null, netProfitTtm: null, netProfitAnnual: null, sustainabilityFin: null };
+    if (!rows.length) return { roeLatest: null, roe5yMedian: null, roePeriod: null, netProfitTtm: null, netProfitAnnual: null, netProfitByYear: {}, sustainabilityFin: null };
 
     /* 严格数值判断：空字符串/空白/null 视为缺失（Number('')===0 会污染中位数） */
     function toNum(v) {
@@ -480,10 +483,20 @@
     /* 可持续性财务：从年报行解析现金流/负债/银行专项（与 sustainability.py parse_financial_rows 同口径） */
     var sustainabilityFin = parseSustainabilityFin(rows, annual.length ? annual[0].year : null);
 
+    /* 前瞻股息率用：{财年: 归母净利润(元)}，仅 12-31 年报行（与 Python net_profit_by_year 同口径） */
+    var netProfitByYear = {};
+    for (var n = 0; n < rows.length; n++) {
+      var npDate = String(rows[n].REPORT_DATE || '').slice(0, 10);
+      if (npDate.length !== 10 || npDate.slice(5, 10) !== '12-31') continue;
+      var npVal = toNum(rows[n].PARENTNETPROFIT);
+      if (isFinite(npVal)) netProfitByYear[parseInt(npDate.slice(0, 4), 10)] = npVal;
+    }
+
     return {
       roeLatest: roeLatest, roe5yMedian: roe5yMedian,
       roePeriod: annual.length ? annual[0].year : null,
       netProfitTtm: netProfitTtm, netProfitAnnual: netProfitAnnual,
+      netProfitByYear: netProfitByYear,
       sustainabilityFin: sustainabilityFin,
     };
   }
@@ -549,6 +562,204 @@
     }
     if (capexByYear[fin.year] != null) fin.capex = capexByYear[fin.year];
     return fin;
+  }
+
+  /* ── 下一财年前瞻股息率（对齐 src/forward_yield.py，见 docs/FORWARD_YIELD.md）──
+   * 前瞻 = 下一财年 L+1 一致预期 EPS × 近 3 年支付率中位数 ÷ 现价。
+   * 支付率按年：Σ(每次 10派/10 × 该次登记股本) ÷ 当年归母净利（免疫送转）。
+   * 不可估（无预测/预测亏损/近年无分红）→ 字段全 null + forward_note。
+   * 仅展示，不进入选股判据（免费源无历史一致预期快照，暂不可回测）。 */
+  var FWD_PAYOUT_WINDOW = 3, FWD_MAX_PAYOUT = 1.0, FWD_TREND_DEVIATION = 0.30;
+  var FWD_FULL_COVERAGE = 3, FWD_STALE_GAP = 2, FWD_YIELD_DEVIATION = 0.5;
+  var FWD_YIELD_MAX = 15.0, FWD_EPS_NP_TOLERANCE = 0.03;
+
+  function _fwdNum(v) {
+    if (v == null || String(v).trim() === '') return null;
+    var n = Number(v);
+    return isFinite(n) ? n : null;
+  }
+
+  function _fwdMedian(values) {
+    /* Python statistics.median 语义：偶数个取中间两数均值 */
+    var s = values.slice().sort(function (a, b) { return a - b; });
+    var mid = Math.floor(s.length / 2);
+    if (s.length % 2) return s[mid];
+    return (s[mid - 1] + s[mid]) / 2;
+  }
+
+  /* 东财一致预期行 → {base_year, eps_by_year, mark_by_year, coverage}；无可用行返回 null。
+   * 实地验证：YEAR{i} 为财年，YEAR_MARK{i} 为标记（A 已披露 / E 预测）。 */
+  function _parseForecastRow(rows) {
+    if (!rows || !rows.length) return null;
+    for (var r = 0; r < rows.length; r++) {
+      var row = rows[r];
+      var epsByYear = {}, markByYear = {}, firstYear = null;
+      for (var i = 1; i <= 4; i++) {
+        var year = _fwdNum(row['YEAR' + i]);
+        if (year == null) continue;
+        year = Math.trunc(year);
+        if (firstYear == null) firstYear = year;
+        var mark = String(row['YEAR_MARK' + i] || '').trim().toUpperCase();
+        if (mark) markByYear[year] = mark;
+        var eps = _fwdNum(row['EPS' + i]);
+        if (eps != null) epsByYear[year] = eps;
+      }
+      if (!Object.keys(epsByYear).length) continue;
+      var baseYear = null;
+      Object.keys(markByYear).forEach(function (y) {
+        if (markByYear[y] === 'A' && epsByYear[y] != null) {
+          var yi = parseInt(y, 10);
+          if (baseYear == null || yi > baseYear) baseYear = yi;
+        }
+      });
+      if (baseYear == null) baseYear = firstYear != null ? firstYear : Math.min.apply(null, Object.keys(epsByYear).map(Number));
+      var cov = _fwdNum(row.RATING_ORG_NUM);
+      return {
+        base_year: baseYear, eps_by_year: epsByYear, mark_by_year: markByYear,
+        coverage: cov == null ? null : Math.trunc(cov),
+      };
+    }
+    return null;
+  }
+
+  function computeForwardYield(input) {
+    var price = input.price, totalShares = input.totalShares;
+    var isCyclical = !!input.isCyclical;
+    var trailingYield = input.trailingYield;
+    var res = {
+      forward_status: null, forward_year: null, forward_eps: null, forward_eps_kind: null,
+      forward_payout_assumed: null, forward_payout_basis: '',
+      forward_payout_samples: [], forward_dps: null,
+      forward_yield_before_tax: null, forward_coverage: null,
+      forward_source: '', forward_warnings: [], forward_note: '',
+    };
+
+    var latest = _fwdNum(input.latestYear);
+    if (latest == null) { res.forward_status = 'no_complete_year'; res.forward_note = '无完整财年分红，不做前瞻'; return res; }
+    latest = Math.trunc(latest);
+    /* 契约：目标财年可确定时就给出，UI 才能显示「FY2026E 无预测」 */
+    res.forward_year = latest + 1;
+
+    if (input.forecast_rows == null) {
+      res.forward_status = 'fetch_error';
+      res.forward_note = '前瞻取数失败（盈利预测），稍后重试';
+      return res;
+    }
+    var forecast = _parseForecastRow(input.forecast_rows);
+    if (!forecast) { res.forward_status = 'no_coverage'; res.forward_note = '无机构盈利预测，未做前瞻估算'; return res; }
+
+    res.forward_coverage = forecast.coverage;
+    res.forward_source = '东财一致预期';
+    /* 股本口径守卫：用基准年（MARK='A'）的 EPS 校验 EPS×股本 ≈ 归母净利 */
+    Array.prototype.push.apply(res.forward_warnings,
+      _fwdEpsShareWarnings(forecast, input.netProfitByYear || {}, totalShares));
+
+    if (forecast.base_year - latest >= FWD_STALE_GAP) {
+      res.forward_status = 'stale';
+      res.forward_year = null;  /* latest+1 已是过去年份，不能当前瞻财年 */
+      res.forward_note = '近年无分红（一致预期已到 ' + forecast.base_year + ' 年，最新分红财年 ' +
+        latest + '），不做前瞻';
+      return res;
+    }
+
+    var forwardYear = res.forward_year;
+    var eps = forecast.eps_by_year[forwardYear];
+    if (eps == null) {
+      res.forward_status = 'no_target_year';
+      res.forward_note = '无 ' + forwardYear + ' 年盈利预测';
+      return res;
+    }
+    res.forward_eps = eps;
+    res.forward_eps_kind = forecast.mark_by_year[forwardYear] === 'A' ? 'A' : 'E';
+    if (eps <= 0) {
+      res.forward_eps = null;
+      res.forward_eps_kind = null;
+      res.forward_status = 'no_positive_eps';
+      res.forward_note = '机构预测 ' + forwardYear + ' 年亏损，不估股息率';
+      return res;
+    }
+
+    var yearly = input.yearlyDividendTotals || {};
+    var npByYear = input.netProfitByYear || {};
+    var samples = [];
+    for (var y = latest; y > latest - FWD_PAYOUT_WINDOW; y--) {
+      var np = npByYear[y], div = yearly[y];
+      if (np == null || np <= 0 || div == null || div <= 0) continue;
+      samples.push(div / np);
+    }
+    res.forward_payout_samples = samples;
+    if (!samples.length) {
+      res.forward_status = 'no_payout_history';
+      res.forward_note = '无可用分红历史，不做前瞻';
+      return res;
+    }
+
+    var rawMedian = _fwdMedian(samples);
+    var assumed = Math.min(Math.max(rawMedian, 0), FWD_MAX_PAYOUT);
+    res.forward_payout_assumed = assumed;
+    res.forward_payout_basis = '近3年支付率中位数 ' + (rawMedian * 100).toFixed(1) + '%';
+
+    if (samples.length < FWD_PAYOUT_WINDOW) {
+      res.forward_warnings.push('支付率样本不连续（最近 ' + FWD_PAYOUT_WINDOW +
+        ' 个财年仅 ' + samples.length + ' 年可用）');
+    }
+    var trend = Math.abs(samples[0] - rawMedian) > FWD_TREND_DEVIATION;
+    if (samples[0] > FWD_MAX_PAYOUT && trend) {
+      res.forward_warnings.push('最新财年支付率 ' + (samples[0] * 100).toFixed(1) +
+        '% > 100%（超出当年净利），与近3年中位数 ' + (rawMedian * 100).toFixed(1) +
+        '% 偏离超 ' + Math.round(FWD_TREND_DEVIATION * 100) + ' 个百分点，分红政策可能变化');
+    } else if (samples[0] > FWD_MAX_PAYOUT) {
+      res.forward_warnings.push('最新财年支付率 ' + (samples[0] * 100).toFixed(1) + '% > 100%（超出当年净利）');
+    } else if (trend) {
+      res.forward_warnings.push('最新财年支付率 ' + (samples[0] * 100).toFixed(1) +
+        '% 与近3年中位数 ' + (rawMedian * 100).toFixed(1) + '% 偏离超 ' +
+        Math.round(FWD_TREND_DEVIATION * 100) + ' 个百分点，分红政策可能变化');
+    }
+
+    if (price == null || !(price > 0)) {
+      res.forward_status = 'missing_inputs';
+      res.forward_note = '缺少现价，不做前瞻';
+      return res;
+    }
+
+    res.forward_dps = eps * assumed;
+    res.forward_yield_before_tax = res.forward_dps / price * 100.0;
+    res.forward_status = 'ok';
+    res.forward_note = forwardYear + res.forward_eps_kind + ' EPS ' + eps.toFixed(2) +
+      ' × 支付率 ' + (assumed * 100).toFixed(1) + '% ÷ 现价 ' + price.toFixed(2);
+
+    if (rawMedian > FWD_MAX_PAYOUT) {
+      res.forward_warnings.push('近3年支付率中位数 ' + (rawMedian * 100).toFixed(1) + '% > 100%，假设截断为 100%');
+    }
+    if (res.forward_coverage != null && res.forward_coverage < FWD_FULL_COVERAGE) {
+      res.forward_warnings.push('一致预期仅 ' + res.forward_coverage + ' 家机构覆盖（样本少）');
+    }
+    if (isCyclical) res.forward_warnings.push('周期行业，盈利预测波动大，前瞻仅供参考');
+    if (trailingYield && trailingYield > 0 &&
+        (res.forward_yield_before_tax > trailingYield * (1 + FWD_YIELD_DEVIATION) ||
+         res.forward_yield_before_tax < trailingYield * (1 - FWD_YIELD_DEVIATION))) {
+      res.forward_warnings.push('前瞻 ' + res.forward_yield_before_tax.toFixed(2) + '% 与主口径 ' +
+        trailingYield.toFixed(2) + '% 偏离超 50%，请核对');
+    }
+    if (res.forward_yield_before_tax > FWD_YIELD_MAX) {
+      res.forward_warnings.push('前瞻股息率 ' + res.forward_yield_before_tax.toFixed(2) + '% 超合理上限，疑似数据异常');
+    }
+    return res;
+  }
+
+  /* 用一致预期基准年的已披露 EPS 校验股本口径：EPS × 当前股本 应 ≈ 基准年归母净利。
+   * 一致预期 EPS 是当前股本口径；基准年之后有送转/增发时两者会偏离 → 提示（不阻断）。 */
+  function _fwdEpsShareWarnings(forecast, npByYear, totalShares) {
+    if (!totalShares || !(totalShares > 0)) return [];
+    var base = forecast.base_year;
+    if (forecast.mark_by_year[base] !== 'A') return [];
+    var eps = forecast.eps_by_year[base];
+    var npActual = npByYear ? npByYear[base] : null;
+    if (eps == null || npActual == null || !(npActual > 0)) return [];
+    var implied = eps * totalShares;
+    if (Math.abs(implied - npActual) / npActual <= FWD_EPS_NP_TOLERANCE) return [];
+    return ['一致预期基准年(' + base + ') EPS ' + eps.toFixed(2) + ' × 股本 与归母净利偏差 ' +
+      (Math.abs(implied / npActual - 1) * 100).toFixed(0) + '%，股本口径可能不一致'];
   }
 
   /* ── 市赚率（对齐 pr_calculator.py）── */
@@ -1195,6 +1406,7 @@
     buildExDivMarkers: buildExDivMarkers,
     computeTtmDividend: computeTtmDividend,
     parseFinancials: parseFinancials,
+    computeForwardYield: computeForwardYield,
     computeBasicPR: computeBasicPR,
     computeCorrectedPR: computeCorrectedPR,
     computePbPR: computePbPR,

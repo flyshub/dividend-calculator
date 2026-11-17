@@ -26,6 +26,23 @@
     });
   }
 
+  /* 带超时的 JSON 请求：仅用于增强数据（前瞻预测），超时/失败由调用方降级 */
+  function jsonFetchWithTimeout(url, ms) {
+    if (typeof AbortController === 'undefined') return jsonFetch(url);
+    var controller = new AbortController();
+    var timer = setTimeout(function () { controller.abort(); }, ms);
+    return fetch(url, { signal: controller.signal }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + url);
+      return r.json();
+    }).then(function (d) {
+      clearTimeout(timer);
+      return d;
+    }, function (err) {
+      clearTimeout(timer);
+      throw err;
+    });
+  }
+
   /* ── 腾讯行情（qt.gtimg.cn，GBK）──
    * 字段索引与 tencent_quote.py 对齐:
    *   1=名称 3=价格 39=PE-TTM 46=PB 72=A股股本 73=总股本（33 是当日最高价，勿混） */
@@ -169,6 +186,32 @@
   }
 
   /* ── 东财财务（RPT_F10_FINANCE_MAINFINADATA，ROEJQ/PARENTNETPROFIT）── */
+  /* ── 东财券商一致预期（RPT_WEB_RESPREDICT，EPS1..4 + YEAR1..4 + YEAR_MARK1..4）
+   * 无覆盖时 result.data 为 null → 返回 []（与分红接口 None/[] 语义一致：这里用
+   * null 表示取数失败，[] 表示确实没有机构预测）。 */
+  /* 一致预期（东财 RPT_WEB_RESPREDICT）：null 语义 = 取数失败，[] = 无机构覆盖。
+   * 5s 超时——该接口只服务前瞻卡，不能拖住主结果。 */
+  var FORECAST_TIMEOUT_MS = 5000;
+  var FORECAST_NO_DATA_CODE = 9201;  // 东财「返回数据为空」＝真·无覆盖，不是故障
+
+  /* 三分类（对齐 src/eastmoney_fetcher._forecast_rows_from_payload）：
+   * 东财对「无覆盖」与「服务端错误」都回 HTTP 200 + success=false，只能靠 code 区分。 */
+  function forecastRowsFromPayload(payload) {
+    if (!payload) return null;
+    var data = payload.result && payload.result.data;
+    if (data && data.length) return data;
+    if (payload.success === true) return [];
+    if (payload.code === FORECAST_NO_DATA_CODE) return [];
+    return null;
+  }
+
+  function fetchEarningsForecast(stockCode) {
+    var url = 'https://datacenter-web.eastmoney.com/api/data/v1/get' +
+      '?reportName=RPT_WEB_RESPREDICT&columns=ALL' +
+      '&filter=(SECURITY_CODE%3D%22' + stockCode + '%22)&pageNumber=1&pageSize=5';
+    return jsonFetchWithTimeout(url, FORECAST_TIMEOUT_MS).then(forecastRowsFromPayload);
+  }
+
   function fetchFinancials(stockCode) {
     var market = stockCode[0] === '6' ? '.SH' : '.SZ';
     var secucode = stockCode + market;
@@ -320,6 +363,8 @@
     fetchMonthlyPricesEastmoney: fetchMonthlyPricesEastmoney,
     fetchDividendRecords: fetchDividendRecords,
     fetchFinancials: fetchFinancials,
+    fetchEarningsForecast: fetchEarningsForecast,
+    forecastRowsFromPayload: forecastRowsFromPayload,
     fetchCashflow: fetchCashflow,
     fetchIndustry: fetchIndustry,
     fetchPriceChange1y: fetchPriceChange1y,

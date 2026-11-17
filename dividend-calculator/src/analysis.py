@@ -11,6 +11,7 @@ from typing import Optional
 from .api import get_stock_info
 from .datasource.base import StockInfo
 from .dividend import get_latest_full_year_dividend
+from .forward_yield import ForwardYieldResult, estimate_forward_yield
 from .pr import calculate_pr, PRResult
 from .sustainability import assess_with_auto_fetch
 from .sustainability_calculator import SustainabilityResult, THRESHOLD_YIELD
@@ -26,6 +27,7 @@ class StockAnalysisResult:
     dividend_yield_before_tax: Optional[float]   # 税前股息率（百分数），无有效分红为 None
     pr_result: PRResult
     sustainability: Optional[SustainabilityResult] = None  # 仅股息率 > 阈值时评估，否则 None
+    forward_yield: Optional[ForwardYieldResult] = None      # 下一财年前瞻股息率（模型估算，仅展示）
 
 
 def run_stock_analysis(stock_input: str) -> Optional[StockAnalysisResult]:
@@ -73,10 +75,26 @@ def run_stock_analysis(stock_input: str) -> Optional[StockAnalysisResult]:
         except Exception as e:
             logger.warning("可持续性评估失败 %s: %s", stock_code, e)
 
+    # 下一财年前瞻股息率（模型估算，仅展示；失败降级为不估，不影响主结果）
+    forward_yield = None
+    if dividend_year:
+        try:
+            forward_yield = estimate_forward_yield(
+                stock_code=stock_code,
+                price=stock_info.current_price,
+                total_shares=stock_info.total_shares,
+                latest_year=dividend_year,
+                is_cyclical=pr_result.is_cyclical,
+                trailing_yield=dividend_yield,
+            )
+        except Exception as e:
+            logger.warning("前瞻股息率计算失败 %s: %s", stock_code, e)
+
     return StockAnalysisResult(
         stock_info=stock_info,
         dividend_total=dividend_total,
         dividend_yield_before_tax=dividend_yield,
         pr_result=pr_result,
         sustainability=sustainability,
+        forward_yield=forward_yield,
     )

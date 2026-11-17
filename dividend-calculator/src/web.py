@@ -190,6 +190,10 @@ class DividendRequestHandler(BaseHTTPRequestHandler):
             serialize_sustainability(analysis.sustainability)
             if analysis.sustainability is not None else None
         )
+        # 下一财年前瞻股息率（模型估算，仅展示，不进判定）
+        data["forward"] = (
+            asdict(analysis.forward_yield) if analysis.forward_yield is not None else None
+        )
         self._send_json(200, {"success": True, "data": data})
 
     def _handle_historical_data(self, query: str):
