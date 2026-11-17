@@ -174,6 +174,7 @@ CSV/JSON 按 **90 天保留周期**自动清理；DB 快照表**不做时间裁�
 - A+H 股必须用总股本（腾讯 Index 73），不能用流通股本（Index 72）
 - F10 财务分析表格第一列通常是 Q1 数据（非年报），解析时需过滤到仅 12-31
 - mootdx 的 fenhong 值有浮点精度问题（如 2.1 显示为 2.09999...），计算时需 `round(, 4)`
+- **页面脚本必须带版本戳**：`site/index.html` 里 4 个本地 `<script src="js/*.js?v=BUILD">`，改任何 `js/*.js` 都要同步升 `BUILD`。GitHub Pages 的 JS 有缓存，HTML 已更新而 JS 是旧缓存时，页面会报 `xxx is not a function`（2026-11-17 前瞻卡曾因此永远停在「正在获取机构盈利预测…」）
 
 ## 开发规范
 

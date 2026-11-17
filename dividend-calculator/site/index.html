@@ -6,10 +6,11 @@
   <title>真实股息率计算器</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232e5be6'/%3E%3Ctext x='16' y='22' font-size='17' text-anchor='middle' fill='%23fff' font-family='-apple-system,sans-serif'%3E息%3C/text%3E%3C/svg%3E">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
-  <script src="js/policy.js"></script>
-  <script src="js/calculator.js"></script>
-  <script src="js/datasources.js"></script>
-  <script src="js/app.js"></script>
+  <!-- BUILD：改任何 js/*.js 必须同步升版，否则旧缓存会与新 HTML 混用（fetchForward is not a function） -->
+  <script src="js/policy.js?v=20261117-2"></script>
+  <script src="js/calculator.js?v=20261117-2"></script>
+  <script src="js/datasources.js?v=20261117-2"></script>
+  <script src="js/app.js?v=20261117-2"></script>
   <style>
     :root {
       color-scheme: light;
@@ -1794,17 +1795,35 @@
         }
         const result = await DividendApp.analyzeStock(code);
         renderResult(result);
-        /* 前瞻卡非阻塞填充：序号防止旧请求覆盖新结果 */
+        /* 前瞻卡非阻塞填充：序号防止旧请求覆盖新结果；
+         * 三条兜底路径（版本不一致 / 8s 超时 / 正常返回）都必须把卡片从"正在获取"落下 */
         const fwdInputs = result.forward_inputs;
         if (fwdInputs && result.dividend && result.dividend.dividend_year) {
-          const seq = ++forwardSeq;
-          DividendApp.fetchForward(fwdInputs).then((fwd) => {
-            if (seq !== forwardSeq) return;
-            paintForwardCard(fwd, { trailingYield: result.dividend.dividend_yield_before_tax });
-          });
+          const trailingYield = result.dividend.dividend_yield_before_tax;
+          const targetYear = Number(result.dividend.dividend_year) + 1;  // dividend_year 可能是字符串
+          const fallback = (note) => paintForwardCard({
+            forward_status: 'fetch_error', forward_year: targetYear, forward_note: note,
+          }, { trailingYield });
+          if (typeof DividendApp.fetchForward !== 'function') {
+            fallback('页面资源版本不一致，请强制刷新（' +
+              (navigator.userAgent.indexOf('Mac') >= 0 ? 'Cmd+Shift+R' : 'Ctrl+Shift+R') + '）');
+          } else {
+            const seq = ++forwardSeq;
+            const watchdog = setTimeout(() => {
+              if (seq === forwardSeq) fallback('前瞻取数超时，稍后重试');
+            }, 8000);
+            DividendApp.fetchForward(fwdInputs).then((fwd) => {
+              clearTimeout(watchdog);
+              if (seq !== forwardSeq) return;
+              paintForwardCard(fwd, { trailingYield });
+            });
+          }
         }
       } catch (error) {
-        showError('请求失败: ' + (error.message || error) + '。请确认网络可访问腾讯/东财数据源。');
+        const isCodeError = error instanceof TypeError;
+        showError('请求失败: ' + (error.message || error) +
+          (isCodeError ? '。页面资源可能是旧版本，请强制刷新（Cmd+Shift+R）重试。'
+                       : '。请确认网络可访问腾讯/东财数据源。'));
       } finally {
         setLoading(false);
       }
