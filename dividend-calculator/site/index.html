@@ -1820,10 +1820,10 @@
           }
         }
       } catch (error) {
-        const isCodeError = error instanceof TypeError;
+        /* 不再用 `error instanceof TypeError` 推断"旧缓存"：真正的 TypeError 与版本不一致
+         * 无法区分，误报会把人引向无效的强刷。只给可执行的两条路径。 */
         showError('请求失败: ' + (error.message || error) +
-          (isCodeError ? '。页面资源可能是旧版本，请强制刷新（Cmd+Shift+R）重试。'
-                       : '。请确认网络可访问腾讯/东财数据源。'));
+          '。请确认网络可访问腾讯/东财数据源；若刚更新过页面，可强制刷新（Cmd/Ctrl+Shift+R）后重试。');
       } finally {
         setLoading(false);
       }

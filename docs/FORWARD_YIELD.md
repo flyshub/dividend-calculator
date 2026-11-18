@@ -1,10 +1,10 @@
-# 下一年度前瞻股息率（Forward Yield）设计提案
+# 下一财年前瞻股息率（Forward Yield）
 
-Status: proposal（待确认口径后实施）
+Status: 已实施（2026-11-17 落地 P1–P4，P5 未做；见 §9）
 
 目标：在现有「真实股息率（最近完整财年）」之外，增加一个**下一财年**的股息率估算，
 让用户在分红公布之前就能看到"按当前盈利预期与公司分红习惯，明年大概能拿到多少"。
-本文件只做方案与落点，不改代码。
+口径与落点以本文件为准；实现与本文冲突时，以本文为准则修代码或改本文，不允许长期背离。
 
 ---
 
@@ -135,7 +135,7 @@ forward_yield = DPS_F / 当前股价 × 100
 | `EPS_F <= 0`（预测亏损） | `no_positive_eps` | 不估 | 机构预测下一财年亏损，不估股息率 |
 | 支付率样本为空 | `no_payout_history` | 不估 | 无可用分红历史 |
 | 基准年 − 最新分红财年 ≥ 2 | `stale` | 不估，**目标年置空**（`L+1` 已是过去年份） | 近年无分红，不做前瞻 |
-| 缺现价 / 缺股本 | `missing_inputs` | 不估 | 缺少现价或股本，不做前瞻 |
+| 缺现价（股本缺失不阻断，见 §5.1） | `missing_inputs` | 不估 | 缺少现价，不做前瞻 |
 | 网络 / HTTP / 接口故障（非 9201） | `fetch_error` | 不估，不阻塞主结果 | 前瞻取数失败（来源），稍后重试 |
 | 覆盖机构 < 3 | `ok` | 照算 + warning | 覆盖不足，预测可靠性低 |
 | 最新支付率 > 100% 或与中位数偏离 > 30pct | `ok` | 照算 + warning（两者合成一条） | 最新财年支付率 X%（超出当年净利），与中位數 Y% 偏离超 30 个百分点，分红政策可能变化 |
@@ -214,15 +214,16 @@ warning「一致预期基准年(YYYY) EPS x × 股本 与归母净利偏差 N%�
   "forward_status": "ok",
   "forward_year": 2026,
   "forward_eps": 66.807,
+  "forward_eps_kind": "E",
   "forward_payout_assumed": 0.751,
-  "forward_payout_basis": "近3年支付率中位数",
+  "forward_payout_basis": "近3年支付率中位数 75.1%",
   "forward_payout_samples": [0.79, 0.751, 0.519],
   "forward_dps": 50.177,
   "forward_yield_before_tax": 3.44,
   "forward_coverage": 43,
   "forward_source": "东财一致预期",
   "forward_warnings": [],
-  "forward_note": "2026E EPS 66.81 × 支付率 75.1% = 每股 50.18 元 ÷ 现价 1457.70 = 3.44%"
+  "forward_note": "2026E EPS 66.81 × 支付率 75.1% ÷ 现价 1457.70"
 }
 ```
 
@@ -245,7 +246,7 @@ warning「一致预期基准年(YYYY) EPS x × 股本 与归母净利偏差 N%�
 | `no_target_year` | 有覆盖但缺目标年 EPS | L+1 | 无 FY2026E 盈利预测 |
 | `no_positive_eps` | 目标年预测亏损/为 0 | L+1 | 机构预测亏损，不估 |
 | `no_payout_history` | 近 3 年无可用支付率样本 | L+1 | 无可用分红历史 |
-| `missing_inputs` | 缺现价或股本 | L+1 | 缺少现价或股本，不做前瞻 |
+| `missing_inputs` | 缺现价（股本缺失仅跳过口径守卫，不阻断） | L+1 | 缺少现价，不做前瞻 |
 | `stale` | 基准年 − 最新分红财年 ≥ 2 | **null** | 近年无分红 |
 
 ---
@@ -343,8 +344,8 @@ python scripts/verify_js_vs_python.py 600519 600036 000858 601088 002714 300441 
 
 | 阶段 | 落点 |
 | --- | --- |
-| P1 | `src/eastmoney_fetcher.fetch_earnings_forecast`、`src/forward_yield.py`、`tests/test_forward_yield.py`（23 例） |
-| P2 | `site/js/calculator.js::computeForwardYield` + `calculator.test.js`（17 例，与 Python 同输入同期望）；`parseFinancials` 增 `netProfitByYear`，`parseDividendRecords` 增 `yearlyDividendTotals` |
+| P1 | `src/eastmoney_fetcher.fetch_earnings_forecast`、`src/forward_yield.py`、`tests/test_forward_yield.py`（27 例） |
+| P2 | `site/js/calculator.js::computeForwardYield` + `calculator.test.js`（21 例，与 Python 同输入同期望）；`parseFinancials` 增 `netProfitByYear`，`parseDividendRecords` 增 `yearlyDividendTotals` |
 | P3 | `site/js/datasources.js::fetchEarningsForecast`、`app.js` 组装、`formatResult.js` 拍平、`index.html` 前瞻卡片；`src/analysis.py` + `src/web.py`（`data.forward`）+ `calc_pr.py` 输出 |
 | P4 | `scripts/verify_js_vs_python.py` 增 `forecast_rows` 与 7 个前瞻字段；README 功能行与 API 行 |
 
@@ -389,7 +390,7 @@ python scripts/verify_js_vs_python.py 600519 600036 000858 601088 002714 300441 
 | 项 | 处置 |
 | --- | --- |
 | `no_coverage` / `fetch_error` 无法区分 | 新增 `_forecast_rows_from_payload` 与 `forecastRowsFromPayload`：`code=9201` → 无覆盖，其他非 0 code（实测 `9501` 参数错误）→ 取数失败；两端各加 6 例单测 |
-| `missing_price` 也覆盖"缺股本" | 状态改名 `missing_inputs`，文案「缺少现价或股本，不做前瞻」 |
+| `missing_price` 曾要求同时有股本 | 状态名保留 `missing_inputs`，但门只查现价：股本仅用于 `EPS×股本≈归母净利` 口径守卫，缺失时跳过告警继续估算（页面 quote 无股本时不应与 `/api/pr` 分叉） |
 | 取数失败/无覆盖文案与 §5.1 不一致 | 统一为「前瞻取数失败（来源），稍后重试」/「无机构盈利预测，未做前瞻估算」，双端同步 |
 | 孤儿 `logger` | 删除 `import logging` 与 logger（从未使用） |
 | 模块 docstring 只写 7 个对账字段 | 更新为 9 个 + warnings 集合 |

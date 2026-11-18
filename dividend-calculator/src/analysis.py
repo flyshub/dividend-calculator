@@ -83,7 +83,6 @@ def run_stock_analysis(stock_input: str) -> Optional[StockAnalysisResult]:
                 stock_code=stock_code,
                 price=stock_info.current_price,
                 total_shares=stock_info.total_shares,
-                latest_year=dividend_year,
                 is_cyclical=pr_result.is_cyclical,
                 trailing_yield=dividend_yield,
             )

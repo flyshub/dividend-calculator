@@ -185,12 +185,9 @@
     });
   }
 
-  /* ── 东财财务（RPT_F10_FINANCE_MAINFINADATA，ROEJQ/PARENTNETPROFIT）── */
   /* ── 东财券商一致预期（RPT_WEB_RESPREDICT，EPS1..4 + YEAR1..4 + YEAR_MARK1..4）
-   * 无覆盖时 result.data 为 null → 返回 []（与分红接口 None/[] 语义一致：这里用
-   * null 表示取数失败，[] 表示确实没有机构预测）。 */
-  /* 一致预期（东财 RPT_WEB_RESPREDICT）：null 语义 = 取数失败，[] = 无机构覆盖。
-   * 5s 超时——该接口只服务前瞻卡，不能拖住主结果。 */
+   * null = 取数失败，[] = 无机构覆盖（与分红接口同语义）。5s 超时——该接口只服务
+   * 前瞻卡，不能拖住主结果。 */
   var FORECAST_TIMEOUT_MS = 5000;
   var FORECAST_NO_DATA_CODE = 9201;  // 东财「返回数据为空」＝真·无覆盖，不是故障
 

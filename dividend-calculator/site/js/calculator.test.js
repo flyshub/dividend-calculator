@@ -1163,6 +1163,20 @@ test('computeForwardYield 缺现价', () => {
   assert.equal(noPrice.forward_note, '缺少现价，不做前瞻');
 });
 
+/* 缺现价时 warning 集合必须与 Python 一致：现价门在样本/覆盖/周期警示之后。
+ * 对应 tests/test_forward_yield.py::test_missing_price_keeps_context_warnings */
+test('computeForwardYield 缺现价仍保留覆盖与周期警示', () => {
+  const r = Calc.computeForwardYield(fwdInputs({
+    price: null, isCyclical: true, forecast_rows: fwdForecast(66.0, 1),
+  }));
+  assert.equal(r.forward_status, 'missing_inputs');
+  assert.deepEqual(r.forward_warnings, [
+    '一致预期仅 1 家机构覆盖（样本少）',
+    '周期行业，盈利预测波动大，前瞻仅供参考',
+  ]);
+  assert.equal(r.forward_yield_before_tax, null);
+});
+
 test('computeForwardYield 周期行业警示', () => {
   const r = Calc.computeForwardYield(fwdInputs({ isCyclical: true }));
   assert.ok(r.forward_warnings.some(w => w.includes('周期行业')));

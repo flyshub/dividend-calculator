@@ -291,32 +291,66 @@ def _fin_rows():
 
 def test_estimate_forward_yield_end_to_end():
     r = estimate_forward_yield(
-        stock_code="000000", price=1000.0, total_shares=SHARES, latest_year=None,
+        stock_code="000000", price=1000.0, total_shares=SHARES,
         dividend_rows=_div_rows(), financial_rows=_fin_rows(), forecast_rows=_forecast(),
     )
     assert r.forward_yield_before_tax == pytest.approx(4.95)
 
 
+def test_estimate_without_shares_still_estimates():
+    """股本只服务 EPS×股本 口径守卫，缺失时不该阻断估算（页面 quote 无股本也会算）。"""
+    r = estimate_forward_yield(
+        stock_code="000000", price=1000.0, total_shares=None,
+        dividend_rows=_div_rows(), financial_rows=_fin_rows(), forecast_rows=_forecast(),
+    )
+    assert r.forward_status == "ok"
+    assert r.forward_yield_before_tax == pytest.approx(4.95)
+    assert not [w for w in r.forward_warnings if "股本口径可能不一致" in w]
+
+
+def test_missing_price_keeps_context_warnings():
+    """缺现价时也要先攒覆盖/周期警示：与 JS computeForwardYield 同序，verify 对账要求集合一致。"""
+    r = compute_forward_yield(
+        price=None,
+        latest_year=2025,
+        yearly_dividend_totals={2025: 30e9, 2024: 28.5e9, 2023: 27e9},
+        net_profit_by_year_map={2025: 40e9, 2024: 38e9, 2023: 36e9},
+        forecast_rows=[{
+            "YEAR1": 2025, "YEAR_MARK1": "A", "EPS1": 40.0,
+            "YEAR2": 2026, "YEAR_MARK2": "E", "EPS2": 66.0,
+            "RATING_ORG_NUM": 1,
+        }],
+        is_cyclical=True,
+        total_shares=1e9,
+    )
+    assert r.forward_status == "missing_inputs"
+    assert r.forward_warnings == [
+        "一致预期仅 1 家机构覆盖（样本少）",
+        "周期行业，盈利预测波动大，前瞻仅供参考",
+    ]
+    assert r.forward_yield_before_tax is None
+
+
 def test_estimate_forward_yield_missing_inputs_fail_soft():
     assert estimate_forward_yield(
-        stock_code="000000", price=None, total_shares=SHARES, latest_year=None,
+        stock_code="000000", price=None, total_shares=SHARES,
         dividend_rows=_div_rows(), financial_rows=_fin_rows(), forecast_rows=_forecast(),
-    ).forward_note == "缺少现价或股本，不做前瞻"
+    ).forward_note == "缺少现价，不做前瞻"
 
     assert estimate_forward_yield(
-        stock_code="000000", price=10.0, total_shares=SHARES, latest_year=None,
+        stock_code="000000", price=10.0, total_shares=SHARES,
         dividend_rows=None, financial_rows=_fin_rows(), forecast_rows=_forecast(),
         dividend_fetcher=lambda code: None,
     ).forward_note == "前瞻取数失败（分红明细），稍后重试"
 
     assert estimate_forward_yield(
-        stock_code="000000", price=10.0, total_shares=SHARES, latest_year=None,
+        stock_code="000000", price=10.0, total_shares=SHARES,
         dividend_rows=_div_rows(), financial_rows=None, forecast_rows=_forecast(),
         financial_fetcher=lambda code: None,
     ).forward_note == "前瞻取数失败（财务数据），稍后重试"
 
     r = estimate_forward_yield(
-        stock_code="000000", price=10.0, total_shares=SHARES, latest_year=None,
+        stock_code="000000", price=10.0, total_shares=SHARES,
         dividend_rows=_div_rows(), financial_rows=_fin_rows(), forecast_rows=None,
         forecast_fetcher=lambda code: None,
     )

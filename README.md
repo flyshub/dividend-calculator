@@ -66,7 +66,7 @@ python -m src.web
 | 端点 | 参数 | 功能 |
 |------|------|------|
 | `GET /api/calculate?stock=600987` | 股票代码或名称 | 股息率计算 |
-| `GET /api/pr?stock=600987` | 股票代码或名称 | 市赚率计算（含 `forward` 前瞻股息率字段，不可估时为 `null`） |
+| `GET /api/pr?stock=600987` | 股票代码或名称 | 市赚率计算（含 `forward` 前瞻股息率；无完整财年时 `forward` 为 `null`，其余情况返回对象并用 `forward_status` 说明为何不估） |
 | `GET /api/historical-data?stock=600987` | 股票代码 | 走势图数据 |
 | `GET /health` | 无 | 健康检查 |
 | `GET /screener.html` | 无 | 每日选股结果页（含 `/screener/` 静态资源） |

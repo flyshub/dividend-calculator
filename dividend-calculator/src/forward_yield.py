@@ -332,7 +332,6 @@ def estimate_forward_yield(
     stock_code: str,
     price: Optional[float],
     total_shares: Optional[float],
-    latest_year,
     dividend_rows=None,
     financial_rows=None,
     forecast_rows=None,
@@ -342,9 +341,12 @@ def estimate_forward_yield(
     financial_fetcher=fetch_financial_rows,
     forecast_fetcher=fetch_earnings_forecast,
 ) -> ForwardYieldResult:
-    """编排层：取数（可注入）→ 纯函数计算。任何一步失败都降级为「不估」，不抛出。"""
-    if price is None or price <= 0 or not total_shares:
-        return _empty("缺少现价或股本，不做前瞻", STATUS_MISSING_INPUTS)
+    """编排层：取数（可注入）→ 纯函数计算。任何一步失败都降级为「不估」，不抛出。
+
+    股本只用于 EPS×股本 口径守卫，不参与股息率计算，因此缺失时不阻断估算。
+    """
+    if price is None or price <= 0:
+        return _empty("缺少现价，不做前瞻", STATUS_MISSING_INPUTS)
 
     if dividend_rows is None:
         dividend_rows = dividend_fetcher(stock_code)

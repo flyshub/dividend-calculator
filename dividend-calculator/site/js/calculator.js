@@ -716,6 +716,16 @@
         Math.round(FWD_TREND_DEVIATION * 100) + ' 个百分点，分红政策可能变化');
     }
 
+    if (rawMedian > FWD_MAX_PAYOUT) {
+      res.forward_warnings.push('近3年支付率中位数 ' + (rawMedian * 100).toFixed(1) + '% > 100%，假设截断为 100%');
+    }
+    if (res.forward_coverage != null && res.forward_coverage < FWD_FULL_COVERAGE) {
+      res.forward_warnings.push('一致预期仅 ' + res.forward_coverage + ' 家机构覆盖（样本少）');
+    }
+    if (isCyclical) res.forward_warnings.push('周期行业，盈利预测波动大，前瞻仅供参考');
+
+    /* 现价门必须在这批警示之后：Python compute_forward_yield 同序，
+     * 否则缺现价时两端 forward_warnings 集合不同，verify 对账会分叉 */
     if (price == null || !(price > 0)) {
       res.forward_status = 'missing_inputs';
       res.forward_note = '缺少现价，不做前瞻';
@@ -727,14 +737,6 @@
     res.forward_status = 'ok';
     res.forward_note = forwardYear + res.forward_eps_kind + ' EPS ' + eps.toFixed(2) +
       ' × 支付率 ' + (assumed * 100).toFixed(1) + '% ÷ 现价 ' + price.toFixed(2);
-
-    if (rawMedian > FWD_MAX_PAYOUT) {
-      res.forward_warnings.push('近3年支付率中位数 ' + (rawMedian * 100).toFixed(1) + '% > 100%，假设截断为 100%');
-    }
-    if (res.forward_coverage != null && res.forward_coverage < FWD_FULL_COVERAGE) {
-      res.forward_warnings.push('一致预期仅 ' + res.forward_coverage + ' 家机构覆盖（样本少）');
-    }
-    if (isCyclical) res.forward_warnings.push('周期行业，盈利预测波动大，前瞻仅供参考');
     if (trailingYield && trailingYield > 0 &&
         (res.forward_yield_before_tax > trailingYield * (1 + FWD_YIELD_DEVIATION) ||
          res.forward_yield_before_tax < trailingYield * (1 - FWD_YIELD_DEVIATION))) {

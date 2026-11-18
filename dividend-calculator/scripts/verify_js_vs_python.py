@@ -154,16 +154,13 @@ def fetch_cashflow_rows(code: str) -> list:
 
 
 def fetch_forecast_rows(code: str):
-    """东财券商一致预期行：无覆盖 → []，HTTP 异常 → None（与 fetch_earnings_forecast 同语义）。"""
-    url = ("https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_WEB_RESPREDICT"
-           f"&columns=ALL&filter=(SECURITY_CODE%3D%22{code}%22)&pageNumber=1&pageSize=5")
-    try:
-        r = _get(url)
-        d = r.json()
-    except Exception:
-        return None
-    return (d.get("result") or {}).get("data") or []
+    """东财券商一致预期行：直接复用生产实现，保证与本模块内 Python 侧同一套 None/[] 语义。
 
+    早期版本自己拼 URL 并 `(data) or []`，会把 9501 参数错误也当成「无覆盖」，
+    导致 verify 永远跑不到 fetch_error 分支，且 docstring 谎称与生产同语义。
+    """
+    from src.eastmoney_fetcher import fetch_earnings_forecast
+    return fetch_earnings_forecast(code)
 
 def fetch_raw(code: str) -> dict:
     return {
