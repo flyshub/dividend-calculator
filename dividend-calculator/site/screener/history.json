@@ -1,10 +1,5 @@
 [
   {
-    "date": "2026-08-24",
-    "file": "screener_2026-08-24.json",
-    "count": 30
-  },
-  {
     "date": "2026-08-25",
     "file": "screener_2026-08-25.json",
     "count": 30
@@ -313,5 +308,10 @@
     "date": "2026-11-20",
     "file": "screener_2026-11-20.json",
     "count": 26
+  },
+  {
+    "date": "2026-11-23",
+    "file": "screener_2026-11-23.json",
+    "count": 30
   }
 ]
