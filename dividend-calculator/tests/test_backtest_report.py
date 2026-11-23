@@ -47,30 +47,42 @@ def test_table_basic():
 # ---------------------------------------------------------------------------
 # 报告生成（端到端，用内存 DB + Mock lookup）
 # ---------------------------------------------------------------------------
+# 兜底 DDL：源库（若存在）缺哪张表就用它建，保证测试不依赖本地数据文件形态
+_TABLE_DDL = {
+    "stock_list": "CREATE TABLE stock_list (code TEXT, name TEXT, list_date TEXT, delist_date TEXT, board TEXT)",
+    "daily_price": "CREATE TABLE daily_price (code TEXT, date TEXT, close REAL)",
+    "daily_pe": "CREATE TABLE daily_pe (code TEXT, date TEXT, pe_ttm REAL)",
+    "dividend_history": "CREATE TABLE dividend_history (code TEXT, announce_date TEXT, report_date TEXT, ex_dividend_date TEXT, cash_div_10shares REAL, bonus_ratio REAL, trans_ratio REAL)",
+    "finance_history": "CREATE TABLE finance_history (code TEXT, report_date TEXT, roe REAL, net_profit REAL, net_cash_operate REAL, bps REAL, newcapitalader REAL, loan_provision_ratio REAL, notice_date TEXT, total_assets REAL, total_liabilities REAL, net_profit_yoy REAL, investing_cf REAL, capex REAL)",
+    "index_daily": "CREATE TABLE index_daily (code TEXT, date TEXT, close REAL)",
+    "build_progress": "CREATE TABLE build_progress (table_name TEXT, code TEXT, UNIQUE(table_name, code))",
+}
+
+
 def _make_db(db_path: str):
-    """建最小可用的 backtest.db（schema 对齐实际 DB）。"""
+    """建最小可用的 backtest.db（schema 对齐实际 DB）。
+
+    本地 `data/backtest.db` 与这里期望的 schema 不一定一致（当前本地那份只有
+    pe/roe/px/constituents，没有 stock_list），所以「有源库」只用来抄可用的 DDL，
+    缺的表一律用兜底 DDL 补建——否则本地必挂、CI 反而不挂。
+    """
     src = _ROOT / "data" / "backtest.db"
     c = sqlite3.connect(db_path)
+    created = set()
     if src.exists():
         # 从实际 DB 复制 schema（DDL only），保证列名一致
         src_conn = sqlite3.connect(str(src))
-        for t in ("stock_list", "daily_price", "daily_pe", "dividend_history",
-                  "finance_history", "index_daily", "build_progress"):
+        for t in _TABLE_DDL:
             ddl = src_conn.execute(
                 f"SELECT sql FROM sqlite_master WHERE name='{t}'"
             ).fetchone()
             if ddl:
                 c.execute(ddl[0])
+                created.add(t)
         src_conn.close()
-    else:
-        # 无实际 DB 时手动建（CI 兜底）
-        c.execute("CREATE TABLE stock_list (code TEXT, name TEXT, list_date TEXT, delist_date TEXT, board TEXT)")
-        c.execute("CREATE TABLE daily_price (code TEXT, date TEXT, close REAL)")
-        c.execute("CREATE TABLE daily_pe (code TEXT, date TEXT, pe_ttm REAL)")
-        c.execute("CREATE TABLE dividend_history (code TEXT, announce_date TEXT, report_date TEXT, ex_dividend_date TEXT, cash_div_10shares REAL, bonus_ratio REAL, trans_ratio REAL)")
-        c.execute("CREATE TABLE finance_history (code TEXT, report_date TEXT, roe REAL, net_profit REAL, net_cash_operate REAL, bps REAL, newcapitalader REAL, loan_provision_ratio REAL, notice_date TEXT, total_assets REAL, total_liabilities REAL, net_profit_yoy REAL, investing_cf REAL, capex REAL)")
-        c.execute("CREATE TABLE index_daily (code TEXT, date TEXT, close REAL)")
-        c.execute("CREATE TABLE build_progress (table_name TEXT, code TEXT, UNIQUE(table_name, code))")
+    for t, ddl in _TABLE_DDL.items():
+        if t not in created:
+            c.execute(ddl)
 
     codes = ["600036", "601398"]
     for code in codes:
