@@ -117,8 +117,11 @@ def run_screener(
         print(f"漏斗③ 淘汰原因: {detail}", file=sys.stderr)
     print(f"漏斗④ 可持续性 {sus_verdict}: {n4} 只", file=sys.stderr)
     if result.fallback_count:
-        print(f"漏斗② 降级: {result.fallback_count} 只缺 total/ttm_dividend 用存储旧值，"
-              f"其中 {result.fallback_passed} 只入选", file=sys.stderr)
+        detail = "、".join(f"缺 {k} {v} 只" for k, v in
+                          sorted(result.fallback_reasons.items(), key=lambda kv: -kv[1]))
+        print(f"漏斗② 降级: {result.fallback_count} 只用存储旧值"
+              + (f"（{detail}）" if detail else "")
+              + f"，其中 {result.fallback_passed} 只入选", file=sys.stderr)
     return result
 
 

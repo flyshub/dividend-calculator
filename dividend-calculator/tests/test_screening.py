@@ -140,12 +140,16 @@ class TestFunnel2Fallback:
         assert result.fallback_passed == 1
 
     def test_missing_ttm_only_falls_back_both(self):
-        # 仅 ttm_dividend 缺失 → real 与 ttm 一起回退（保持同源）
+        # 仅 ttm_dividend 缺失 → real 与 ttm 一起回退（保持同源）。
+        # 夹具刻意让实时重算的 real=10.0 与存储值 6.0 不同：若改成「各自缺失才回退」，
+        # real_yield_now 会变成 10.0，下面两条断言会挂。
         c = _candidate(dividend=_dividend(real=6.0, ttm=6.5, total=1e10, ttm_total=None))
         result = run_funnel([c])
         assert result.stage_counts[1] == 1
         assert c.used_fallback is True
         assert result.fallback_count == 1
+        assert c.real_yield_now == 6.0
+        assert c.ttm_yield_now == 6.5
 
     def test_fallback_still_enforces_threshold(self):
         # 回退后旧值仍低于阈值 → 不过；统计保留
@@ -159,6 +163,18 @@ class TestFunnel2Fallback:
         result = run_funnel([_candidate()])
         assert result.fallback_count == 0
         assert result.fallback_passed == 0
+        assert result.fallback_reasons == {}
+
+    def test_fallback_reasons_bucket_by_column(self):
+        # 仅缺 ttm_dividend（近 12 个月无分红）：不得记成 total_dividend 缺失
+        only_ttm = _candidate(dividend=_dividend(real=6.0, ttm=6.5, ttm_total=None))
+        assert run_funnel([only_ttm]).fallback_reasons == {"ttm_dividend": 1}
+
+        both = _candidate("600987",
+                          dividend=_dividend("600987", real=6.0, ttm=6.5,
+                                             total=None, ttm_total=None))
+        assert run_funnel([both]).fallback_reasons == {
+            "total_dividend": 1, "ttm_dividend": 1}
 
 
 class TestFunnel3Pr:

@@ -72,6 +72,10 @@ class FunnelResult:
     candidates: List[FunnelCandidate]  # 通过全部层的候选
     fallback_count: int = 0            # 漏斗② 缺 total/ttm_dividend 触发回退的股票数
     fallback_passed: int = 0           # 其中最终入选数
+    fallback_reasons: Dict[str, int] = field(default_factory=dict)
+    """回退原因分桶（列名 → 只数）。「缺 ttm_dividend」绝大多数是近 12 个月无分红
+    （如 2026-11-20：1834 只，其中 ttm_yield 同样为 NULL），不是待回填的数据缺口；
+    分桶是为了让日志能区分它与真正的 total_dividend 缺失。"""
     pr_reject_reasons: Dict[str, int] = field(default_factory=dict)
     """漏斗③ 淘汰原因分布（估值区间 → 只数）。用于区分「数据缺失」与「估值不达标」：
     2026-11 排查中无法判断 ②→③ 的淘汰里多少是 finance 快照缺失。"""
@@ -136,6 +140,7 @@ def run_funnel(
     stage_counts = [0, 0, 0, 0]
     fallback_count = 0
     fallback_passed = 0
+    fallback_reasons: Dict[str, int] = {}
     pr_reject_reasons: Dict[str, int] = {}
     final_candidates: List[FunnelCandidate] = []
 
@@ -155,10 +160,14 @@ def run_funnel(
             real = compute_real_yield(d.total_dividend, q.market_cap)
             ttm = compute_real_yield(d.ttm_dividend, q.market_cap)
             if real is None or ttm is None:
-                # total/ttm_dividend 缺失（NULL，旧 DB 迁移未回填）→ 回退存储旧值
+                # total/ttm_dividend 缺失 → 回退存储旧值（两腿同源，口径见 #81）
                 c.used_fallback = True
                 real, ttm = d.real_yield, d.ttm_yield
                 fallback_count += 1
+                for col, missing in (("total_dividend", d.total_dividend is None),
+                                     ("ttm_dividend", d.ttm_dividend is None)):
+                    if missing:
+                        fallback_reasons[col] = fallback_reasons.get(col, 0) + 1
             c.real_yield_now, c.ttm_yield_now = real, ttm
         else:
             # 无股息快照 → 无收益率，按不通过处理
@@ -192,6 +201,7 @@ def run_funnel(
 
     return FunnelResult(stage_counts=stage_counts, candidates=final_candidates,
                         fallback_count=fallback_count, fallback_passed=fallback_passed,
+                        fallback_reasons=fallback_reasons,
                         pr_reject_reasons=pr_reject_reasons)
 
 
