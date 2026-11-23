@@ -24,6 +24,9 @@ cd dividend-calculator && python -m src.web
 # 运行全部测试
 cd dividend-calculator && python -m pytest -v
 
+# 同步生产数据（本地 screener.db 不自动更新；排查选股数据前先跑）
+cd dividend-calculator && python scripts/sync_seed_db.py
+
 # 运行单个测试
 cd dividend-calculator && python -m pytest tests/test_dividend.py -v
 ```
@@ -174,6 +177,7 @@ CSV/JSON 按 **90 天保留周期**自动清理；DB 快照表**不做时间裁�
 - A+H 股必须用总股本（腾讯 Index 73），不能用流通股本（Index 72）
 - F10 财务分析表格第一列通常是 Q1 数据（非年报），解析时需过滤到仅 12-31
 - mootdx 的 fenhong 值有浮点精度问题（如 2.1 显示为 2.09999...），计算时需 `round(, 4)`
+- **本地 `data/screener.db` 不随生产更新**：生产库在 Release `screener-seed`（CI 每日上传），本地那份可能停在几个月前（财务/可持续性尤其）。任何「某只股票缺数据 / 被漏斗淘汰」的本地判断，先跑 `python scripts/sync_seed_db.py`（下载 + 校验 + 原子替换），否则结论可能是本地库滞后造成的假象（2026-11 实际踩过）
 - **页面脚本必须带版本戳**：`site/index.html` 里 4 个本地 `<script src="js/*.js?v=BUILD">`，改任何 `js/*.js` 都要同步升 `BUILD`。GitHub Pages 的 JS 有缓存，HTML 已更新而 JS 是旧缓存时，页面会报 `xxx is not a function`（2026-11-17 前瞻卡曾因此永远停在「正在获取机构盈利预测…」）
 
 ## 开发规范

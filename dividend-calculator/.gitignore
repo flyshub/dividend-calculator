@@ -38,6 +38,7 @@ Thumbs.db
 # 其余 data/ 为本地缓存/数据库，不跟踪
 data/backtest.db
 data/screener.db
+data/screener.db.bak-*
 data/*.csv
 data/industry_cache.json
 data/result_summary.json
