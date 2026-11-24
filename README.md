@@ -24,6 +24,7 @@
 - **A+H 股正确处理**：使用总股本（腾讯 Index 73）而非流通股本
 - **多引擎降级**：mootdx（通达信协议）+ 腾讯 + 东方财富，全球可用
 - **双端一致性**：Python 与 JS 实现逐字段对齐，脚本交叉验证
+- **组合股息分析**：输入持仓（代码:股数）→ 年度股息现金流、市值加权股息率、税前/税后三档、行业分布与可持续性概览（`site/portfolio.html`，浏览器本地计算）
 - **每日选股器**：全 A 四层漏斗筛选（TTM/真实股息率 >5%、市赚率 PR≤1、可持续性），GitHub Actions 每日自动产出选股结果页（`site/screener.html`）
 
 ## 🚀 快速开始
@@ -70,6 +71,7 @@ python -m src.web
 | `GET /api/historical-data?stock=600987` | 股票代码 | 走势图数据 |
 | `GET /health` | 无 | 健康检查 |
 | `GET /screener.html` | 无 | 每日选股结果页（含 `/screener/` 静态资源） |
+| `GET /portfolio.html` | 无 | 组合股息分析页（浏览器本地计算，无后端调用） |
 
 ### 作为库使用
 
@@ -82,6 +84,15 @@ from src.pr import calculate_pr
 result = calculate_pr("600987")
 print(f"市赚率: {result.pr_basic:.3f}")
 ```
+
+```python
+# 组合股息分析（#31）：代码:股数，逗号分隔
+from src.portfolio import analyze_portfolio, parse_holdings
+summary = analyze_portfolio(parse_holdings("600900:1000,601398:5000"))
+print(f"年度股息: {summary.total_annual_income:,.0f} 元，加权股息率 {summary.weighted_yield:.2f}%")
+```
+
+命令行：`python -m src.main --portfolio "600900:1000,601398:5000"`（`--json` 见 `python -m src.portfolio_cli`）。
 
 ### 运行测试
 

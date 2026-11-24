@@ -28,14 +28,32 @@ def ensure_utf8_stdout():
 
 
 @click.command()
-@click.argument('stock_input', type=str)
-def dividend(stock_input):
+@click.argument('stock_input', type=str, required=False)
+@click.option('--portfolio', 'portfolio_text', default=None,
+              help='组合模式：持仓「代码:股数」逗号分隔，如 600900:1000,601398:5000')
+def dividend(stock_input, portfolio_text):
     """
     计算股票的真实股息率
 
     STOCK_INPUT: 股票代码（如600887）或名称（如伊利股份）
+
+    加 --portfolio 时改为组合股息分析（#31），STOCK_INPUT 可省略。
     """
     ensure_utf8_stdout()
+
+    if portfolio_text:
+        from src.portfolio import analyze_portfolio, parse_holdings
+        from src.portfolio_cli import render_text
+
+        try:
+            holdings = parse_holdings(portfolio_text)
+        except ValueError as e:
+            raise click.ClickException(f"参数错误：{e}")
+        click.echo(render_text(analyze_portfolio(holdings)))
+        return
+
+    if not stock_input:
+        raise click.ClickException("请提供股票代码，或使用 --portfolio 持仓列表")
     click.echo("=" * 60)
     click.echo(f"真实股息率计算: {stock_input}")
     click.echo("=" * 60)

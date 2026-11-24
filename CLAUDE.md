@@ -18,6 +18,9 @@ cd dividend-calculator && python -m src.main 600987
 # 市赚率计算
 cd dividend-calculator && python calc_pr.py 600900
 
+# 组合股息分析（持仓：代码:股数，逗号分隔）
+cd dividend-calculator && python -m src.main --portfolio "600900:1000,601398:5000"
+
 # 启动 Web 服务
 cd dividend-calculator && python -m src.web
 

@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>组合股息分析</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232e5be6'/%3E%3Ctext x='16' y='22' font-size='17' text-anchor='middle' fill='%23fff' font-family='-apple-system,sans-serif'%3E息%3C/text%3E%3C/svg%3E">
+  <script src="js/policy.js?v=20261124-2"></script>
+  <script src="js/calculator.js?v=20261124-2"></script>
+  <script src="js/portfolio.js?v=20261124-2"></script>
+  <script src="js/datasources.js?v=20261124-2"></script>
+  <script src="js/app.js?v=20261124-2"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f5f6f8;
+      --ink: #1c212b;
+      --muted: #6e7683;
+      --line: #e3e6eb;
+      --card: #ffffff;
+      --accent: #2e5be6;
+      --green: #1f9d55;
+      --orange: #b45309;
+      --red: #d64545;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    .wrap { max-width: 1040px; margin: 0 auto; padding: 40px 20px 80px; }
+    header.page { margin-bottom: 24px; }
+    .eyebrow { color: var(--accent); font-size: 12px; letter-spacing: .12em; font-weight: 600; }
+    h1 { font-size: 30px; margin: 6px 0 8px; letter-spacing: -.01em; }
+    .lede { color: var(--muted); margin: 0; }
+    .nav { margin-top: 10px; font-size: 13px; }
+    .nav a { color: var(--accent); text-decoration: none; margin-right: 16px; }
+    .card {
+      background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+      padding: 20px; margin-bottom: 18px;
+    }
+    .card h2 { font-size: 14px; margin: 0 0 12px; color: var(--muted); font-weight: 600; letter-spacing: .04em; }
+    textarea {
+      width: 100%; min-height: 88px; padding: 12px; border: 1px solid var(--line);
+      border-radius: 10px; font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+      resize: vertical; color: var(--ink); background: #fbfcfe;
+    }
+    textarea:focus { outline: 2px solid #c7d4ff; border-color: var(--accent); }
+    .row { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+    button {
+      border: 0; border-radius: 10px; padding: 10px 20px; font-size: 14px; font-weight: 600;
+      background: var(--accent); color: #fff; cursor: pointer;
+    }
+    button.secondary { background: #eef1f7; color: var(--ink); }
+    button:disabled { opacity: .55; cursor: progress; }
+    .hint { color: var(--muted); font-size: 12.5px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+    .stat { background: #fbfcfe; border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+    .stat .label { color: var(--muted); font-size: 12px; }
+    .stat .value { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 4px; }
+    .stat .value.green { color: var(--green); }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { padding: 9px 8px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+    th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
+    th { color: var(--muted); font-size: 12px; font-weight: 600; }
+    tr.err td { color: var(--muted); }
+    .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
+    .badge.green { color: var(--green); border-color: #bfe3cd; background: #f0faf4; }
+    .badge.orange { color: var(--orange); border-color: #f0d3b0; background: #fdf6ec; }
+    .badge.red { color: var(--red); border-color: #f2c3c3; background: #fdf1f1; }
+    .badge.gray { color: var(--muted); }
+    .bars { display: flex; flex-direction: column; gap: 10px; }
+    .bar-row { display: grid; grid-template-columns: 150px 1fr 110px; gap: 10px; align-items: center; font-size: 13.5px; }
+    .bar-track { background: #eef1f7; border-radius: 999px; height: 10px; overflow: hidden; }
+    .bar-fill { background: var(--accent); height: 100%; border-radius: 999px; }
+    .bar-num { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .hidden { display: none !important; }
+    .error { color: var(--red); font-size: 14px; margin-top: 10px; }
+    footer { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header class="page">
+    <div class="eyebrow">A 股 · 持仓视角</div>
+    <h1>组合股息分析</h1>
+    <p class="lede">输入持仓（代码 + 股数），按最新完整财年分红折算年度现金股息、组合加权股息率、行业分布与可持续性概览。</p>
+    <div class="nav">
+      <a href="index.html">← 单股计算</a>
+      <a href="screener.html">每日选股</a>
+    </div>
+  </header>
+
+  <section class="card">
+    <h2>持仓</h2>
+    <textarea id="holdings-input" placeholder="每行一只：600900:1000&#10;601398:5000"></textarea>
+    <div class="row">
+      <button id="calc-btn">计算组合</button>
+      <button id="sample-btn" class="secondary">填入示例</button>
+      <span class="hint">格式「代码:股数」，支持逗号或换行分隔。数据在浏览器本地计算，不经过服务器。</span>
+    </div>
+    <div id="progress" class="hint hidden"></div>
+    <div id="error" class="error hidden"></div>
+  </section>
+
+  <section id="result" class="hidden">
+    <div class="card">
+      <h2>汇总（税前；税后按持股期限）</h2>
+      <div class="grid">
+        <div class="stat"><div class="label">持仓市值</div><div id="sum-mv" class="value">—</div></div>
+        <div class="stat"><div class="label">年度股息（税前）</div><div id="sum-income" class="value green">—</div></div>
+        <div class="stat"><div class="label">组合股息率（加权）</div><div id="sum-yield" class="value">—</div></div>
+        <div class="stat"><div class="label">持股 1 月~1 年（10%）</div><div id="sum-tax10" class="value">—</div></div>
+        <div class="stat"><div class="label">持股不足 1 月（20%）</div><div id="sum-tax20" class="value">—</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>逐只明细</h2>
+      <table>
+        <thead>
+          <tr><th>代码</th><th>名称</th><th>持股</th><th>现价</th><th>每股分红</th><th>市值</th><th>年股息</th><th>股息率</th><th>可持续性</th></tr>
+        </thead>
+        <tbody id="positions-body"></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>行业分布（占年度股息）</h2>
+      <div id="industry-bars" class="bars"></div>
+      <div id="verdict-line" class="hint" style="margin-top:12px"></div>
+    </div>
+
+    <div id="errors-card" class="card hidden">
+      <h2>未计入的持仓</h2>
+      <div id="errors-list" class="hint"></div>
+    </div>
+  </section>
+
+  <footer>
+    口径：每股分红 = 最新完整财年现金分红总额 ÷ 当前总股本（总额法），与单股主卡同源。
+    无分红或取数失败的持仓不进入加权股息率的分母，单列在「未计入」。可持续性沿用单股规则（税前股息率 &gt; 4% 才评估）。
+  </footer>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  function money(v) {
+    if (v == null) return '—';
+    if (Math.abs(v) < 1e4) return v.toLocaleString('zh-CN', { maximumFractionDigits: 0 }) + ' 元';
+    if (Math.abs(v) < 1e8) return (v / 1e4).toFixed(2) + ' 万元';
+    return (v / 1e8).toFixed(2) + ' 亿元';
+  }
+  function pct(v) { return v == null ? '—' : v.toFixed(2) + '%'; }
+  function verdictBadge(v) {
+    if (!v) return '<span class="badge gray">未评估</span>';
+    const cls = v === '可持续' ? 'green' : (v === '偏弱' ? 'orange' : 'red');
+    return '<span class="badge ' + cls + '">' + v + '</span>';
+  }
+
+  /* 并发 2 只，避免一次打出十几个数据源请求 */
+  async function analyzeAll(holdings) {
+    const rows = new Array(holdings.length);
+    let next = 0, done = 0;
+    async function worker() {
+      while (next < holdings.length) {
+        const i = next++;
+        const h = holdings[i];
+        let analysis = null;
+        try {
+          analysis = await DividendApp.analyzeStock(h.code);
+        } catch (e) {
+          analysis = null;
+        }
+        rows[i] = Portfolio.buildPosition(h.code, h.shares, analysis);
+        done += 1;
+        $('progress').textContent = '正在计算 ' + done + ' / ' + holdings.length + ' …';
+      }
+    }
+    await Promise.all([worker(), worker()]);
+    return rows;
+  }
+
+  function render(summary) {
+    $('sum-mv').textContent = money(summary.total_market_value);
+    $('sum-income').textContent = money(summary.total_annual_income);
+    $('sum-yield').textContent = pct(summary.weighted_yield);
+    $('sum-tax10').textContent = money(summary.after_tax_income_10);
+    $('sum-tax20').textContent = money(summary.after_tax_income_20);
+
+    const body = $('positions-body');
+    body.innerHTML = '';
+    summary.positions.forEach((p) => {
+      const tr = document.createElement('tr');
+      if (p.error) tr.className = 'err';
+      const cells = [
+        p.code, p.name || '—', p.shares.toLocaleString('zh-CN'),
+        p.price == null ? '—' : p.price.toFixed(2),
+        p.dividend_per_share == null ? '—' : p.dividend_per_share.toFixed(4),
+        money(p.market_value), money(p.annual_income), pct(p.dividend_yield),
+      ];
+      cells.forEach((text) => {
+        const td = document.createElement('td');
+        td.textContent = text;
+        tr.appendChild(td);
+      });
+      const td = document.createElement('td');
+      td.innerHTML = p.error ? '<span class="badge gray">未计入</span>' : verdictBadge(p.verdict);
+      tr.appendChild(td);
+      body.appendChild(tr);
+    });
+
+    const bars = $('industry-bars');
+    bars.innerHTML = '';
+    summary.industry_breakdown.forEach(([name, amount, share]) => {
+      const row = document.createElement('div');
+      row.className = 'bar-row';
+      const label = document.createElement('div'); label.textContent = name;
+      const track = document.createElement('div'); track.className = 'bar-track';
+      const fill = document.createElement('div'); fill.className = 'bar-fill';
+      fill.style.width = Math.max(2, share) + '%';
+      track.appendChild(fill);
+      const num = document.createElement('div'); num.className = 'bar-num';
+      num.textContent = money(amount) + ' · ' + share.toFixed(1) + '%';
+      row.append(label, track, num);
+      bars.appendChild(row);
+    });
+
+    const verdicts = Object.keys(summary.verdict_summary)
+      .sort((a, b) => summary.verdict_summary[b] - summary.verdict_summary[a])
+      .map((k) => k + ' ' + summary.verdict_summary[k] + ' 只').join('、');
+    $('verdict-line').textContent = verdicts ? '可持续性概览：' + verdicts : '';
+
+    if (summary.errors.length) {
+      $('errors-card').classList.remove('hidden');
+      $('errors-list').textContent = summary.errors.join('；');
+    } else {
+      $('errors-card').classList.add('hidden');
+    }
+    $('result').classList.remove('hidden');
+  }
+
+  async function calculate() {
+    $('error').classList.add('hidden');
+    $('result').classList.add('hidden');
+    let holdings;
+    try {
+      holdings = Portfolio.parseHoldings($('holdings-input').value);
+    } catch (e) {
+      $('error').textContent = e.message;
+      $('error').classList.remove('hidden');
+      return;
+    }
+    $('calc-btn').disabled = true;
+    $('progress').classList.remove('hidden');
+    $('progress').textContent = '正在计算 0 / ' + holdings.length + ' …';
+    try {
+      const rows = await analyzeAll(holdings);
+      render(Portfolio.summarize(rows));
+    } catch (e) {
+      $('error').textContent = '计算失败：' + (e.message || e);
+      $('error').classList.remove('hidden');
+    } finally {
+      $('calc-btn').disabled = false;
+      $('progress').classList.add('hidden');
+    }
+  }
+
+  $('calc-btn').addEventListener('click', calculate);
+  $('sample-btn').addEventListener('click', () => {
+    $('holdings-input').value = '600900:1000\n601398:5000\n600887:2000';
+  });
+</script>
+</body>
+</html>

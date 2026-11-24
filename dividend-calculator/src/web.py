@@ -85,6 +85,10 @@ class DividendRequestHandler(BaseHTTPRequestHandler):
             self._send_file(SCREENER_FILE, "text/html; charset=utf-8")
             return
 
+        if parsed_url.path == "/portfolio.html":
+            self._send_file(STATIC_DIR / "portfolio.html", "text/html; charset=utf-8")
+            return
+
         if parsed_url.path.startswith("/screener/"):
             # 选股结果 JSON（site/screener/，与 GitHub Pages 同源）
             rel = Path(parsed_url.path).name
