@@ -39,11 +39,14 @@ LEGACY_FIELDS_11 = ["代码", "名称", "TTM股息率%", "真实股息率%", "�
                     "行业", "可持续性", "ROE%", "总市值(亿)", "数据来源"]
 # #30 之前的 12 列表头（含 TSR，无股息 CAGR/趋势）——2026-11 及更早的历史 CSV 就是这个形状
 LEGACY_FIELDS_12 = LEGACY_FIELDS_11[:9] + ["股东总回报率%"] + LEGACY_FIELDS_11[9:]
+# 2026-11-24 前写入的 14 列 CSV：后两列用旧名「股息CAGR%」「股息趋势」（当日跑了两次日更，
+# 磁盘上确有这种文件）。改名后仍要能解析，否则 export 会拒收历史 CSV。
+LEGACY_FIELDS_14 = LEGACY_FIELDS_12 + ["股息CAGR%", "股息趋势"]
 
 # CSV 14 列 → JSON 字段（数字列转 float）。列定义来自 src.screening.FIELDS，
 # （screener_daily.yml 每日跑本脚本时，export 会校验 CSV 表头与 FIELDS 一致，防漂移）。
 NUMERIC = {"TTM股息率%", "真实股息率%", "市赚率PR", "ROE%", "股东总回报率%", "总市值(亿)",
-           "股息CAGR%"}
+           "分红CAGR%", "股息CAGR%"}   # 旧名保留：历史 CSV 仍要能解析
 
 
 def _csv_date(path: Path):
@@ -85,7 +88,7 @@ def parse_csv(path: Path) -> list:
     with open(path, encoding="utf-8") as f:
         reader = csv.DictReader(f)
         header = reader.fieldnames or []
-        if header not in (FIELDS, LEGACY_FIELDS_11, LEGACY_FIELDS_12):
+        if header not in (FIELDS, LEGACY_FIELDS_11, LEGACY_FIELDS_12, LEGACY_FIELDS_14):
             missing = [c for c in FIELDS if c not in header]
             extra = [c for c in header if c not in FIELDS]
             raise ValueError(

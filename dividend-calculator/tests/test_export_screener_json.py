@@ -207,12 +207,27 @@ class TestHeaderValidation:
             writer.writerow({c: "x" for c in ex.LEGACY_FIELDS_12})
         rows = ex.parse_csv(p)
         assert len(rows) == 1 and len(rows[0]) == 12
-        assert "股息趋势" not in rows[0] and "股息CAGR%" not in rows[0]
+        assert "分红趋势" not in rows[0] and "分红CAGR%" not in rows[0]
+
+    def test_legacy_14_column_old_names_still_parse(self, ex, tmp_path):
+        """改名前的 14 列 CSV（旧表头 股息CAGR%/股息趋势）必须仍能解析。
+
+        2026-11-24 磁盘上确实存在这种文件；改名若直接收紧白名单，export 会
+        拒收历史 CSV，违反「宁留不误删」。
+        """
+        p = tmp_path / "screener_20261123_221036.csv"
+        with open(p, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=ex.LEGACY_FIELDS_14)
+            writer.writeheader()
+            writer.writerow({c: "x" for c in ex.LEGACY_FIELDS_14})
+        rows = ex.parse_csv(p)
+        assert len(rows) == 1
+        assert "股息趋势" in rows[0] and "分红趋势" not in rows[0]
 
     def test_thirteen_columns_still_rejected(self, ex, tmp_path):
         """既非当前 14 列也非两个历史白名单（如 13 列）→ 仍报错，防漂移。"""
         p = tmp_path / "screener_20261121_100000.csv"
-        header = [c for c in CSV_HEADER if c != "股息趋势"]
+        header = [c for c in CSV_HEADER if c != "分红趋势"]
         with open(p, "w", encoding="utf-8", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=header)
             writer.writeheader()

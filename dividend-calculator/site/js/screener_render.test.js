@@ -119,20 +119,25 @@ test('rowHtml 小盘+偏弱行带提示徽标', () => {
   assert.ok(!big.includes('badge-note'));
 });
 
-/* #30 股息趋势列 */
+/* #30 分红趋势列（2026-11 由「股息」改名；旧表头仍兼容） */
 test('divTrendCell 增长/萎缩/平稳与缺失', () => {
-  assert.ok(R.divTrendCell({ '股息趋势': '增长', '股息CAGR%': 8.4 }).includes('+8.4%'));
-  assert.ok(R.divTrendCell({ '股息趋势': '增长', '股息CAGR%': 8.4 }).includes('#3fb950'));
-  assert.ok(R.divTrendCell({ '股息趋势': '萎缩', '股息CAGR%': -6.2 }).includes('#e5534b'));
-  assert.ok(R.divTrendCell({ '股息趋势': '萎缩', '股息CAGR%': -6.2 }).includes('-6.2%'));
-  assert.ok(R.divTrendCell({ '股息趋势': '平稳', '股息CAGR%': 0 }).includes('平稳'));
+  assert.ok(R.divTrendCell({ '分红趋势': '增长', '分红CAGR%': 8.4 }).includes('+8.4%'));
+  assert.ok(R.divTrendCell({ '分红趋势': '增长', '分红CAGR%': 8.4 }).includes('#3fb950'));
+  assert.ok(R.divTrendCell({ '分红趋势': '萎缩', '分红CAGR%': -6.2 }).includes('#e5534b'));
+  assert.ok(R.divTrendCell({ '分红趋势': '萎缩', '分红CAGR%': -6.2 }).includes('-6.2%'));
+  assert.ok(R.divTrendCell({ '分红趋势': '平稳', '分红CAGR%': 0 }).includes('平稳'));
   assert.ok(R.divTrendCell({}).includes('—'), '历史行缺列显示占位符');
-  assert.ok(!R.divTrendCell({ '股息趋势': '增长' }).includes('NaN'), 'CAGR 缺失不渲染 NaN');
+  assert.ok(!R.divTrendCell({ '分红趋势': '增长' }).includes('NaN'), 'CAGR 缺失不渲染 NaN');
 });
 
 test('rowHtml 股息趋势列在可持续性之后', () => {
   const r = { '代码': '600900', '名称': '长江电力', '真实股息率%': 3.8,
-              '可持续性': '可持续', '股息趋势': '增长', '股息CAGR%': 8.4 };
+              '可持续性': '可持续', '分红趋势': '增长', '分红CAGR%': 8.4 };
   const html = R.rowHtml(r);
   assert.ok(html.indexOf('badge-green') < html.indexOf('+8.4%'), '趋势列紧随可持续性');
+});
+
+test('divTrendCell 兼容改名前的历史 JSON（股息趋势/股息CAGR%）', () => {
+  const html = R.divTrendCell({ '股息趋势': '增长', '股息CAGR%': 5.5 });
+  assert.ok(html.includes('增长') && html.includes('+5.5%'));
 });

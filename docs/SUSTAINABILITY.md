@@ -159,7 +159,7 @@ CAGR = (最新年分红总额 / 窗口首年分红总额) ^ (1 / (年数-1)) −
 - **短窗口要说明**：窗口起点之前一年无分红记录（亏损停派或上市较晚）时，`dividend_cagr_note` 提示「起点基数可能偏低，读作长期趋势需谨慎」。华能国际 600011：2021-2022 煤价亏损停派，窗口只有 2023-2025（31.40/42.38/62.79 亿）→ **+41.4%/年**，这是从亏损失血恢复的斜率，不是可持续的复合增速。
 - **分红次数变化必须说明**：年度总额含中期分配，某年开始「一年两次」会让口径跳变。伊利 600887 2021→2025 年度总额 9.6/10.4/12.0/12.2/13.8 元/10股 → **+9.2%/年**，但 2025 新增中期 4.8、年报单次由 12.2 降到 9.0 → **年报口径 −1.9%/年**。两个数都对，混读成「盈利驱动的高增长」就是错的，所以窗口内分红次数不一致时 `dividend_cagr_note` 会写明差异并给出年报口径（`dividend_cagr_annual` 字段，页面在 tooltip）。
 - `compute_dividend_cagr(year_amount, complete_years, annual_amount, mid_year_years)`（JS `computeDividendCagr(yearAmount, completeYears, annualAmount, midYears)` 同参数）——后两个只用于口径对照，不改变主 CAGR。
-- 用途：判断分红是在增长、持平还是缩水。**不进漏斗判据、不改 verdict**；页面「股息年均增速」与选股器「股息趋势」列只做展示（单股页在可持续性卡，选股器在 CSV 第 13/14 列）。
+- 用途：判断分红是在增长、持平还是缩水。**不进漏斗判据、不改 verdict**；页面「现金分红年均增速」与选股器「分红趋势」列只做展示（单股页在可持续性卡，选股器在 CSV 第 13/14 列（2026-11-24 由「股息CAGR%」「股息趋势」改名为「分红CAGR%」「分红趋势」，旧表头 CSV 仍可解析））。
 - 双端：`src/sustainability_calculator.py::compute_dividend_cagr` ↔ `site/js/calculator.js::computeDividendCagr`，用例一一对应，`verify_js_vs_python.py` 对拍 `dividend_cagr/trend/years/cagr_annual`。
 
 ## 4. 数据来源

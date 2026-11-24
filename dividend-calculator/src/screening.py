@@ -31,7 +31,7 @@ DEFAULT_SUS_VERDICT = ("可持续", "偏弱")
 # 「股东总回报率%」于 2026-09 起 11 列 → 12 列，历史 11 列表头由 export 白名单放行，见 ADR-0003）
 FIELDS = ["代码", "名称", "TTM股息率%", "真实股息率%", "估值区间", "市赚率PR",
           "行业", "可持续性", "ROE%", "股东总回报率%", "总市值(亿)", "数据来源",
-          "股息CAGR%", "股息趋势"]
+          "分红CAGR%", "分红趋势"]
 
 
 @dataclass(frozen=True)
@@ -265,8 +265,8 @@ def build_output_rows(result: FunnelResult) -> List[dict]:
             "股东总回报率%": tsr if tsr is not None else "",
             "总市值(亿)": round(market_cap / 1e8, 2) if market_cap else "",
             "数据来源": (d.dividend_source if d else "") + " / " + (q.source if q else "腾讯"),
-            "股息CAGR%": round(c.dividend_cagr * 100, 1) if c.dividend_cagr is not None else "",
-            "股息趋势": c.dividend_trend or "",
+            "分红CAGR%": round(c.dividend_cagr * 100, 1) if c.dividend_cagr is not None else "",
+            "分红趋势": c.dividend_trend or "",
         })
     rows.sort(key=lambda r: r["真实股息率%"] if isinstance(r["真实股息率%"], float) else -1, reverse=True)
     return rows

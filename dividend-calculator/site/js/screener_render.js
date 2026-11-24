@@ -67,11 +67,13 @@
     return '';
   }
 
-  /* #30 股息趋势列：增长/萎缩/平稳 + 年化 CAGR（仅展示，不参与漏斗判据）。
-   * 数据来自 CSV 的「股息趋势」「股息CAGR%」两列；旧历史 JSON 无这两列 → 显示 — */
+  /* #30 分红趋势列：增长/萎缩/平稳 + 年化 CAGR（仅展示，不参与漏斗判据）。
+   * 数据来自 CSV 的「分红趋势」「分红CAGR%」两列。2026-11 前写入历史 JSON 的旧列名
+   * 「股息趋势」「股息CAGR%」仍然读取（旧数据兼容）；更早的历史 JSON 无这两列 → 显示 — */
   function divTrendCell(r) {
-    var trend = r['股息趋势'] ? String(r['股息趋势']) : '';
-    var cagr = Number(r['股息CAGR%']);
+    var trendRaw = r['分红趋势'] != null ? r['分红趋势'] : r['股息趋势'];
+    var trend = trendRaw ? String(trendRaw) : '';
+    var cagr = Number(r['分红CAGR%'] != null ? r['分红CAGR%'] : r['股息CAGR%']);
     if (!trend) return '<td class="num">—</td>';
     var color = trend === '萎缩' ? '#e5534b' : (trend === '增长' ? '#3fb950' : 'inherit');
     var pct = isFinite(cagr) ? ' ' + (cagr > 0 ? '+' : '') + cagr.toFixed(1) + '%' : '';
