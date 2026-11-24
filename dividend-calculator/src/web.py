@@ -59,6 +59,10 @@ def serialize_sustainability(result: SustainabilityResult) -> dict:
         "metrics": {k: v for k, v in result.metrics.items()},
         "branch": result.branch,
         "notes": list(result.notes),
+        "dividend_cagr": result.dividend_cagr,
+        "dividend_trend": result.dividend_trend,
+        "dividend_cagr_years": result.dividend_cagr_years,
+        "dividend_cagr_note": result.dividend_cagr_note,
         "explanation": explain_sustainability(result),
     }
 

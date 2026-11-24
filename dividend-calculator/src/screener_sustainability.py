@@ -12,7 +12,7 @@ import sys
 from src.screener_rate_limit import batch_wait
 from src.screener_cache import ScreenerCache, DividendSnapshot
 from src.screener_fetch import DEFAULT_MAX_CONSECUTIVE_FAILURES, fetch_or_default
-from src.screening import DEFAULT_SUS_VERDICT, FunnelCandidate
+from src.screening import DEFAULT_SUS_VERDICT, FunnelCandidate, SusEvaluation
 
 # 漏斗④ 保留的 verdict（可持续 + 偏弱）——别名指向 screening 的常量
 SUS_VERDICT_KEEP = DEFAULT_SUS_VERDICT
@@ -34,7 +34,7 @@ def evaluate_sustainability(
     industry: Optional[str] = None,
     cache: Optional[ScreenerCache] = None,
 ) -> dict:
-    """单股可持续性评估。返回 {verdict, pass_sus}。
+    """单股可持续性评估。返回 {verdict, pass_sus, cagr, trend, years, note}。
 
     assessor 注入便于测试；默认走 assess_with_auto_fetch（真实数据源）。
     缓存加速：sustainability_snapshot 命中（未过期）时注入预拉数据，零网络；
@@ -44,26 +44,32 @@ def evaluate_sustainability(
         # 内存缓存命中：仅当 DB 缓存也有效时才复用（否则强制重评估，避免过期 verdict）
         db_snap = cache.get_sustainability(code)
         if db_snap is not None and not cache.is_sustainability_stale(code):
-            verdict = _sus_cache[code]
+            ev = _sus_cache[code]
         else:
             _sus_cache.pop(code, None)
-            verdict = _assess_and_cache(code, dividend, assessor, total_shares,
-                                        dividend_total, industry, cache)
+            ev = _assess_and_cache(code, dividend, assessor, total_shares,
+                                   dividend_total, industry, cache)
     elif code in _sus_cache:
         # 无 DB 缓存场景（测试）：直接复用内存缓存
-        verdict = _sus_cache[code]
+        ev = _sus_cache[code]
     else:
-        verdict = _assess_and_cache(code, dividend, assessor, total_shares,
-                                    dividend_total, industry, cache)
+        ev = _assess_and_cache(code, dividend, assessor, total_shares,
+                               dividend_total, industry, cache)
     return {
-        "verdict": verdict,
-        "pass_sus": verdict in SUS_VERDICT_KEEP,
+        "verdict": ev["verdict"],
+        "pass_sus": ev["verdict"] in SUS_VERDICT_KEEP,
+        "cagr": ev["cagr"],
+        "trend": ev["trend"],
+        "years": ev["years"],
+        "note": ev["note"],
     }
 
 
 def _assess_and_cache(code, dividend, assessor, total_shares, dividend_total,
                       industry, cache):
-    """评估单股可持续性，写回缓存（S1 按需补拉）。返回 verdict。
+    """评估单股可持续性，写回缓存（S1 按需补拉）。
+
+    返回 dict：verdict + 股息增长率字段（#30，仅随行输出、不进判据）。
 
     缓存命中时走 sustainability.assess_from_cache（内部反序列化并注入预拉数据，
     调用方不接触快照 JSON 列，见 sustainability.py #95 序列化契约）；
@@ -93,9 +99,15 @@ def _assess_and_cache(code, dividend, assessor, total_shares, dividend_total,
             latest_dividend_year=dividend.real_yield_year,
             industry=industry,
         )
-    verdict = getattr(result, "verdict", "未评估")
-    _sus_cache[code] = verdict
-    return verdict
+    ev = {
+        "verdict": getattr(result, "verdict", "未评估"),
+        "cagr": getattr(result, "dividend_cagr", None),
+        "trend": getattr(result, "dividend_trend", None),
+        "years": getattr(result, "dividend_cagr_years", 0) or 0,
+        "note": getattr(result, "dividend_cagr_note", None),
+    }
+    _sus_cache[code] = ev
+    return ev
 
 
 def make_sustainability_evaluator(
@@ -103,7 +115,7 @@ def make_sustainability_evaluator(
     *,
     assessor: Optional[Callable[[str], object]] = None,
     max_consecutive_failures: int = DEFAULT_MAX_CONSECUTIVE_FAILURES,
-) -> Callable[[FunnelCandidate], str]:
+) -> Callable[[FunnelCandidate], "SusEvaluation"]:
     """构造漏斗④ 的可持续性评估回调（数据获取层）：限流 + 缓存复用 + 评估。
 
     返回单股 verdict 字符串。缓存命中（未过期）时跳过限流等待（零网络）；
@@ -116,19 +128,19 @@ def make_sustainability_evaluator(
     """
     consecutive_failures = 0
 
-    def evaluate(candidate: FunnelCandidate) -> str:
+    def evaluate(candidate: FunnelCandidate) -> "SusEvaluation":
         nonlocal consecutive_failures
         code = candidate.code
         dividend = candidate.dividend
         if dividend is None:
-            return "未评估"
+            return SusEvaluation(verdict="未评估")
         snap = cache.get_sustainability(code) if cache else None
         if snap is not None and snap.industry and not candidate.industry:
             candidate.industry = snap.industry
         cached_ok = snap is not None and not cache.is_sustainability_stale(code)
         if not cached_ok and assessor is None:
             batch_wait()
-        verdict = fetch_or_default(
+        ev = fetch_or_default(
             code,
             lambda: evaluate_sustainability(
                 code, dividend, assessor=assessor,
@@ -136,11 +148,12 @@ def make_sustainability_evaluator(
                 dividend_total=dividend.total_dividend,
                 industry=candidate.industry,
                 cache=cache,
-            )["verdict"],
+            ),
             label="可持续性",
             timeout_s=SUS_FETCH_TIMEOUT,
-            default="未评估",
+            default={"verdict": "未评估"},
         )
+        verdict = ev["verdict"]
         if verdict == "未评估" and not cached_ok:
             consecutive_failures += 1
             if consecutive_failures >= max_consecutive_failures:
@@ -150,7 +163,13 @@ def make_sustainability_evaluator(
                 )
         else:
             consecutive_failures = 0
-        return verdict
+        return SusEvaluation(
+            verdict=verdict,
+            cagr=ev.get("cagr"),
+            trend=ev.get("trend"),
+            years=ev.get("years") or 0,
+            note=ev.get("note"),
+        )
 
     return evaluate
 

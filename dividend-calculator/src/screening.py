@@ -30,7 +30,8 @@ DEFAULT_SUS_VERDICT = ("可持续", "偏弱")
 # CSV 12 列契约（export_screener_json.py 与选股页列定义共用；改动需三处同步；
 # 「股东总回报率%」于 2026-09 起 11 列 → 12 列，历史 11 列表头由 export 白名单放行，见 ADR-0003）
 FIELDS = ["代码", "名称", "TTM股息率%", "真实股息率%", "估值区间", "市赚率PR",
-          "行业", "可持续性", "ROE%", "股东总回报率%", "总市值(亿)", "数据来源"]
+          "行业", "可持续性", "ROE%", "股东总回报率%", "总市值(亿)", "数据来源",
+          "股息CAGR%", "股息趋势"]
 
 
 @dataclass(frozen=True)
@@ -58,6 +59,11 @@ class FunnelCandidate:
     real_yield_now: Optional[float] = None
     ttm_yield_now: Optional[float] = None
     used_fallback: bool = False
+    # 股息增长率（#30，评估器填充；仅展示，不进判据）
+    dividend_cagr: Optional[float] = None
+    dividend_trend: Optional[str] = None
+    dividend_cagr_years: int = 0
+    dividend_cagr_note: Optional[str] = None
     # 四级通过标记
     pass_viability: bool = False
     pass_yield: bool = False
@@ -79,6 +85,23 @@ class FunnelResult:
     pr_reject_reasons: Dict[str, int] = field(default_factory=dict)
     """漏斗③ 淘汰原因分布（估值区间 → 只数）。用于区分「数据缺失」与「估值不达标」：
     2026-11 排查中无法判断 ②→③ 的淘汰里多少是 finance 快照缺失。"""
+
+
+@dataclass(frozen=True)
+class SusEvaluation:
+    """漏斗④ 的评估产出：verdict 用于判据，其余字段仅随行输出（#30）。"""
+    verdict: str = ""
+    cagr: Optional[float] = None
+    trend: Optional[str] = None
+    years: int = 0
+    note: Optional[str] = None
+
+
+def as_sus_evaluation(value) -> "SusEvaluation":
+    """兼容旧回调：返回字符串视为 verdict，返回 SusEvaluation 原样透传。"""
+    if isinstance(value, SusEvaluation):
+        return value
+    return SusEvaluation(verdict=str(value or ""))
 
 
 @dataclass(frozen=True)
@@ -126,7 +149,7 @@ def run_funnel(
     config: FunnelConfig = FunnelConfig(),
     *,
     evaluate_pr: Callable[[FunnelCandidate], PrValuation] = default_pr_evaluator,
-    evaluate_sustainability: Callable[[FunnelCandidate], str] = lambda c: "",
+    evaluate_sustainability: Callable[[FunnelCandidate], object] = lambda c: "",
 ) -> FunnelResult:
     """四级漏斗主流程（判定 + 降级 + 分层过滤）。
 
@@ -192,7 +215,12 @@ def run_funnel(
         stage_counts[2] += 1
 
         # ④ 可持续性（评估由数据获取层注入）
-        c.verdict = evaluate_sustainability(c)
+        sus = as_sus_evaluation(evaluate_sustainability(c))
+        c.verdict = sus.verdict
+        c.dividend_cagr = sus.cagr
+        c.dividend_trend = sus.trend
+        c.dividend_cagr_years = sus.years
+        c.dividend_cagr_note = sus.note
         if c.verdict not in config.sus_verdict:
             continue
         c.pass_sus = True
@@ -206,7 +234,7 @@ def run_funnel(
 
 
 def build_output_rows(result: FunnelResult) -> List[dict]:
-    """FunnelResult → 12 列 CSV 行（与 FIELDS 契约一致），按真实股息率降序。
+    """FunnelResult → 14 列 CSV 行（与 FIELDS 契约一致），按真实股息率降序。
 
     与既有输出口径一致：实时股息率 = 分红总额 / 当日市值（缺失显示空串，
     不使用漏斗② 的回退旧值——CSV 如实标注缺失）。
@@ -237,6 +265,8 @@ def build_output_rows(result: FunnelResult) -> List[dict]:
             "股东总回报率%": tsr if tsr is not None else "",
             "总市值(亿)": round(market_cap / 1e8, 2) if market_cap else "",
             "数据来源": (d.dividend_source if d else "") + " / " + (q.source if q else "腾讯"),
+            "股息CAGR%": round(c.dividend_cagr * 100, 1) if c.dividend_cagr is not None else "",
+            "股息趋势": c.dividend_trend or "",
         })
     rows.sort(key=lambda r: r["真实股息率%"] if isinstance(r["真实股息率%"], float) else -1, reverse=True)
     return rows

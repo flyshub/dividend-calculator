@@ -225,11 +225,11 @@ class TestAssessFromCache:
 class TestMakeEvaluator:
     def test_returns_verdict_via_assessor(self):
         ev = make_sustainability_evaluator(None, assessor=lambda c: _FakeResult("可持续"))
-        assert ev(_candidate()) == "可持续"
+        assert ev(_candidate()).verdict == "可持续"
 
     def test_missing_dividend_returns_unassessed(self):
         ev = make_sustainability_evaluator(None, assessor=lambda c: _FakeResult("可持续"))
-        assert ev(_candidate(dividend=None)) == "未评估"
+        assert ev(_candidate(dividend=None)).verdict == "未评估"
 
     def test_fills_industry_from_snapshot(self, tmp_path):
         """纯缓存路径无行业：快照行业补进候选，供输出行使用（不走网络评估）。"""
@@ -242,7 +242,7 @@ class TestMakeEvaluator:
         c = _candidate()
         with _patch("src.sustainability.assess_with_auto_fetch") as mock_assess:
             mock_assess.return_value = _FakeResult("可持续")
-            assert ev(c) == "可持续"
+            assert ev(c).verdict == "可持续"
             # 缓存命中走注入路径：行业来自快照
             assert mock_assess.call_args.kwargs["industry"] == "电力"
         assert c.industry == "电力"
@@ -257,8 +257,8 @@ class TestEvaluatorAbort:
 
         ev = make_sustainability_evaluator(
             None, assessor=boom, max_consecutive_failures=3)
-        assert ev(_candidate()) == "未评估"
-        assert ev(_candidate()) == "未评估"
+        assert ev(_candidate()).verdict == "未评估"
+        assert ev(_candidate()).verdict == "未评估"
         with pytest.raises(RuntimeError, match="可持续性取数连续 3 只无结果"):
             ev(_candidate())
 

@@ -444,8 +444,10 @@ class TestDefaults:
         assert DEFAULT_PR_ZONE == ("合理偏低", "低估")
         assert DEFAULT_SUS_VERDICT == ("可持续", "偏弱")
 
-    def test_fields_contract_12_columns(self):
-        assert len(FIELDS) == 12
+    def test_fields_contract_14_columns(self):
+        # #30 追加两列（股息CAGR% / 股息趋势）在末尾，既有 12 列顺序不变
+        assert len(FIELDS) == 14
+        assert FIELDS[-2:] == ["股息CAGR%", "股息趋势"]
         assert FIELDS[0] == "代码"
         assert "行业" in FIELDS
         # TSR 列插在 ROE% 之后、总市值(亿) 之前（Q7-A：双端同序）

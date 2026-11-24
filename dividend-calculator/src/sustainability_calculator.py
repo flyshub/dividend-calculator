@@ -14,7 +14,7 @@
 """
 import math
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from .datasource.validation import check_net_profit, check_roe
 
@@ -115,6 +115,11 @@ class DividendHistory:
     latest_year_amount: Optional[float]    # 最新财年分红总额（元）
     history_mean_amount: Optional[float]   # 历史年均分红总额（元，不含最新年）
     history_3y_mean: Optional[float] = None  # 近3年（最新年前3年）年均分红（元）；突击分红判断用
+    # 股息增长率（#30）：由 compute_dividend_cagr 从同一年份聚合派生，不进评分
+    cagr: Optional[float] = None            # 年化增长率（小数）
+    trend: Optional[str] = None             # 增长 / 平稳 / 萎缩
+    cagr_years: int = 0                     # 参与计算的连续年数
+    cagr_note: Optional[str] = None         # 数据不足原因 / 特别分红警示
 
 
 @dataclass
@@ -153,6 +158,11 @@ class SustainabilityResult:
     notes: List[str] = field(default_factory=list)  # 缺失数据说明
     latest_annual_year: Optional[int] = None  # 最新年报财年（数据新鲜度判定用，#13）
     score_100: Optional[float] = None  # 加权总分映射 0~100（score×50，便于排序筛选，#20）
+    # 股息增长率（#30）：仅展示，不参与评分与判据
+    dividend_cagr: Optional[float] = None       # 年化增长率（小数）
+    dividend_trend: Optional[str] = None        # 增长 / 平稳 / 萎缩
+    dividend_cagr_years: int = 0                # 参与计算的连续年数
+    dividend_cagr_note: Optional[str] = None    # 数据不足原因 / 特别分红警示
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +209,95 @@ def compute_fcf_coverage(fcf: Optional[float],
                          dividend_total: Optional[float]) -> Optional[float]:
     """自由现金流覆盖倍数 = FCF / 分红总额。"""
     return _safe_ratio(fcf, dividend_total)
+
+
+# 股息 CAGR / 趋势（#30）——口径：以最新财年为终点的连续年报分红窗口
+CAGR_MAX_YEARS = 5          # 窗口上限（含最新财年）
+CAGR_MIN_YEARS = 3          # 少于 3 个连续年不估（两点连线没有趋势含义）
+CAGR_GROWTH = 0.05          # 年化 > +5% → 增长
+CAGR_DECLINE = -0.05        # 年化 < -5% → 萎缩
+
+
+@dataclass
+class DividendCagr:
+    """分红总额的年化增长率与趋势。cagr 为小数（0.084 = 8.4%/年）。"""
+    cagr: Optional[float] = None
+    trend: Optional[str] = None      # 增长 / 平稳 / 萎缩
+    years: int = 0                   # 参与计算的连续年数
+    note: Optional[str] = None       # 人类可读说明（数据不足原因 / 特别分红警示）
+
+
+def compute_dividend_cagr(year_amount: Dict[str, float],
+                          complete_years: Optional[Sequence] = None,
+                          *, max_years: int = CAGR_MAX_YEARS,
+                          min_years: int = CAGR_MIN_YEARS) -> DividendCagr:
+    """按年分红总额 → 年化增长率（CAGR）与趋势。
+
+    窗口规则：从**最新完整财年**向前取连续年份，遇缺年或零分红即停，最多 max_years 年。
+    不连续时宁可不估（跳过空年把更早的高分红拉进来会系统性虚增增长率）。
+
+    complete_years：有年报记录的财年集合。缺省时用全部年份（仅测试/兜底）。
+    必须传它——当年只有中期分配的财年（如 2026 中期）分红额天然不完整，
+    拿来当窗口端点会把增长率算成暴跌（中远海控 2026 中期 vs 2022 全年 = -41%，
+    真实 2021→2025 是 +2.5%/年）。
+    """
+    amounts: Dict[int, float] = {}
+    for key, value in (year_amount or {}).items():
+        try:
+            year = int(str(key)[:4])
+        except (TypeError, ValueError):
+            continue
+        if value is not None:
+            amounts[year] = float(value)
+
+    if not amounts:
+        return DividendCagr()
+
+    if complete_years is not None:
+        complete = set()
+        for y in complete_years:
+            try:
+                complete.add(int(str(y)[:4]))
+            except (TypeError, ValueError):
+                continue
+        candidates = [y for y in amounts if y in complete]
+    else:
+        candidates = list(amounts)
+    if not candidates:
+        return DividendCagr(note="无完整财年分红数据，不估增长率")
+    latest = max(candidates)
+    if amounts[latest] <= 0:
+        return DividendCagr(years=1, note="最新财年无现金分红，不估增长率")
+
+    chain: List[float] = []
+    year = latest
+    while (year in amounts and amounts[year] > 0
+           and (complete_years is None or year in complete) and len(chain) < max_years):
+        chain.append(amounts[year])
+        year -= 1
+
+    if len(chain) < min_years:
+        return DividendCagr(
+            years=len(chain),
+            note=f"连续分红年数不足 {min_years} 年（{len(chain)} 年），不估增长率")
+
+    start, end = chain[-1], chain[0]
+    cagr = (end / start) ** (1.0 / (len(chain) - 1)) - 1.0
+    if cagr > CAGR_GROWTH:
+        trend = "增长"
+    elif cagr < CAGR_DECLINE:
+        trend = "萎缩"
+    else:
+        trend = "平稳"
+
+    note = None
+    others = sorted(chain[1:])
+    if others:
+        baseline = others[len(others) // 2]
+        if baseline > 0 and max(chain) > baseline * WARN_SPECIAL_DIV_MULTIPLE:
+            note = "窗口内某年分红远超其余年份（周期高峰或特别分红），增长率会被放大"
+
+    return DividendCagr(cagr=cagr, trend=trend, years=len(chain), note=note)
 
 
 def compute_payout_ratio(dividend_total: Optional[float],

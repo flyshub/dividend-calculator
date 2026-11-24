@@ -141,6 +141,30 @@ def test_aggregate_detects_cut():
     assert h.ever_cut is True  # 2023 削减（近 10 年窗口内）
 
 
+def test_aggregate_fills_dividend_cagr():
+    """#30：聚合时顺带给出 CAGR/趋势（同一份年份聚合，不新增取数）。"""
+    h = aggregate_dividend_history(_div_records(), "2025", 1e9)
+    # 窗口 2021~2025 = 5,5,2,5,5 → 首尾相同，年化为 0（中间那年的坑不影响首尾比）
+    assert h.cagr == 0.0 and h.trend == "平稳"
+    assert h.cagr_years == 5
+
+
+def test_aggregate_cagr_declining_series():
+    recs = [DividendRecord(ex_dividend_date=f"{y}-07-01",
+                           dividend_per_10=10.0 * (0.9 ** (y - 2021)),
+                           report_time=f"{y}年报") for y in range(2021, 2026)]
+    h = aggregate_dividend_history(recs, "2025", 1e9)
+    assert h.cagr == pytest.approx(-0.10, abs=1e-6)
+    assert h.trend == "萎缩"
+
+
+def test_aggregate_cagr_none_when_history_short():
+    recs = [DividendRecord(ex_dividend_date=f"{y}-07-01", dividend_per_10=5.0,
+                           report_time=f"{y}年报") for y in (2024, 2025)]
+    h = aggregate_dividend_history(recs, "2025", 1e9)
+    assert h.cagr is None and h.cagr_years == 2
+
+
 def test_aggregate_cut_outside_10y_window_ignored():
     """10 年窗口之外的削减不计入 ever_cut（如伊利 2014 年波动不影响 2016~2025 连涨）。"""
     recs = []

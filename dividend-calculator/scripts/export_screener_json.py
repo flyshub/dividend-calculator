@@ -37,10 +37,13 @@ RETENTION_DAYS = 90
 # 页面渲染为空白；其余任何缺列/换列/多列仍严格报错（防漂移初衷保留）。
 LEGACY_FIELDS_11 = ["代码", "名称", "TTM股息率%", "真实股息率%", "估值区间", "市赚率PR",
                     "行业", "可持续性", "ROE%", "总市值(亿)", "数据来源"]
+# #30 之前的 12 列表头（含 TSR，无股息 CAGR/趋势）——2026-11 及更早的历史 CSV 就是这个形状
+LEGACY_FIELDS_12 = LEGACY_FIELDS_11[:9] + ["股东总回报率%"] + LEGACY_FIELDS_11[9:]
 
-# CSV 12 列 → JSON 字段（数字列转 float）。列定义来自 src.screening.FIELDS，
+# CSV 14 列 → JSON 字段（数字列转 float）。列定义来自 src.screening.FIELDS，
 # （screener_daily.yml 每日跑本脚本时，export 会校验 CSV 表头与 FIELDS 一致，防漂移）。
-NUMERIC = {"TTM股息率%", "真实股息率%", "市赚率PR", "ROE%", "股东总回报率%", "总市值(亿)"}
+NUMERIC = {"TTM股息率%", "真实股息率%", "市赚率PR", "ROE%", "股东总回报率%", "总市值(亿)",
+           "股息CAGR%"}
 
 
 def _csv_date(path: Path):
@@ -77,12 +80,12 @@ def parse_csv(path: Path) -> list:
 
     校验表头与 FIELDS 一致：缺列/换列说明选股器输出变更，需同步脚本与页面列定义，
     此时直接报错（数据铁律：口径不准宁可失败不输出错误数据）。
-    例外：历史 11 列表头（ADR-0003 白名单）放行，缺失的新列按无值处理。
+    例外：历史 11 列（ADR-0003）与 12 列（#30 前）表头白名单放行，缺失的新列按无值处理。
     """
     with open(path, encoding="utf-8") as f:
         reader = csv.DictReader(f)
         header = reader.fieldnames or []
-        if header != FIELDS and header != LEGACY_FIELDS_11:
+        if header not in (FIELDS, LEGACY_FIELDS_11, LEGACY_FIELDS_12):
             missing = [c for c in FIELDS if c not in header]
             extra = [c for c in header if c not in FIELDS]
             raise ValueError(

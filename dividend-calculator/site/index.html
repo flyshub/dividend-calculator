@@ -7,10 +7,10 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232e5be6'/%3E%3Ctext x='16' y='22' font-size='17' text-anchor='middle' fill='%23fff' font-family='-apple-system,sans-serif'%3E息%3C/text%3E%3C/svg%3E">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
   <!-- BUILD：改任何 js/*.js 必须同步升版，否则旧缓存会与新 HTML 混用（fetchForward is not a function） -->
-  <script src="js/policy.js?v=20261117-2"></script>
-  <script src="js/calculator.js?v=20261117-2"></script>
-  <script src="js/datasources.js?v=20261117-2"></script>
-  <script src="js/app.js?v=20261117-2"></script>
+  <script src="js/policy.js?v=20261124-1"></script>
+  <script src="js/calculator.js?v=20261124-1"></script>
+  <script src="js/datasources.js?v=20261124-1"></script>
+  <script src="js/app.js?v=20261124-1"></script>
   <style>
     :root {
       color-scheme: light;
@@ -954,6 +954,9 @@
           <div class="metric"><div class="label">ROE（最新）</div><div id="sus-roe" class="value"></div></div>
           <div class="metric"><div class="label">净利润同比</div><div id="sus-np-yoy" class="value"></div></div>
           <div class="metric"><div class="label">连续分红年数</div><div id="sus-consecutive" class="value"></div></div>
+          <div class="metric"><div class="label">股息年均增速</div><div id="sus-cagr" class="value"></div></div>
+        </div>
+        <div class="metric-row">
           <div class="metric"><div class="label">各维度评分</div><div id="sus-dims" class="value value--base"></div></div>
         </div>
         <p id="sus-fatal" class="alert alert--danger hidden"></p>
@@ -1561,6 +1564,22 @@
       document.getElementById('sus-roe').textContent = m.roe_latest == null ? '无' : m.roe_latest.toFixed(2) + '%';
       document.getElementById('sus-np-yoy').textContent = m.net_profit_yoy == null ? '无' : m.net_profit_yoy.toFixed(1) + '%';
       document.getElementById('sus-consecutive').textContent = m.consecutive_dividend_years == null ? '无' : parseInt(m.consecutive_dividend_years) + ' 年';
+      /* #30 股息 CAGR：趋势 + 年化 + 样本年数（仅展示，不参与评分）；样本不足时给原因 */
+      (function () {
+        const el = document.getElementById('sus-cagr');
+        if (s.dividend_cagr == null) {
+          el.textContent = s.dividend_cagr_note ? '不估（' + s.dividend_cagr_note + '）' : '无';
+          el.style.color = '';
+          return;
+        }
+        const pct = (s.dividend_cagr * 100).toFixed(1);
+        /* 主值保持单行（与相邻指标同高）；样本年数与特别分红提示放 title */
+        el.textContent = (s.dividend_trend || '') + ' ' + (s.dividend_cagr > 0 ? '+' : '') + pct + '%/年';
+        el.style.color = s.dividend_trend === '萎缩' ? '#e5534b' : (s.dividend_trend === '增长' ? '#3fb950' : '');
+        const tips = [s.dividend_cagr_years + ' 年样本'];
+        if (s.dividend_cagr_note) tips.push(s.dividend_cagr_note);
+        el.title = tips.join(' · ');
+      })();
 
       // 各维度评分
       var dims = [];

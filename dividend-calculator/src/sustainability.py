@@ -36,6 +36,7 @@ from .sustainability_calculator import (
     CUT_WINDOW_YEARS,
     DividendHistory,
     SustainabilityResult,
+    compute_dividend_cagr,
     assess_sustainability,
 )
 
@@ -304,12 +305,20 @@ def aggregate_dividend_history(records: List[DividendRecord],
             ever_cut = True
             break
 
+    # 股息增长率（#30）：复用同一年份聚合，不新增取数。
+    # complete_years = 有年报记录的财年 —— 只有中期分配的当年分红不完整，不能当窗口端点
+    growth = compute_dividend_cagr(year_amount, [int(y) for y in annual_amount])
+
     return DividendHistory(
         consecutive_years=consecutive,
         ever_cut=ever_cut,
         latest_year_amount=year_amount.get(target_year),
         history_mean_amount=history_mean,
         history_3y_mean=history_3y_mean,
+        cagr=growth.cagr,
+        trend=growth.trend,
+        cagr_years=growth.years,
+        cagr_note=growth.note,
     )
 
 
@@ -401,6 +410,11 @@ def assess_for_stock(*,
     )
     if dividend_fetch_failed and not dividend_records:
         result.notes.append("分红历史数据获取失败，历史维度不参与评分")
+    if history is not None:
+        result.dividend_cagr = history.cagr
+        result.dividend_trend = history.trend
+        result.dividend_cagr_years = history.cagr_years
+        result.dividend_cagr_note = history.cagr_note
     return result
 
 

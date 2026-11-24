@@ -188,7 +188,7 @@ class TestHeaderValidation:
     def test_legacy_11_column_header_passes(self, ex, tmp_path):
         """历史 11 列表头（无 TSR 列）白名单放行（ADR-0003）：行 dict 缺新列、不崩溃。"""
         p = tmp_path / "screener_20260809_100000.csv"
-        legacy_header = [c for c in CSV_HEADER if c != "股东总回报率%"]
+        legacy_header = ex.LEGACY_FIELDS_11
         with open(p, "w", encoding="utf-8", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=legacy_header)
             writer.writeheader()
@@ -198,9 +198,31 @@ class TestHeaderValidation:
         assert "股东总回报率%" not in rows[0], "历史行无 TSR 列，页面渲染为空白"
         assert len(rows[0]) == 11
 
+    def test_legacy_12_column_header_passes(self, ex, tmp_path):
+        """#30 之前的 12 列表头（含 TSR、无股息 CAGR/趋势）放行：行里无这两列，页面显示占位符。"""
+        p = tmp_path / "screener_20261120_100000.csv"
+        with open(p, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=ex.LEGACY_FIELDS_12)
+            writer.writeheader()
+            writer.writerow({c: "x" for c in ex.LEGACY_FIELDS_12})
+        rows = ex.parse_csv(p)
+        assert len(rows) == 1 and len(rows[0]) == 12
+        assert "股息趋势" not in rows[0] and "股息CAGR%" not in rows[0]
+
+    def test_thirteen_columns_still_rejected(self, ex, tmp_path):
+        """既非当前 14 列也非两个历史白名单（如 13 列）→ 仍报错，防漂移。"""
+        p = tmp_path / "screener_20261121_100000.csv"
+        header = [c for c in CSV_HEADER if c != "股息趋势"]
+        with open(p, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=header)
+            writer.writeheader()
+            writer.writerow({c: "x" for c in header})
+        with pytest.raises(ValueError, match="表头与 FIELDS 不一致"):
+            ex.parse_csv(p)
+
     def test_mixed_new_and_legacy_csv_both_parse(self, ex, tmp_path):
         """新旧表头 CSV 混合（真实上线场景）：都能解析，互不干扰。"""
-        legacy_header = [c for c in CSV_HEADER if c != "股东总回报率%"]
+        legacy_header = ex.LEGACY_FIELDS_11
         with open(tmp_path / "screener_20260801_100000.csv", "w", encoding="utf-8", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=legacy_header)
             writer.writeheader()

@@ -67,6 +67,17 @@
     return '';
   }
 
+  /* #30 股息趋势列：增长/萎缩/平稳 + 年化 CAGR（仅展示，不参与漏斗判据）。
+   * 数据来自 CSV 的「股息趋势」「股息CAGR%」两列；旧历史 JSON 无这两列 → 显示 — */
+  function divTrendCell(r) {
+    var trend = r['股息趋势'] ? String(r['股息趋势']) : '';
+    var cagr = Number(r['股息CAGR%']);
+    if (!trend) return '<td class="num">—</td>';
+    var color = trend === '萎缩' ? '#e5534b' : (trend === '增长' ? '#3fb950' : 'inherit');
+    var pct = isFinite(cagr) ? ' ' + (cagr > 0 ? '+' : '') + cagr.toFixed(1) + '%' : '';
+    return '<td class="num"><span style="color:' + color + '">' + esc(trend) + pct + '</span></td>';
+  }
+
   // 单行渲染（行字段拼接，返回值拼进 innerHTML；字符串列已 esc）
   // 列序须与 site/screener.html 的 <th> 表头一致
   function rowHtml(r) {
@@ -74,6 +85,7 @@
       '<td>' + esc(r['名称']) + '</td>' +
       '<td class="num yield">' + fmtNum(r['真实股息率%'], 2) + '</td>' +
       '<td>' + susBadge(esc(r['可持续性'])) + susNote(r) + '</td>' +
+      divTrendCell(r) +
       '<td>' + zoneBadge(esc(r['估值区间'])) + '</td>' +
       '<td class="num">' + fmtNum(r['市赚率PR'], 2) + prNote(r) + '</td>' +
       '<td class="num">' + fmtNum(r['ROE%'], 2) + '</td>' +
@@ -84,5 +96,5 @@
       '<td>' + esc(r['数据来源']) + '</td>';
   }
 
-  return { esc: esc, fmtNum: fmtNum, zoneBadge: zoneBadge, susBadge: susBadge, noteBadge: noteBadge, prNote: prNote, susNote: susNote, tsrNote: tsrNote, rowHtml: rowHtml };
+  return { esc: esc, fmtNum: fmtNum, zoneBadge: zoneBadge, susBadge: susBadge, noteBadge: noteBadge, prNote: prNote, susNote: susNote, tsrNote: tsrNote, divTrendCell: divTrendCell, rowHtml: rowHtml };
 }));

@@ -60,6 +60,10 @@ module.exports = function formatResult(r) {
     sustainability_interest_coverage: _m(r, 'interest_coverage'),
     sustainability_consecutive_years: _m(r, 'consecutive_dividend_years'),
     sustainability_payout_ratio: _m(r, 'payout_ratio'),
+    // #30 股息增长率（与 Python SustainabilityResult 同字段名，非 metrics）
+    sustainability_dividend_cagr: r.sustainability ? r.sustainability.dividend_cagr : null,
+    sustainability_dividend_trend: r.sustainability ? r.sustainability.dividend_trend : null,
+    sustainability_dividend_cagr_years: r.sustainability ? r.sustainability.dividend_cagr_years : null,
     sustainability_explanation: r.sustainability ? (r.sustainability.explanation || []).join('\n') : null,
   };
 };

@@ -18,6 +18,7 @@ from src.sustainability_calculator import (
     compute_cf_coverage,
     compute_fcf_coverage,
     compute_payout_ratio,
+    compute_dividend_cagr,
     check_fatal_flags,
     assess_sustainability,
     explain_sustainability,
@@ -504,3 +505,104 @@ def test_explain_sustainability_fatal_flags_first():
 
 def test_explain_sustainability_not_triggered():
     assert explain_sustainability(SustainabilityResult(triggered=False, verdict="未评估")) == []
+
+
+# ---------------------------------------------------------------------------
+# 股息 CAGR / 趋势（#30）
+# ---------------------------------------------------------------------------
+
+class TestDividendCagr:
+    def test_steady_growth_10pct(self):
+        amts = {"2021": 100.0, "2022": 110.0, "2023": 121.0,
+                "2024": 133.1, "2025": 146.41}
+        r = compute_dividend_cagr(amts)
+        assert r.years == 5
+        assert r.cagr == pytest.approx(0.10, abs=1e-6)
+        assert r.trend == "增长"
+
+    def test_decline_10pct(self):
+        amts = {"2021": 100.0, "2022": 90.0, "2023": 81.0,
+                "2024": 72.9, "2025": 65.61}
+        r = compute_dividend_cagr(amts)
+        assert r.cagr == pytest.approx(-0.10, abs=1e-6)
+        assert r.trend == "萎缩"
+
+    def test_flat_is_stable(self):
+        r = compute_dividend_cagr({str(y): 100.0 for y in range(2021, 2026)})
+        assert r.cagr == pytest.approx(0.0, abs=1e-9)
+        assert r.trend == "平稳"
+
+    def test_two_years_is_none(self):
+        r = compute_dividend_cagr({"2024": 100.0, "2025": 110.0})
+        assert r.cagr is None and r.trend is None and r.years == 2
+
+    def test_gap_breaks_window(self):
+        # 2023 缺年 → 从 2025 向前只有 2 个连续年 → 不估
+        r = compute_dividend_cagr({"2021": 80.0, "2022": 90.0,
+                                   "2024": 100.0, "2025": 110.0})
+        assert r.cagr is None and r.years == 2
+
+    def test_zero_year_breaks_window(self):
+        r = compute_dividend_cagr({"2021": 80.0, "2022": 90.0,
+                                   "2023": 100.0, "2024": 0.0, "2025": 110.0})
+        assert r.cagr is None
+
+    def test_missing_latest_year_is_none(self):
+        # 最新财年无现金分红（只有送转/中期）→ 无 CAGR 可言
+        assert compute_dividend_cagr({"2024": 100.0}).cagr is None
+
+    def test_window_caps_at_five_years(self):
+        amts = {str(y): 100.0 * (1.1 ** (y - 2016)) for y in range(2016, 2026)}
+        r = compute_dividend_cagr(amts)
+        assert r.years == 5
+        assert r.cagr == pytest.approx(0.10, abs=1e-6)
+
+    def test_special_dividend_note(self):
+        amts = {"2021": 100.0, "2022": 100.0, "2023": 100.0,
+                "2024": 100.0, "2025": 300.0}
+        r = compute_dividend_cagr(amts)
+        assert r.cagr is not None
+        assert "特别分红" in (r.note or "")
+
+    def test_no_special_note_for_steady_growth(self):
+        amts = {"2021": 100.0, "2022": 110.0, "2023": 121.0,
+                "2024": 133.1, "2025": 146.41}
+        assert compute_dividend_cagr(amts).note is None
+
+    def test_empty(self):
+        r = compute_dividend_cagr({})
+        assert r.cagr is None and r.years == 0
+
+
+class TestDividendCagrCompleteYears:
+    """#30 回归：当年只有中期分配时不得当窗口端点（中远海控 2026 中期 vs 2022 全年 = -41% 假暴跌）。"""
+
+    AMOUNTS = {"2026": 6.54e9, "2025": 15.39e9, "2024": 24.25e9,
+               "2023": 11.86e9, "2022": 54.83e9, "2021": 13.93e9}
+    COMPLETE = ["2021", "2022", "2023", "2024", "2025"]
+
+    def test_partial_latest_year_is_skipped(self):
+        from src.sustainability_calculator import compute_dividend_cagr
+        r = compute_dividend_cagr(self.AMOUNTS, self.COMPLETE)
+        assert r.years == 5, "窗口应从 2025 起算，不含 2026 中期"
+        expected = (15.39e9 / 13.93e9) ** 0.25 - 1
+        assert abs(r.cagr - expected) < 1e-9
+        assert r.trend == "平稳"
+
+    def test_without_complete_years_reproduces_bug(self):
+        """缺省 complete_years 时仍按全部年份（兜底语义），正是要避免的 -41%。"""
+        from src.sustainability_calculator import compute_dividend_cagr
+        r = compute_dividend_cagr(self.AMOUNTS)
+        assert r.cagr < -0.4 and r.trend == "萎缩"
+
+    def test_zero_annual_dividend_year_breaks_chain(self):
+        """完整财年但当年现金分红为 0（纯转送股）→ 链条断开，不跨过该年。"""
+        from src.sustainability_calculator import compute_dividend_cagr
+        amounts = {"2025": 10.0, "2024": 0.0, "2023": 9.0, "2022": 8.0, "2021": 7.0}
+        r = compute_dividend_cagr(amounts, ["2021", "2022", "2023", "2024", "2025"])
+        assert r.years == 1 and r.cagr is None
+
+    def test_no_complete_year_returns_note(self):
+        from src.sustainability_calculator import compute_dividend_cagr
+        r = compute_dividend_cagr({"2026": 6.5e9}, ["2025"])
+        assert r.cagr is None and "完整财年" in (r.note or "")

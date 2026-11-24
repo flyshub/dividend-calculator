@@ -109,6 +109,10 @@
 | `warning_flags` | list[str] | 情境红旗理由（带数值） |
 | `dimension_scores` | dict | 各维度 0/1/2 分 |
 | `metrics` | dict | 支撑数据（payout_ratio、operating_cf、capex、free_cash_flow、cf_coverage、fcf_coverage、debt_ratio、interest_coverage、roe_latest、net_profit_yoy、consecutive_dividend_years、ever_cut、银行专项等） |
+| `dividend_cagr` | float\|None | **股息年化增长率（小数）**，`compute_dividend_cagr()` 从按财年聚合的现金分红总额派生；仅展示，**不参与评分与漏斗判据**（#30） |
+| `dividend_trend` | str\|None | 增长 / 平稳 / 萎缩（阈值 ±5%/年） |
+| `dividend_cagr_years` | int | 参与 CAGR 的连续年份数（窗口上限 5 年，不足 3 年不估） |
+| `dividend_cagr_note` | str\|None | 不估原因（样本不足/最新年无分红）或特别分红警示 |
 | `branch` | str | general / finance / general-fallback |
 | `notes` | list[str] | 缺失数据说明 |
 | `explanation` | list[str] | **结论白话说明**（`explain_sustainability()` / JS `explainSustainability()` 生成，双端逐字一致） |
@@ -131,6 +135,20 @@ N. 优势项：{强维度（≤2 条）} ← 偏弱/可持续时列出，带支�
 - 例（601919 偏弱）：`结论：偏弱 — 分红有一定基础，但存在隐忧，长期分红能力可能打折扣` / `1. 盈利稳定性：ROE 13.17%、净利润同比 -37.1%，盈利在下滑，分红难持续` / `2. 属强周期行业，盈利随景气波动大，高分红难年年保证` / `3. 连续分红 5 年，尚不算长期稳定` / `4. 优势项：现金流覆盖 2.98 倍（充裕）、支付率 49.5%（健康）`。
 
 ---
+
+### 3.2 股息增长率（#30）
+
+```
+窗口：从最新财年向前，遇缺年或零分红即停，最多 5 年；< 3 年不估
+CAGR = (最新年分红总额 / 窗口首年分红总额) ^ (1 / (年数-1)) − 1
+趋势 = 增长 (> +5%/年) / 平稳 (−5%~+5%) / 萎缩 (< −5%/年)
+```
+
+- 分子分母都用**总额法**（每次分红 × 该次登记股本），与主口径一致，免疫送转。
+- **窗口端点必须是「完整财年」**（该年有年报记录）。当年只有中期分配时，分红天然不完整，拿它当端点会把增长率算成暴跌：中远海控 2026 中期 6.5 亿 vs 2022 全年 54.8 亿 → −41%，而真实 2021→2025 是 +2.5%/年。`compute_dividend_cagr(year_amount, complete_years)` 的第二个参数就是这个约束（JS `computeDividendCagr(yearAmount, completeYears)` 同）。
+- 窗口内某年分红 > 其余年份中位数 2 倍时记「某年分红远超其余年份（周期高峰或特别分红），增长率会被放大」——不剔除该年，只提示。
+- 用途：判断分红是在增长、持平还是缩水。**不进漏斗判据、不改 verdict**；页面「股息年均增速」与选股器「股息趋势」列只做展示（单股页在可持续性卡，选股器在 CSV 第 13/14 列）。
+- 双端：`src/sustainability_calculator.py::compute_dividend_cagr` ↔ `site/js/calculator.js::computeDividendCagr`，11 个用例一一对应，`verify_js_vs_python.py` 对拍 `dividend_cagr/trend/years`。
 
 ## 4. 数据来源
 

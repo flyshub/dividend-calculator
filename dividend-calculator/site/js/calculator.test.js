@@ -1231,3 +1231,80 @@ test('parseDividendRecords 输出 yearlyDividendTotals（逐笔登记股本）',
   ], 1.0e9);
   approx(div.yearlyDividendTotals[2025], 10.0 / 10 * 1.5e9 + 2.0 / 10 * 1.0e9);
 });
+
+/* ── computeDividendCagr（#30，对齐 Python compute_dividend_cagr 全部用例） ── */
+test('computeDividendCagr 稳定增长 10%', () => {
+  const r = Calc.computeDividendCagr({ 2021: 100, 2022: 110, 2023: 121, 2024: 133.1, 2025: 146.41 });
+  assert.equal(r.years, 5);
+  assert.ok(Math.abs(r.cagr - 0.10) < 1e-6);
+  assert.equal(r.trend, '增长');
+});
+test('computeDividendCagr 下降 10%', () => {
+  const r = Calc.computeDividendCagr({ 2021: 100, 2022: 90, 2023: 81, 2024: 72.9, 2025: 65.61 });
+  assert.ok(Math.abs(r.cagr + 0.10) < 1e-6);
+  assert.equal(r.trend, '萎缩');
+});
+test('computeDividendCagr 持平为平稳', () => {
+  const r = Calc.computeDividendCagr({ 2021: 100, 2022: 100, 2023: 100, 2024: 100, 2025: 100 });
+  assert.equal(r.cagr, 0);
+  assert.equal(r.trend, '平稳');
+});
+test('computeDividendCagr 两年不估', () => {
+  const r = Calc.computeDividendCagr({ 2024: 100, 2025: 110 });
+  assert.equal(r.cagr, null);
+  assert.equal(r.trend, null);
+  assert.equal(r.years, 2);
+});
+test('computeDividendCagr 缺年截断窗口', () => {
+  const r = Calc.computeDividendCagr({ 2021: 80, 2022: 90, 2024: 100, 2025: 110 });
+  assert.equal(r.cagr, null);
+  assert.equal(r.years, 2);
+});
+test('computeDividendCagr 零分红年截断', () => {
+  const r = Calc.computeDividendCagr({ 2021: 80, 2022: 90, 2023: 100, 2024: 0, 2025: 110 });
+  assert.equal(r.cagr, null);
+});
+test('computeDividendCagr 最新年无分红不估', () => {
+  assert.equal(Calc.computeDividendCagr({ 2024: 100 }).cagr, null);
+});
+test('computeDividendCagr 窗口上限 5 年', () => {
+  const amts = {};
+  for (let y = 2016; y <= 2025; y++) amts[y] = 100 * Math.pow(1.1, y - 2016);
+  const r = Calc.computeDividendCagr(amts);
+  assert.equal(r.years, 5);
+  assert.ok(Math.abs(r.cagr - 0.10) < 1e-6);
+});
+test('computeDividendCagr 特别分红给出说明', () => {
+  const r = Calc.computeDividendCagr({ 2021: 100, 2022: 100, 2023: 100, 2024: 100, 2025: 300 });
+  assert.notEqual(r.cagr, null);
+  assert.ok(String(r.note).indexOf('特别分红') !== -1);
+});
+test('computeDividendCagr 稳定增长无特别分红说明', () => {
+  const r = Calc.computeDividendCagr({ 2021: 100, 2022: 110, 2023: 121, 2024: 133.1, 2025: 146.41 });
+  assert.equal(r.note, null);
+});
+test('computeDividendCagr 空输入', () => {
+  const r = Calc.computeDividendCagr({});
+  assert.equal(r.cagr, null);
+  assert.equal(r.years, 0);
+});
+
+test('computeDividendCagr 跳过只有中期分配的当年（#30 回归）', () => {
+  const amounts = { '2026': 6.54e9, '2025': 15.39e9, '2024': 24.25e9,
+                    '2023': 11.86e9, '2022': 54.83e9, '2021': 13.93e9 };
+  const complete = { '2021': 1, '2022': 1, '2023': 1, '2024': 1, '2025': 1 };
+  const r = Calc.computeDividendCagr(amounts, complete);
+  assert.strictEqual(r.years, 5);
+  assert.ok(Math.abs(r.cagr - (Math.pow(15.39e9 / 13.93e9, 0.25) - 1)) < 1e-12);
+  assert.strictEqual(r.trend, '平稳');
+  // 缺省时按全部年份（兜底）→ 正是要避免的假暴跌
+  assert.ok(Calc.computeDividendCagr(amounts).cagr < -0.4);
+});
+
+test('computeDividendCagr 完整财年但零分红 → 链条断开', () => {
+  const r = Calc.computeDividendCagr(
+    { '2025': 10, '2024': 0, '2023': 9, '2022': 8, '2021': 7 },
+    { '2021': 1, '2022': 1, '2023': 1, '2024': 1, '2025': 1 });
+  assert.strictEqual(r.years, 1);
+  assert.strictEqual(r.cagr, null);
+});

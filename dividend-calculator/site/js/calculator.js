@@ -336,6 +336,63 @@
   }
 
   /* 按财年聚合 → {consecutive_years, ever_cut, latest_year_amount, history_mean_amount} */
+  /* ── 股息 CAGR / 趋势（#30，对齐 sustainability_calculator.compute_dividend_cagr）──
+   * 窗口：从最新财年向前取连续年份，遇缺年/零分红即停，最多 5 年；不足 3 年不估。
+   * 返回 {cagr, trend, years, note}，cagr 为小数（0.084 = 8.4%/年）。 */
+  var DIV_CAGR_MAX_YEARS = 5;
+  var DIV_CAGR_MIN_YEARS = 3;
+  var DIV_CAGR_GROWTH = 0.05;
+  var DIV_CAGR_DECLINE = -0.05;
+
+  function computeDividendCagr(yearAmount, completeYears) {
+    var amounts = {};
+    Object.keys(yearAmount || {}).forEach(function (k) {
+      var y = parseInt(String(k).slice(0, 4), 10);
+      var v = yearAmount[k];
+      if (!isNaN(y) && v != null) amounts[y] = Number(v);
+    });
+    var years = Object.keys(amounts).map(Number);
+    if (!years.length) return { cagr: null, trend: null, years: 0, note: null };
+    /* completeYears：有年报记录的财年（当年只有中期分配时分红不完整，不能当窗口端点） */
+    var complete = null;
+    if (completeYears) {
+      complete = {};
+      Object.keys(completeYears).forEach(function (k) {
+        var y = parseInt(String(k).slice(0, 4), 10);
+        if (!isNaN(y)) complete[y] = true;
+      });
+      years = years.filter(function (y) { return complete[y]; });
+      if (!years.length) return { cagr: null, trend: null, years: 0, note: '无完整财年分红数据，不估增长率' };
+    }
+    var latest = Math.max.apply(null, years);
+    if (!(amounts[latest] > 0)) {
+      return { cagr: null, trend: null, years: 1, note: '最新财年无现金分红，不估增长率' };
+    }
+    var chain = [];
+    var y = latest;
+    while (amounts[y] != null && amounts[y] > 0 && (!complete || complete[y])
+           && chain.length < DIV_CAGR_MAX_YEARS) {
+      chain.push(amounts[y]); y -= 1;
+    }
+    if (chain.length < DIV_CAGR_MIN_YEARS) {
+      return { cagr: null, trend: null, years: chain.length,
+               note: '连续分红年数不足 ' + DIV_CAGR_MIN_YEARS + ' 年（' + chain.length + ' 年），不估增长率' };
+    }
+    var start = chain[chain.length - 1], end = chain[0];
+    var cagr = Math.pow(end / start, 1 / (chain.length - 1)) - 1;
+    var trend = cagr > DIV_CAGR_GROWTH ? '增长' : (cagr < DIV_CAGR_DECLINE ? '萎缩' : '平稳');
+    var note = null;
+    var others = chain.slice(1).sort(function (a, b) { return a - b; });
+    if (others.length) {
+      var baseline = others[Math.floor(others.length / 2)];
+      var peak = Math.max.apply(null, chain);
+      if (baseline > 0 && peak > baseline * SUS_WARN.special_div) {
+        note = '窗口内某年分红远超其余年份（周期高峰或特别分红），增长率会被放大';
+      }
+    }
+    return { cagr: cagr, trend: trend, years: chain.length, note: note };
+  }
+
   function _aggregateDividendHistory(yearly, targetYear, totalShares) {
     /* P1-1: 每笔分红用各自行股本（历史股本）折算，缺失/无效回退参数股本 —— 与 Python 逐记录一致 */
     function recShares(d) {
@@ -353,17 +410,27 @@
      * report_time 为 'YYYY年报'/'YYYY中期分配'（注意 '中期分配' 不含 '年报' 子串，双重判断防 '半年报'）。
      * 半年报混入会掩盖相邻年降幅（如 2025 年报 8 元 + 半年报 3 元被当作 11 元）。 */
     var annualAmount = {};
+    /* 完整财年集合：该年至少有一条年报记录（Python annual_amount 的 key 语义）。
+     * 不能只看 annualAmount[y] 是否存在——那会给"只有中期分配"的当年填 0，
+     * 使其被当成完整财年（#30：中远海控/宝钢 的 CAGR 曾因此算成暴跌）。 */
+    var completeYears = {};
     Object.keys(yearly).forEach(function (y) {
       var sum = 0;
+      var hasAnnual = false;
       (yearly[y].details || []).forEach(function (d) {
         var t = String(d.report_time || '');
-        if (t.indexOf('年报') !== -1 && t.indexOf('半年报') === -1) sum += (Number(d.dividend_per_10) || 0) / 10.0 * recShares(d);
+        if (t.indexOf('年报') !== -1 && t.indexOf('半年报') === -1) {
+          hasAnnual = true;
+          sum += (Number(d.dividend_per_10) || 0) / 10.0 * recShares(d);
+        }
       });
       annualAmount[y] = sum;
+      if (hasAnnual) completeYears[y] = 1;
     });
     var yearsSorted = Object.keys(yearAmount).map(Number).sort(function (a, b) { return b - a; });
     if (!yearsSorted.length) {
-      return { consecutive_years: 0, ever_cut: false, latest_year_amount: null, history_mean_amount: null, year_amounts: {} };
+      return { consecutive_years: 0, ever_cut: false, latest_year_amount: null, history_mean_amount: null,
+               year_amounts: {}, cagr: null, trend: null, cagr_years: 0, cagr_note: null };
     }
     /* 基准财年：优先传入的 targetYear（须在数据中），否则最新有分红年——对齐 Python target_year */
     var baseYear = (targetYear && yearAmount[targetYear] != null) ? parseInt(targetYear, 10) : yearsSorted[0];
@@ -397,8 +464,11 @@
       var prev = annualAmount[String(prevY)], cur = annualAmount[String(curY)];
       if (prev > 0 && cur < prev * 0.7) { everCut = true; break; }
     }
+    var growth = computeDividendCagr(yearAmount, completeYears);
     return {
       consecutive_years: consecutive, ever_cut: everCut,
+      cagr: growth.cagr, trend: growth.trend,
+      cagr_years: growth.years, cagr_note: growth.note,
       /* #35: 用 baseYear（最新有年报年，含 fallback，与 Python target_year 语义一致）而非最大年份 */
       latest_year_amount: yearAmount[String(baseYear)] || null,
       history_mean_amount: historyMean,
@@ -1178,6 +1248,12 @@
                                     latest_year_amount: dividendTotal, history_mean_amount: null };
     if (!opts.history) result.notes.push('分红历史缺失，分红历史维度按 0 分计');
 
+    /* #30 股息增长率：仅展示，不参与评分（所有分支统一在此挂载，含未触发/致命红旗早退） */
+    result.dividend_cagr = (history.cagr != null) ? history.cagr : null;
+    result.dividend_trend = history.trend || null;
+    result.dividend_cagr_years = history.cagr_years || 0;
+    result.dividend_cagr_note = history.cagr_note || null;
+
     /* Layer 2：分支评分（先算，供展示；红旗否决时也有维度分）*/
     var scored = _scoreByBranch(fin, history, payoutRatio, cfCoverage, cls.isBank, cls.isCyclical, cls.isDefensive);
     var dimScores = scored.dimScores, score = scored.score;
@@ -1422,6 +1498,7 @@
     assessSustainability: assessSustainability,
     explainSustainability: explainSustainability,
     aggregateDividendHistory: _aggregateDividendHistory,
+    computeDividendCagr: computeDividendCagr,
     round2: round2,
     CYCLICAL_INDUSTRIES: CYCLICAL_INDUSTRIES,
     TECH_INDUSTRIES: TECH_INDUSTRIES,
