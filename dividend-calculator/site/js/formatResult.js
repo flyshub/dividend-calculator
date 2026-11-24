@@ -64,6 +64,7 @@ module.exports = function formatResult(r) {
     sustainability_dividend_cagr: r.sustainability ? r.sustainability.dividend_cagr : null,
     sustainability_dividend_trend: r.sustainability ? r.sustainability.dividend_trend : null,
     sustainability_dividend_cagr_years: r.sustainability ? r.sustainability.dividend_cagr_years : null,
+    sustainability_dividend_cagr_note: r.sustainability ? (r.sustainability.dividend_cagr_note || null) : null,
     sustainability_dividend_cagr_annual: r.sustainability && r.sustainability.dividend_cagr_annual != null
       ? r.sustainability.dividend_cagr_annual : null,
     sustainability_explanation: r.sustainability ? (r.sustainability.explanation || []).join('\n') : null,

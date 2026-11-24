@@ -311,6 +311,15 @@ def compute_dividend_cagr(year_amount: Dict[str, float],
         ann_chain = [annual_amount.get(str(y)) for y in window_years]
         if all(a and a > 0 for a in ann_chain):
             cagr_annual = (ann_chain[0] / ann_chain[-1]) ** (1.0 / (len(ann_chain) - 1)) - 1.0
+    # 恢复性增长：窗口起点前一年无现金分红（亏损停派/IPO 当年），
+    # 3 年期 CAGR 会把「从 0 恢复」读成高增长（华能国际 2023-2025：31.4→62.8 亿 = +41.4%/年，
+    # 2021-2022 因煤价亏损停派）。只提示，不改数值。
+    prior_year = latest - len(chain)
+    if not amounts.get(prior_year):
+        notes.append(
+            f"窗口起点 {window_years[-1]} 之前一年（{prior_year}）无现金分红记录"
+            "（亏损停派或上市较晚），起点基数可能偏低，读作长期趋势需谨慎")
+
     if mid_year_years:
         mid_set = set()
         for y in mid_year_years:

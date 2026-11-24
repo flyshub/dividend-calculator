@@ -565,9 +565,19 @@ class TestDividendCagr:
         assert "特别分红" in (r.note or "")
 
     def test_no_special_note_for_steady_growth(self):
-        amts = {"2021": 100.0, "2022": 110.0, "2023": 121.0,
+        # 带 2020 起点：窗口取 2021-2025，起点前一年有分红 → 既无特别分红说明也无恢复性说明
+        amts = {"2020": 90.9, "2021": 100.0, "2022": 110.0, "2023": 121.0,
                 "2024": 133.1, "2025": 146.41}
         assert compute_dividend_cagr(amts).note is None
+
+    def test_recovery_note_when_year_before_window_has_no_dividend(self):
+        """华能国际 600011：2021-2022 亏损停派，3 年窗口 2023-2025 → 41.4%/年 是恢复性反弹。"""
+        amts = {"2023": 31.40e8, "2024": 42.38e8, "2025": 62.79e8}
+        r = compute_dividend_cagr(amts, [2023, 2024, 2025])
+        assert r.years == 3
+        assert abs(r.cagr - ((62.79 / 31.40) ** 0.5 - 1)) < 1e-12
+        assert "起点基数可能偏低" in r.note
+        assert "2022" in r.note
 
     def test_empty(self):
         r = compute_dividend_cagr({})
@@ -638,9 +648,10 @@ def test_cagr_flags_frequency_change_with_annual_only_reference():
 def test_cagr_no_frequency_change_has_no_note_and_matches_annual():
     from src.sustainability_calculator import compute_dividend_cagr
 
-    year_amount = {"2021": 10, "2022": 11, "2023": 12}
+    # 6 年数据 → 窗口取满 5 年（2020-2024），起点前一年（2019）有分红 → 无任何说明
+    year_amount = {"2019": 8, "2020": 9, "2021": 10, "2022": 11, "2023": 12, "2024": 13}
     annual_amount = dict(year_amount)
-    r = compute_dividend_cagr(year_amount, [2021, 2022, 2023],
+    r = compute_dividend_cagr(year_amount, [2019, 2020, 2021, 2022, 2023, 2024],
                               annual_amount=annual_amount, mid_year_years=[])
     assert r.note is None
     assert r.cagr_annual == pytest.approx(r.cagr)

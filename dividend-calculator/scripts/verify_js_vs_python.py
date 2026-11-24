@@ -53,6 +53,7 @@ FIELDS_STR = ["dividend_year", "valuation_zone", "pr_warning", "industry", "is_l
               "sustainability_verdict", "sustainability_explanation",
               "ttm_period", "ttm_source", "roe_period",
               "forward_eps_kind", "forward_status", "forward_warnings",
+    "sustainability_dividend_cagr_note",
               "is_cyclical", "is_tech", "is_growth"]
 
 
@@ -362,6 +363,8 @@ def compute_python(raw: dict) -> dict:
         getattr(sus, "dividend_cagr_years", None) if sus else None)
     result["sustainability_dividend_cagr_annual"] = (
         getattr(sus, "dividend_cagr_annual", None) if sus is not None else None)
+    result["sustainability_dividend_cagr_note"] = (
+        getattr(sus, "dividend_cagr_note", None) if sus is not None else None)
     result["sustainability_payout_ratio"] = sus_m.get("payout_ratio")
     from src.sustainability_calculator import explain_sustainability
     result["sustainability_explanation"] = (

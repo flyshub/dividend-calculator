@@ -1280,8 +1280,17 @@ test('computeDividendCagr 特别分红给出说明', () => {
   assert.ok(String(r.note).indexOf('特别分红') !== -1);
 });
 test('computeDividendCagr 稳定增长无特别分红说明', () => {
-  const r = Calc.computeDividendCagr({ 2021: 100, 2022: 110, 2023: 121, 2024: 133.1, 2025: 146.41 });
+  const r = Calc.computeDividendCagr({ 2020: 90.9, 2021: 100, 2022: 110, 2023: 121, 2024: 133.1, 2025: 146.41 });
   assert.equal(r.note, null);
+});
+
+test('computeDividendCagr 窗口前一年无分红 → 提示起点基数可能偏低（华能 600011）', () => {
+  const r = Calc.computeDividendCagr({ 2023: 31.40e8, 2024: 42.38e8, 2025: 62.79e8 },
+                                     { 2023: 1, 2024: 1, 2025: 1 });
+  assert.equal(r.years, 3);
+  assert.ok(Math.abs(r.cagr - (Math.sqrt(62.79 / 31.40) - 1)) < 1e-12);
+  assert.match(r.note, /起点基数可能偏低/);
+  assert.match(r.note, /2022/);
 });
 test('computeDividendCagr 空输入', () => {
   const r = Calc.computeDividendCagr({});
@@ -1349,8 +1358,10 @@ test('computeDividendCagr 分红次数变化 → 给年报口径对照（伊利 
 });
 
 test('computeDividendCagr 次数不变时无口径说明，年报口径等于总口径', () => {
-  const ya = { 2021: 10, 2022: 11, 2023: 12 };
-  const r = Calc.computeDividendCagr(ya, { 2021: 1, 2022: 1, 2023: 1 }, { 2021: 10, 2022: 11, 2023: 12 }, []);
+  /* 6 年数据 → 窗口取满 5 年（2020-2024），起点前一年（2019）有分红 → 无任何说明 */
+  const ya = { 2019: 8, 2020: 9, 2021: 10, 2022: 11, 2023: 12, 2024: 13 };
+  const r = Calc.computeDividendCagr(ya, { 2019: 1, 2020: 1, 2021: 1, 2022: 1, 2023: 1, 2024: 1 },
+                                     { 2019: 8, 2020: 9, 2021: 10, 2022: 11, 2023: 12, 2024: 13 }, []);
   assert.equal(r.note, null);
   assert.ok(Math.abs(r.cagr_annual - r.cagr) < 1e-12);
 });

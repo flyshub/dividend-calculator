@@ -432,6 +432,14 @@
       midSet = {};
       midYears.forEach(function (y) { midSet[parseInt(String(y).slice(0, 4), 10)] = true; });
     }
+    /* 恢复性增长：窗口起点前一年无分红（亏损停派/IPO 当年），3 年期增速会显得很高。
+     * 镜像 Python：只提示，不改数值。 */
+    var priorYear = latest - chain.length;
+    if (!amounts[priorYear]) {
+      notes.push('窗口起点 ' + windowYears[windowYears.length - 1] + ' 之前一年（' + priorYear +
+        '）无现金分红记录（亏损停派或上市较晚），起点基数可能偏低，读作长期趋势需谨慎');
+    }
+
     if (midSet && cagrAnnual != null) {
       var flags = {};
       windowYears.forEach(function (y) { flags[midSet[y] ? 1 : 0] = true; });
