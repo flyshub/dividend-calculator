@@ -9,6 +9,9 @@
 }(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
+  /* 行业关键词镜像 src/industry_policy.py（浏览器读不到 .py，只能保留副本）。
+   * 改动必须双端同步：scripts/policy_parity.py::check_industry_keywords 会在
+   * verify_js_vs_python.py / CI 里拦住漂移；词条一律子串匹配，用能唯一指认行业的专名。 */
   var CYCLICAL_INDUSTRIES = [
     '煤炭', '钢铁', '有色金属', '石油', '化工', '航运', '建材',
     '水泥', '玻璃', '造纸', '养殖', '房地产', '工程机械', '船舶',
@@ -333,6 +336,28 @@
       count: count,
       source: '东财',
     };
+  }
+
+  /* ── #26 A 股特色风险：ST 与商誉（镜像 src/risk_flags.py）──
+   * 两者都是警示，不改评分、档位或漏斗判据。 */
+  var GOODWILL_EQUITY_WARN = 0.50;
+
+  function isST(stockName) {
+    return !!stockName && String(stockName).toUpperCase().indexOf('ST') !== -1;
+  }
+
+  function stWarning(stockName) {
+    if (!isST(stockName)) return null;
+    return 'ST 股票（退市风险警示）：盈利与分红政策可能已恶化，历史分红不可直接外推';
+  }
+
+  /* goodwill / equity > 50% 时返回警示文案；缺数据返回 null（不补 0、不推断） */
+  function goodwillWarning(goodwill, equity) {
+    if (goodwill == null || equity == null || !(equity > 0) || !(goodwill > 0)) return null;
+    var ratio = goodwill / equity;
+    if (ratio <= GOODWILL_EQUITY_WARN) return null;
+    return '商誉占净资产 ' + Math.round(ratio * 100) + '%（>' +
+      Math.round(GOODWILL_EQUITY_WARN * 100) + '%）：商誉减值会直接侵蚀净资产与分红能力';
   }
 
   /* 按财年聚合 → {consecutive_years, ever_cut, latest_year_amount, history_mean_amount} */
@@ -1495,6 +1520,9 @@
     classifyValuation: classifyValuation,
     classifyIndustry: classifyIndustry,
     computePr: computePr,
+    isST: isST,
+    stWarning: stWarning,
+    goodwillWarning: goodwillWarning,
     assessSustainability: assessSustainability,
     explainSustainability: explainSustainability,
     aggregateDividendHistory: _aggregateDividendHistory,

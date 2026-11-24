@@ -13,6 +13,7 @@ from .tencent_quote import fetch_tencent_quote
 from .datasource import get_data_source_manager
 from .utils import get_stock_list_cache, compute_ttm_dividend
 from .dividend_records import summarize_fhps_df, summarize_cninfo_df, summarize_dividend_rows
+from .risk_flags import st_warning
 
 logger = logging.getLogger(__name__)
 
@@ -269,9 +270,10 @@ def calculate_true_dividend_yield(
         )
 
         if total_dividend <= 0:
+            _name = _get_stock_name(stock_code)
             return DividendResult(
                 stock_code=stock_code,
-                stock_name=None,
+                stock_name=_name,
                 current_price=stock_info.current_price,
                 total_shares=stock_info.total_shares,
                 total_market_cap=total_market_cap,
@@ -282,7 +284,7 @@ def calculate_true_dividend_yield(
                 latest_year=None,
                 dividend_details=[],
                 explanation=f"无有效分红: {dividend_explanation}",
-                warnings=list(stock_info.warnings),
+                warnings=list(stock_info.warnings) + _st_warnings(_name),
             )
 
         dividend_yield_before_tax, dividend_yield_after_tax, dividend_yield_after_tax_20 = calculate_dividend_yield(
@@ -320,7 +322,8 @@ def calculate_true_dividend_yield(
             latest_year=latest_year,
             dividend_details=dividend_details,
             explanation=explanation,
-            warnings=list(stock_info.warnings) + _yield_warnings(dividend_yield_before_tax),
+            warnings=(list(stock_info.warnings) + _yield_warnings(dividend_yield_before_tax)
+                      + _st_warnings(stock_name)),
             dividend_source=dividend_source,
             ttm_dividend=_ttm_total,
             dividend_yield_ttm_before_tax=_ttm_yield,
@@ -336,4 +339,10 @@ def calculate_true_dividend_yield(
 def _yield_warnings(yield_before_tax: Optional[float]) -> List[str]:
     """股息率越界软校验（审查 #4），返回 warning 列表。"""
     w = check_dividend_yield(yield_before_tax)
+    return [w] if w else []
+
+
+def _st_warnings(stock_name: Optional[str]) -> List[str]:
+    """ST / *ST 退市风险警示（#26），返回 warning 列表。"""
+    w = st_warning(stock_name)
     return [w] if w else []

@@ -33,6 +33,7 @@ from .pr_calculator import (
     select_judge_roe,
 )
 from .eastmoney_fetcher import fetch_industry as fetch_eastmoney_industry
+from .risk_flags import st_warning
 
 logger = logging.getLogger(__name__)
 
@@ -516,6 +517,9 @@ def calculate_pr(
     # 4. 分类行业属性
     is_cyclical, is_tech, is_growth, pr_warning = classify_industry(industry)
 
+    # 4.5 ST / *ST 退市风险警示（#26）：只警告，不改 PR 判定
+    st_flag = st_warning(stock_name)
+
     # 5. 判断亏损股
     is_loss_stock = False
     if net_profit_annual is not None and net_profit_annual <= 0:
@@ -552,6 +556,9 @@ def calculate_pr(
         # 修正 PR 只展示，不参与判定——阈值 0.5/1.0/3.0 是在基础 PR 上标定的。
         roe_judge, pr_judge, valuation_zone = judge_pr(
             pe_ttm, roe_latest, roe_5y_median, is_cyclical)
+
+    if st_flag:
+        pr_warning = pr_warning + "；" + st_flag if pr_warning else st_flag
 
     # 数据完整性软校验（审查 #4）：越界只追加 errors，不否决结果
     all_errors.extend(_check_pr_fields(pe_ttm, pb, roe_latest, net_profit_annual, payout_ratio))

@@ -7,10 +7,10 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232e5be6'/%3E%3Ctext x='16' y='22' font-size='17' text-anchor='middle' fill='%23fff' font-family='-apple-system,sans-serif'%3E息%3C/text%3E%3C/svg%3E">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
   <!-- BUILD：改任何 js/*.js 必须同步升版，否则旧缓存会与新 HTML 混用（fetchForward is not a function） -->
-  <script src="js/policy.js?v=20261124-1"></script>
-  <script src="js/calculator.js?v=20261124-1"></script>
-  <script src="js/datasources.js?v=20261124-1"></script>
-  <script src="js/app.js?v=20261124-1"></script>
+  <script src="js/policy.js?v=20261124-2"></script>
+  <script src="js/calculator.js?v=20261124-2"></script>
+  <script src="js/datasources.js?v=20261124-2"></script>
+  <script src="js/app.js?v=20261124-2"></script>
   <style>
     :root {
       color-scheme: light;
@@ -837,6 +837,7 @@
           <span id="signal-yield" class="badge badge--gray"></span>
           <span id="signal-sustainability" class="badge badge--gray"></span>
           <span id="signal-tsr" class="badge badge--green hidden"></span>
+          <span id="signal-st" class="badge badge--red hidden"></span>
         </div>
       </div>
 
@@ -1100,7 +1101,7 @@
       const fwdCard = document.getElementById('forward-card');
       if (fwdCard) fwdCard.classList.add('hidden');
       // P4：重置综合信号条徽章，避免跨搜索残留
-      ['signal-valuation', 'signal-yield', 'signal-sustainability'].forEach(function(id) {
+      ['signal-valuation', 'signal-yield', 'signal-sustainability', 'signal-st'].forEach(function(id) {
         const el = document.getElementById(id);
         if (el) { el.textContent = ''; el.className = 'badge badge--gray hidden'; }
       });
@@ -1540,6 +1541,27 @@
       capital_adequacy: '资本充足率', net_interest_margin: '净息差', npl: '不良贷款率', provision: '拨贷比',
     };
 
+    /* 情境警示渲染：warning_flags + 二次取数追加的警示（#26 商誉） */
+    let susWarnFlags = [];
+    let susExtraWarnings = [];
+    function paintSusWarnings() {
+      const el = document.getElementById('sus-warnings');
+      if (!el) return;
+      const all = susWarnFlags.concat(susExtraWarnings);
+      if (all.length) {
+        el.textContent = '情境警示：\n' + all.map(function (w) { return '  • ' + w; }).join('\n');
+        el.classList.remove('hidden');
+      } else {
+        el.textContent = '';
+        el.classList.add('hidden');
+      }
+    }
+    function appendSusWarning(text) {
+      if (!text || susExtraWarnings.indexOf(text) !== -1) return;
+      susExtraWarnings.push(text);
+      paintSusWarnings();
+    }
+
     function renderSustainability(s) {
       const card = document.getElementById('sustainability-card');
       if (!s || !s.triggered) { card.classList.add('hidden'); return; }
@@ -1596,15 +1618,10 @@
       } else {
         fatalEl.classList.add('hidden');
       }
-      // 情境警示
-      const warnEl = document.getElementById('sus-warnings');
-      if (s.warning_flags && s.warning_flags.length) {
-        warnEl.textContent = '情境警示：\n' + s.warning_flags.map(function (w) { return '  • ' + w; }).join('\n');
-        warnEl.classList.remove('hidden');
-      } else {
-        warnEl.textContent = '';
-        warnEl.classList.add('hidden');
-      }
+      // 情境警示（商誉警示由二次取数追加，见 appendSusWarning）
+      susWarnFlags = (s.warning_flags || []).slice();
+      susExtraWarnings = [];
+      paintSusWarnings();
       // 缺失说明
       document.getElementById('sus-notes').textContent = (s.notes && s.notes.length) ? '注：' + s.notes.join('；') : '';
 
@@ -1704,6 +1721,15 @@
       const di = data.dividend;
       const title = si.stock_name ? `${si.stock_name} (${si.stock_code})` : si.stock_code;
       document.getElementById('stock-title').textContent = title;
+      /* #26 ST / *ST 退市风险警示：名称命中即显示红色徽章，不改任何计算 */
+      const stBadge = document.getElementById('signal-st');
+      if (Calculator.isST(si.stock_name)) {
+        stBadge.textContent = 'ST 风险';
+        stBadge.className = 'badge badge--red';
+      } else {
+        stBadge.textContent = '';
+        stBadge.className = 'badge badge--red hidden';
+      }
       document.getElementById('yield-before-tax').textContent = formatPercent(di.dividend_yield_before_tax);
       document.getElementById('yield-after-tax').textContent = formatPercent(di.dividend_yield_after_tax_10);
       document.getElementById('yield-after-tax-20').textContent = formatPercent(di.dividend_yield_after_tax_20);
@@ -1796,7 +1822,16 @@
           dividend_yield_before_tax: di.dividend_yield_before_tax,
         }));
       }
-      if (data.sustainability) renderSustainability(data.sustainability);
+      if (data.sustainability) {
+        renderSustainability(data.sustainability);
+        /* #26 商誉警示：非阻塞二次取数（东财资产负债表），失败或取不到即不显示 */
+        if (typeof DataSources.fetchGoodwill === 'function') {
+          DataSources.fetchGoodwill(si.stock_code).then((gw) => {
+            const flag = gw && Calculator.goodwillWarning(gw.goodwill, gw.equity);
+            if (flag) appendSusWarning(flag);
+          }).catch(() => {});
+        }
+      }
     }
 
     let forwardSeq = 0;

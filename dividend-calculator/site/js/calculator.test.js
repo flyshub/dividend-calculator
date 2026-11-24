@@ -1308,3 +1308,31 @@ test('computeDividendCagr 完整财年但零分红 → 链条断开', () => {
   assert.strictEqual(r.years, 1);
   assert.strictEqual(r.cagr, null);
 });
+
+/* ── #26 A 股特色风险：ST 与商誉（镜像 src/risk_flags.py）── */
+test('isST 识别 ST / *ST，普通名称不误判', () => {
+  assert.equal(Calc.isST('*ST宏图'), true);
+  assert.equal(Calc.isST('ST 航通'), true);
+  assert.equal(Calc.isST('中远海控'), false);
+  assert.equal(Calc.isST(''), false);
+  assert.equal(Calc.isST(null), false);
+});
+
+test('stWarning 只对 ST 返回文案', () => {
+  assert.match(Calc.stWarning('*ST宏图'), /退市风险警示/);
+  assert.equal(Calc.stWarning('贵州茅台'), null);
+  assert.equal(Calc.stWarning(undefined), null);
+});
+
+test('goodwillWarning 阈值 50%：以上警示、以下与缺数据不警示', () => {
+  // 美的 2026Q3：311.5 亿 / 2364 亿 ≈ 13.2%
+  assert.equal(Calc.goodwillWarning(31146557000, 236404503000), null);
+  // 刚好 50% 不警示（严格大于）
+  assert.equal(Calc.goodwillWarning(500, 1000), null);
+  assert.match(Calc.goodwillWarning(600, 1000), /商誉占净资产 60%/);
+  // 缺数据 / 非正净资产：不补 0、不推断
+  assert.equal(Calc.goodwillWarning(null, 1000), null);
+  assert.equal(Calc.goodwillWarning(100, null), null);
+  assert.equal(Calc.goodwillWarning(100, 0), null);
+  assert.equal(Calc.goodwillWarning(0, 1000), null);
+});

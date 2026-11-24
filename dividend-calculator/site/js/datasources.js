@@ -234,6 +234,30 @@
     });
   }
 
+  /* ── 东财资产负债表（RPT_F10_FINANCE_GBALANCE，商誉警示用；#26）
+   * 返回 {goodwill, equity}（元），取不到返 null。银行等金融报表无此表 → null。 */
+  function fetchGoodwill(stockCode) {
+    var secucode = stockCode;
+    if (stockCode.indexOf('.') === -1) {
+      var head = stockCode.slice(0, 2);
+      var suffix = stockCode[0] === '6' ? '.SH'
+        : (head === '92' || head === '83' || head === '87' || stockCode[0] === '8' ||
+           stockCode[0] === '4') ? '.BJ' : '.SZ';
+      secucode = stockCode + suffix;
+    }
+    var url = 'https://datacenter-web.eastmoney.com/api/data/v1/get?sortColumns=REPORT_DATE&sortTypes=-1' +
+      '&pageSize=2&pageNumber=1&reportName=RPT_F10_FINANCE_GBALANCE&columns=ALL' +
+      '&filter=(SECUCODE%3D%22' + secucode + '%22)';
+    return jsonFetch(url).then(function (d) {
+      var rows = (d.result && d.result.data) || [];
+      for (var i = 0; i < rows.length; i++) {
+        var gw = rows[i].GOODWILL, eq = rows[i].TOTAL_EQUITY;
+        if (gw != null && eq != null) return { goodwill: Number(gw), equity: Number(eq) };
+      }
+      return null;
+    });
+  }
+
   /* ── 东财行业（datacenter RPT_F10_BASIC_ORGINFO，CORS ✓）
    * EM2016 为东财行业（如"公用事业-电力-水电"），INDUSTRYCSRC1 为证监会分类。
    * 优先 EM2016（含简洁行业词，利于关键字匹配）。 */
@@ -363,6 +387,7 @@
     fetchEarningsForecast: fetchEarningsForecast,
     forecastRowsFromPayload: forecastRowsFromPayload,
     fetchCashflow: fetchCashflow,
+    fetchGoodwill: fetchGoodwill,
     fetchIndustry: fetchIndustry,
     fetchPriceChange1y: fetchPriceChange1y,
     fetchTop10Holding: fetchTop10Holding,

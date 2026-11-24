@@ -57,6 +57,14 @@ _CASHFLOW_URL = (
     '&filter=(SECUCODE%3D"{secucode}")'
 )
 
+# 东财资产负债表（商誉 GOODWILL / 所有者权益合计 TOTAL_EQUITY；#26）
+_BALANCE_URL = (
+    "https://datacenter-web.eastmoney.com/api/data/v1/get"
+    "?sortColumns=REPORT_DATE&sortTypes=-1&pageSize=2&pageNumber=1"
+    "&reportName=RPT_F10_FINANCE_GBALANCE&columns=ALL"
+    '&filter=(SECUCODE%3D"{secucode}")'
+)
+
 # 东财前十大股东接口（securities 子路径，返回结构同为 result.data）
 _TOP10_URL = (
     "https://datacenter.eastmoney.com/securities/api/data/v1/get"
@@ -102,6 +110,26 @@ def fetch_cashflow_rows(stock_code: str) -> List[dict]:
     """东财现金流量表行（含 CONSTRUCT_LONG_ASSET 资本开支）。"""
     return _fetch_eastmoney_rows(_CASHFLOW_URL.format(secucode=_secucode(stock_code)),
                                  stock_code, "现金流量表")
+
+
+def fetch_goodwill(stock_code: str) -> Optional[tuple]:
+    """东财资产负债表里的 (商誉, 所有者权益合计)，单位元；无数据返回 None。
+
+    2026-11 实测：RPT_F10_FINANCE_GBALANCE 有 GOODWILL / TOTAL_EQUITY 字段；
+    银行等金融报表不返回该表（result.data 为空），此时返回 None，调用方跳过警示，
+    不补 0、不推断（数据铁律）。茅台等无商誉公司 GOODWILL 为 null，同样返回 None。
+    """
+    rows = _fetch_eastmoney_rows(_BALANCE_URL.format(secucode=_secucode(stock_code)),
+                                 stock_code, "资产负债表")
+    for row in rows:
+        goodwill = row.get("GOODWILL")
+        equity = row.get("TOTAL_EQUITY")
+        if goodwill is not None and equity is not None:
+            try:
+                return float(goodwill), float(equity)
+            except (TypeError, ValueError):
+                return None
+    return None
 
 
 def fetch_dividend_rows(stock_code: str) -> Optional[List[dict]]:

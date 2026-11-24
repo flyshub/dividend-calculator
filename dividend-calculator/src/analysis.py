@@ -14,6 +14,8 @@ from .dividend import get_latest_full_year_dividend
 from .forward_yield import ForwardYieldResult, estimate_forward_yield
 from .pr import calculate_pr, PRResult
 from .sustainability import assess_with_auto_fetch
+from .eastmoney_fetcher import fetch_goodwill
+from .risk_flags import goodwill_warning
 from .sustainability_calculator import SustainabilityResult, THRESHOLD_YIELD
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,20 @@ class StockAnalysisResult:
     pr_result: PRResult
     sustainability: Optional[SustainabilityResult] = None  # 仅股息率 > 阈值时评估，否则 None
     forward_yield: Optional[ForwardYieldResult] = None      # 下一财年前瞻股息率（模型估算，仅展示）
+
+
+def attach_goodwill_warning(sustainability: SustainabilityResult, stock_code: str) -> None:
+    """#26 商誉/净资产 > 50% 时给可持续性结果追加警示（就地修改，不改评分）。
+
+    取不到（金融报表无此表 / 无商誉）即跳过：不补 0、不推断。
+    """
+    gw = fetch_goodwill(stock_code)
+    if not gw:
+        return
+    flag = goodwill_warning(gw[0], gw[1])
+    if flag:
+        sustainability.metrics["goodwill_equity"] = gw[0] / gw[1]
+        sustainability.warning_flags.append(flag)
 
 
 def run_stock_analysis(stock_input: str) -> Optional[StockAnalysisResult]:
@@ -74,6 +90,14 @@ def run_stock_analysis(stock_input: str) -> Optional[StockAnalysisResult]:
             )
         except Exception as e:
             logger.warning("可持续性评估失败 %s: %s", stock_code, e)
+
+    # #26 商誉/净资产警示：只在高股息触发可持续性评估时复核（单股路径）。
+    # 取不到（金融报表无此表/无商誉）即跳过，不补 0、不推断；不改评分与判定。
+    if sustainability is not None:
+        try:
+            attach_goodwill_warning(sustainability, stock_code)
+        except Exception as e:
+            logger.warning("商誉警示计算失败 %s: %s", stock_code, e)
 
     # 下一财年前瞻股息率（模型估算，仅展示；失败降级为不估，不影响主结果）
     forward_yield = None
