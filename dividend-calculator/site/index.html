@@ -7,10 +7,10 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232e5be6'/%3E%3Ctext x='16' y='22' font-size='17' text-anchor='middle' fill='%23fff' font-family='-apple-system,sans-serif'%3E息%3C/text%3E%3C/svg%3E">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
   <!-- BUILD：改任何 js/*.js 必须同步升版，否则旧缓存会与新 HTML 混用（fetchForward is not a function） -->
-  <script src="js/policy.js?v=20261124-5"></script>
-  <script src="js/calculator.js?v=20261124-5"></script>
-  <script src="js/datasources.js?v=20261124-5"></script>
-  <script src="js/app.js?v=20261124-5"></script>
+  <script src="js/policy.js?v=20261124-6"></script>
+  <script src="js/calculator.js?v=20261124-6"></script>
+  <script src="js/datasources.js?v=20261124-6"></script>
+  <script src="js/app.js?v=20261124-6"></script>
   <style>
     :root {
       color-scheme: light;
@@ -508,6 +508,15 @@
       flex: 1;
       min-width: 120px;
     }
+    /* 指标脚下的小字提示（样本年数 / 口径警示）：原生 title 只有悬停才可见，
+     * 触屏设备根本看不到，所以关键口径必须在页面上留一行可见文字 */
+    .metric-hint {
+      margin-top: 2px;
+      font-size: 11.5px;
+      line-height: 1.4;
+      color: var(--muted);
+    }
+    .value[title] { cursor: help; }
 
     /* ===== 数值：等宽数字 + 字重对比 ===== */
     .value {
@@ -955,7 +964,7 @@
           <div class="metric"><div class="label">ROE（最新）</div><div id="sus-roe" class="value"></div></div>
           <div class="metric"><div class="label">净利润同比</div><div id="sus-np-yoy" class="value"></div></div>
           <div class="metric"><div class="label">连续分红年数</div><div id="sus-consecutive" class="value"></div></div>
-          <div class="metric"><div class="label" title="现金分红总额（不含送转）的年化复合增速">现金分红年均增速</div><div id="sus-cagr" class="value"></div></div>
+          <div class="metric"><div class="label" title="现金分红总额（不含送转）的年化复合增速">现金分红年均增速</div><div id="sus-cagr" class="value"></div><div id="sus-cagr-hint" class="metric-hint"></div></div>
         </div>
         <div class="metric-row">
           <div class="metric"><div class="label">各维度评分</div><div id="sus-dims" class="value value--base"></div></div>
@@ -1590,8 +1599,11 @@
       /* #30 股息 CAGR：趋势 + 年化 + 样本年数（仅展示，不参与评分）；样本不足时给原因 */
       (function () {
         const el = document.getElementById('sus-cagr');
+        const hint = document.getElementById('sus-cagr-hint');
         if (s.dividend_cagr == null) {
-          el.textContent = s.dividend_cagr_note ? '不估（' + s.dividend_cagr_note + '）' : '无';
+          el.textContent = s.dividend_cagr_note ? '不估' : '无';
+          el.title = s.dividend_cagr_note || '';
+          hint.textContent = s.dividend_cagr_note || '';
           el.style.color = '';
           return;
         }
@@ -1603,6 +1615,14 @@
         const tips = [s.dividend_cagr_years + ' 年样本（现金分红总额，含中期分配，不含送转）'];
         if (s.dividend_cagr_note) tips.push(s.dividend_cagr_note);
         el.title = tips.join(' · ');
+        /* 可见提示：年数 + 口径短标签（完整说明仍在 title / 触屏看这行） */
+        const flags = [];
+        const note = s.dividend_cagr_note || '';
+        if (note.indexOf('分红次数不一致') !== -1) flags.push('含中期分配变化');
+        if (note.indexOf('起点基数可能偏低') !== -1) flags.push('起点前一年无分红');
+        if (note.indexOf('远超其余年份') !== -1) flags.push('含特别/周期高点');
+        hint.textContent = s.dividend_cagr_years + ' 年样本' + (flags.length ? ' · ' + flags.join('、') : '');
+        hint.title = tips.join(' · ');
       })();
 
       // 各维度评分
