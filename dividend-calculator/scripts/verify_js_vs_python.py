@@ -460,6 +460,67 @@ def close(a, b):
     return a == b
 
 
+PORTFOLIO_SHARES = 1000   # 组合对账统一股数：只比口径算术，不比用户输入
+
+
+def portfolio_boundary_positions() -> list:
+    """边界行（合成，两端完全相同）：默认样本都有分红，覆盖不到这两条口径分支。
+
+    只验证算术两端一致，不代表任何真实公司。
+    """
+    from src.portfolio import PortfolioPosition
+
+    return [
+        PortfolioPosition(stock_code="__no_div__", shares=PORTFOLIO_SHARES,
+                          market_value=30000.0, industry="未知行业",
+                          error="最新完整财年无现金分红"),
+        PortfolioPosition(stock_code="__failed__", shares=PORTFOLIO_SHARES,
+                          error="分析失败（取数失败或代码不存在）"),
+    ]
+
+
+def compute_portfolio_python(py_by_code: dict, boundary_rows: bool = False) -> dict:
+    """用「已算好的单股扁平字段」重建组合汇总（#31 双端对账）。
+
+    不重跑取数：verify 的设计是两端消费同一批 HTTP rows，这里用 compute_python
+    的结果还原 build_position/summarize 需要的输入形状，比较的仍是生产代码。
+    适配层若有偏差会以数值差异的形式暴露，不会静默通过。
+    """
+    from types import SimpleNamespace
+
+    from src.portfolio import build_position, summarize
+
+    positions = []
+    for code, py in py_by_code.items():
+        sus_verdict = py.get("sustainability_verdict")
+        analysis = SimpleNamespace(
+            stock_info=SimpleNamespace(current_price=py.get("current_price"),
+                                       total_shares=py.get("total_shares")),
+            dividend_total=py.get("total_dividend"),
+            pr_result=SimpleNamespace(stock_name=py.get("stock_name"),
+                                      industry=py.get("industry"),
+                                      pr_warning=py.get("pr_warning") or ""),
+            sustainability=(SimpleNamespace(verdict=sus_verdict, score_100=None,
+                                            warning_flags=[])
+                            if sus_verdict else None),
+        )
+        positions.append(build_position(code, PORTFOLIO_SHARES, analysis))
+
+    if boundary_rows:
+        positions.extend(portfolio_boundary_positions())
+
+    s = summarize(positions)
+    return {
+        "total_market_value": s.total_market_value,
+        "total_annual_income": s.total_annual_income,
+        "weighted_yield": s.weighted_yield,
+        "after_tax_income_10": s.after_tax_income_10,
+        "after_tax_income_20": s.after_tax_income_20,
+        "industry": [[name, amount] for name, amount, _ in s.industry_breakdown],
+        "verdicts": s.verdict_summary,
+    }
+
+
 def policy_parity_problems() -> list:
     """结构性校验：关键词集合与档位切点的双端一致性（issues #149 / #151）。
 
@@ -478,10 +539,11 @@ def main():
     codes = sys.argv[1:] or ["600900", "600987", "600919", "600887", "600019", "601012"]
     print(f"对比股票: {codes}")
 
-    fixture = {"stocks": {}}
+    fixture = {"stocks": {}, "portfolio": {}}
     for code in codes:
         raw = fetch_raw(code)
         fixture["stocks"][code] = raw
+        fixture["portfolio"][code] = PORTFOLIO_SHARES
 
         # 空数据假绿防护（审查 #6）：任一类数据为空即明确报错，避免双端
         # 消费同样的空数据静默通过
@@ -516,9 +578,11 @@ def main():
 
     js_all = run_js(fixture_path)
     ok = True
+    py_by_code = {}
     for code in codes:
         js = js_all[code]
         py = compute_python(fixture["stocks"][code])
+        py_by_code[code] = py
         diffs = []
         for k in FIELDS_NUMERIC + FIELDS_STR:
             a, b = js.get(k), py.get(k)
@@ -533,6 +597,25 @@ def main():
             print(f"\n[{code}] {js.get('stock_name')} — OK  (股息率 {round(js.get('dividend_yield_before_tax', 0) or 0, 4)}%)")
 
     print("\n" + ("✔ 全部字段一致" if ok else "✘ 存在差异，见上"))
+
+    # 组合股息（#31）双端对账
+    print("\n[portfolio] 组合汇总（buildPosition + summarize，统一 %d 股/只）" % PORTFOLIO_SHARES)
+    js_port = js_all.get("__portfolio__") or {}
+    py_port = compute_portfolio_python(py_by_code, boundary_rows=True)
+    port_diffs = []
+    for key in ("total_market_value", "total_annual_income", "weighted_yield",
+                "after_tax_income_10", "after_tax_income_20"):
+        if not close(js_port.get(key), py_port.get(key)):
+            port_diffs.append(f"  {key}: JS={js_port.get(key)!r} PY={py_port.get(key)!r}")
+    for key in ("industry", "verdicts"):
+        if js_port.get(key) != py_port.get(key):
+            port_diffs.append(f"  {key}: JS={js_port.get(key)!r} PY={py_port.get(key)!r}")
+    if port_diffs:
+        ok = False
+        for d in port_diffs:
+            print(d)
+    else:
+        print(f"  ✔ 一致（加权股息率 {round(py_port.get('weighted_yield') or 0, 4)}%）")
 
     print("\n[policy] 行业关键词 / 估值档位切点双端一致性")
     problems = policy_parity_problems()

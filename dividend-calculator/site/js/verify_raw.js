@@ -25,4 +25,36 @@ Object.keys(fixture.stocks || {}).forEach(function (code) {
   }
 });
 
+/* 组合股息（#31）双端对账：用同一批 fixture 原始数据跑 Portfolio.buildPosition+summarize。
+ * 每只固定 1000 股，Python 侧用同一股数，只比口径算术，不比用户输入。 */
+if (fixture.portfolio) {
+  var Portfolio = require(path.join(__dirname, 'portfolio.js'));
+  var rows = Object.keys(fixture.portfolio).map(function (code) {
+    var raw = fixture.stocks[code];
+    return Portfolio.buildPosition(code, fixture.portfolio[code], raw ? App.computeFromRaw(raw) : null);
+  });
+  /* 边界行（合成、两端完全相同）：真实样本里默认 6 只都有分红，
+   * 覆盖不到「无分红仍计入市值」与「取数失败整体退出」两条口径分支。
+   * 只验证算术两端一致，不代表任何真实公司。 */
+  rows.push({ code: '__no_div__', shares: 1000, name: null, price: null,
+              market_value: 30000, dividend_per_share: null, annual_income: null,
+              dividend_yield: null, industry: '未知行业', verdict: null,
+              error: '最新完整财年无现金分红' });
+  rows.push({ code: '__failed__', shares: 1000, name: null, price: null,
+              market_value: null, dividend_per_share: null, annual_income: null,
+              dividend_yield: null, industry: null, verdict: null,
+              error: '分析失败（取数失败或代码不存在）' });
+  var sum = Portfolio.summarize(rows);
+  out.__portfolio__ = {
+    total_market_value: sum.total_market_value,
+    total_annual_income: sum.total_annual_income,
+    weighted_yield: sum.weighted_yield,
+    after_tax_income_10: sum.after_tax_income_10,
+    after_tax_income_20: sum.after_tax_income_20,
+    industry: sum.industry_breakdown.map(function (r) { return [r[0], r[1]]; }),
+    verdicts: sum.verdict_summary,
+    errors: sum.errors,
+  };
+}
+
 console.log(JSON.stringify(out, null, 2));

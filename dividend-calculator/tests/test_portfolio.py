@@ -165,3 +165,36 @@ def test_parse_holdings_accepts_space_separator_like_js():
     assert parse_holdings("600900 1000") == [Holding("600900", 1000.0)]
     with pytest.raises(ValueError):
         parse_holdings("600900 1000 2000")
+
+
+# ---------------------------------------------------------------------------
+# verify_js_vs_python 的适配层（portfolio 对账）
+# ---------------------------------------------------------------------------
+
+def test_compute_portfolio_python_adapter_matches_summarize():
+    """适配层（扁平字段 → build_position 输入）不得引入口径偏差。"""
+    from scripts.verify_js_vs_python import PORTFOLIO_SHARES, compute_portfolio_python
+
+    py_by_code = {
+        "600900": {
+            "stock_name": "长江电力", "current_price": 30.0, "total_shares": 1e9,
+            "total_dividend": 3e8, "industry": "公用事业-电力-水电",
+            "pr_warning": "", "sustainability_verdict": "可持续",
+        },
+        "600001": {   # 无完整财年分红
+            "stock_name": "无分红股", "current_price": 10.0, "total_shares": 2e9,
+            "total_dividend": 0, "industry": "制造业",
+            "pr_warning": None, "sustainability_verdict": None,
+        },
+    }
+    p = compute_portfolio_python(py_by_code)
+
+    shares = PORTFOLIO_SHARES
+    mv = 30.0 * shares + 10.0 * shares
+    income = (3e8 / 1e9) * shares
+    assert p["total_market_value"] == pytest.approx(mv)
+    assert p["total_annual_income"] == pytest.approx(income)
+    assert p["weighted_yield"] == pytest.approx(income / mv * 100)
+    assert p["industry"] == [["公用事业-电力-水电", income]]
+    # 无分红股市值仍在分母、但收入 0；verdict 计「未评估」
+    assert p["verdicts"] == {"可持续": 1, "未评估": 1}
