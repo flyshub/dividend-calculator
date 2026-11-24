@@ -17,21 +17,30 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const now = new Date();
-            const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString();
+            // 判据：最近一次成功运行距今超过 4 天。用「距今」而不是「窗口内有几条」：
+            // 每日任务只在工作日跑，周五 18:30 到周一 08:00 已是 61 小时，固定 3 天
+            // 窗口加上定时任务本身延迟（2026-11-23 实测延迟到 22:09Z）就会误报。
+            const STALE_DAYS = 4;
             const runs = await github.rest.actions.listWorkflowRuns({
               owner: context.repo.owner,
               repo: context.repo.repo,
               workflow_id: 'screener_daily.yml',
-              created: `>=${threeDaysAgo}`,
-              per_page: 5,
+              per_page: 20,
             });
+            const ok = runs.data.workflow_runs.filter(r => r.conclusion === 'success');
+            const lastOk = ok[0];
+            const ageDays = lastOk
+              ? (Date.now() - new Date(lastOk.created_at).getTime()) / 86400000
+              : Infinity;
 
-            const successRuns = runs.data.workflow_runs.filter(r => r.conclusion === 'success');
-            if (successRuns.length === 0) {
+            if (ageDays > STALE_DAYS) {
               const title = '🔔 选股器定时任务可能已停止';
-              const runUrl = `${context.serverUrl}/${context.repo.full_name}/actions`;
-              const body = `## 定时任务异常\n\n最近 3 天没有发现成功的选股器每日更新。\n\n可能原因：\n- GitHub Actions cron 被静默禁用\n- workflow 文件语法错误\n- 上游依赖变更（akshare/东财限流）\n\n请检查：[Actions 页面](${runUrl})`;
+              const server = process.env.GITHUB_SERVER_URL || 'https://github.com';
+              const runUrl = `${server}/${context.repo.full_name}/actions/workflows/screener_daily.yml`;
+              const lastText = lastOk
+                ? `最近一次成功：${lastOk.created_at}（${ageDays.toFixed(1)} 天前）`
+                : '找不到任何成功运行';
+              const body = `## 定时任务异常\n\n${lastText}，超过 ${STALE_DAYS} 天阈值。\n\n可能原因：\n- GitHub Actions cron 被静默禁用\n- workflow 文件语法错误\n- 上游依赖变更（akshare/东财限流）\n\n请检查：[Screener Daily 运行记录](${runUrl})`;
               // 去重：已有未关闭的同类告警则跳过（否则每轮检查都新开一条）
               const open = await github.paginate(github.rest.issues.listForRepo, {
                 owner: context.repo.owner, repo: context.repo.repo,
@@ -47,5 +56,5 @@ jobs:
                 });
               }
             } else {
-              console.log(`Found ${successRuns.length} successful runs in the last 3 days. Health OK.`);
+              console.log(`Health OK：最近一次成功 ${lastOk.created_at}（${ageDays.toFixed(1)} 天前）`);
             }
