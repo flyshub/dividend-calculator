@@ -7,10 +7,10 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232e5be6'/%3E%3Ctext x='16' y='22' font-size='17' text-anchor='middle' fill='%23fff' font-family='-apple-system,sans-serif'%3E息%3C/text%3E%3C/svg%3E">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
   <!-- BUILD：改任何 js/*.js 必须同步升版，否则旧缓存会与新 HTML 混用（fetchForward is not a function） -->
-  <script src="js/policy.js?v=20261124-2"></script>
-  <script src="js/calculator.js?v=20261124-2"></script>
-  <script src="js/datasources.js?v=20261124-2"></script>
-  <script src="js/app.js?v=20261124-2"></script>
+  <script src="js/policy.js?v=20261124-3"></script>
+  <script src="js/calculator.js?v=20261124-3"></script>
+  <script src="js/datasources.js?v=20261124-3"></script>
+  <script src="js/app.js?v=20261124-3"></script>
   <style>
     :root {
       color-scheme: light;
@@ -1599,7 +1599,8 @@
         /* 主值保持单行（与相邻指标同高）；样本年数与特别分红提示放 title */
         el.textContent = (s.dividend_trend || '') + ' ' + (s.dividend_cagr > 0 ? '+' : '') + pct + '%/年';
         el.style.color = s.dividend_trend === '萎缩' ? '#e5534b' : (s.dividend_trend === '增长' ? '#3fb950' : '');
-        const tips = [s.dividend_cagr_years + ' 年样本'];
+        /* 年报口径对照与「次数变化」说明已由 dividend_cagr_note 承载，不重复拼 */
+        const tips = [s.dividend_cagr_years + ' 年样本（含中期分配）'];
         if (s.dividend_cagr_note) tips.push(s.dividend_cagr_note);
         el.title = tips.join(' · ');
       })();

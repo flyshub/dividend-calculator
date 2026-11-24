@@ -369,7 +369,7 @@
   var DIV_CAGR_GROWTH = 0.05;
   var DIV_CAGR_DECLINE = -0.05;
 
-  function computeDividendCagr(yearAmount, completeYears) {
+  function computeDividendCagr(yearAmount, completeYears, annualAmount, midYears) {
     var amounts = {};
     Object.keys(yearAmount || {}).forEach(function (k) {
       var y = parseInt(String(k).slice(0, 4), 10);
@@ -406,16 +406,42 @@
     var start = chain[chain.length - 1], end = chain[0];
     var cagr = Math.pow(end / start, 1 / (chain.length - 1)) - 1;
     var trend = cagr > DIV_CAGR_GROWTH ? '增长' : (cagr < DIV_CAGR_DECLINE ? '萎缩' : '平稳');
-    var note = null;
+    var notes = [];
     var others = chain.slice(1).sort(function (a, b) { return a - b; });
     if (others.length) {
       var baseline = others[Math.floor(others.length / 2)];
       var peak = Math.max.apply(null, chain);
       if (baseline > 0 && peak > baseline * SUS_WARN.special_div) {
-        note = '窗口内某年分红远超其余年份（周期高峰或特别分红），增长率会被放大';
+        notes.push('窗口内某年分红远超其余年份（周期高峰或特别分红），增长率会被放大');
       }
     }
-    return { cagr: cagr, trend: trend, years: chain.length, note: note };
+    /* 分红次数变化（某年起加中期分配）会让年度现金口径跳变，给出年报口径对照。
+     * 镜像 Python compute_dividend_cagr：伊利 2025 起加中期分配 → 总额 +9.2%/年，
+     * 但仅年报口径为 -1.9%/年。 */
+    var windowYears = [];
+    for (var i = 0; i < chain.length; i++) windowYears.push(latest - i);
+    var cagrAnnual = null;
+    if (annualAmount) {
+      var annChain = windowYears.map(function (y) { return annualAmount[y]; });
+      if (annChain.every(function (a) { return a != null && a > 0; })) {
+        cagrAnnual = Math.pow(annChain[0] / annChain[annChain.length - 1], 1 / (annChain.length - 1)) - 1;
+      }
+    }
+    var midSet = null;
+    if (midYears) {
+      midSet = {};
+      midYears.forEach(function (y) { midSet[parseInt(String(y).slice(0, 4), 10)] = true; });
+    }
+    if (midSet && cagrAnnual != null) {
+      var flags = {};
+      windowYears.forEach(function (y) { flags[midSet[y] ? 1 : 0] = true; });
+      if (Object.keys(flags).length > 1) {
+        notes.push('窗口内分红次数不一致（某年起增加中期分配），增速含分红政策变化；' +
+          '仅按年报口径为 ' + (cagrAnnual > 0 ? '+' : '') + (cagrAnnual * 100).toFixed(1) + '%/年');
+      }
+    }
+    return { cagr: cagr, trend: trend, years: chain.length,
+             note: notes.length ? notes.join('；') : null, cagr_annual: cagrAnnual };
   }
 
   function _aggregateDividendHistory(yearly, targetYear, totalShares) {
@@ -439,6 +465,7 @@
      * 不能只看 annualAmount[y] 是否存在——那会给"只有中期分配"的当年填 0，
      * 使其被当成完整财年（#30：中远海控/宝钢 的 CAGR 曾因此算成暴跌）。 */
     var completeYears = {};
+    var midYears = {};
     Object.keys(yearly).forEach(function (y) {
       var sum = 0;
       var hasAnnual = false;
@@ -447,6 +474,9 @@
         if (t.indexOf('年报') !== -1 && t.indexOf('半年报') === -1) {
           hasAnnual = true;
           sum += (Number(d.dividend_per_10) || 0) / 10.0 * recShares(d);
+        } else if ((Number(d.dividend_per_10) || 0) > 0) {
+          /* 中期分配（当年非年报记录）——只用于识别「分红次数变化」 */
+          midYears[y] = 1;
         }
       });
       annualAmount[y] = sum;
@@ -489,11 +519,12 @@
       var prev = annualAmount[String(prevY)], cur = annualAmount[String(curY)];
       if (prev > 0 && cur < prev * 0.7) { everCut = true; break; }
     }
-    var growth = computeDividendCagr(yearAmount, completeYears);
+    var growth = computeDividendCagr(yearAmount, completeYears, annualAmount, Object.keys(midYears));
     return {
       consecutive_years: consecutive, ever_cut: everCut,
       cagr: growth.cagr, trend: growth.trend,
       cagr_years: growth.years, cagr_note: growth.note,
+      cagr_annual: growth.cagr_annual,
       /* #35: 用 baseYear（最新有年报年，含 fallback，与 Python target_year 语义一致）而非最大年份 */
       latest_year_amount: yearAmount[String(baseYear)] || null,
       history_mean_amount: historyMean,
@@ -1278,6 +1309,7 @@
     result.dividend_trend = history.trend || null;
     result.dividend_cagr_years = history.cagr_years || 0;
     result.dividend_cagr_note = history.cagr_note || null;
+    result.dividend_cagr_annual = history.cagr_annual != null ? history.cagr_annual : null;
 
     /* Layer 2：分支评分（先算，供展示；红旗否决时也有维度分）*/
     var scored = _scoreByBranch(fin, history, payoutRatio, cfCoverage, cls.isBank, cls.isCyclical, cls.isDefensive);

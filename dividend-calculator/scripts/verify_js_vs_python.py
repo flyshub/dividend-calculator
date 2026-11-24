@@ -42,7 +42,7 @@ FIELDS_NUMERIC = [
     "sustainability_interest_coverage", "sustainability_consecutive_years",
     # #30 股息增长率（仅展示；两端公式/窗口/特别分红判定必须一致）
     "sustainability_dividend_cagr", "sustainability_dividend_trend",
-    "sustainability_dividend_cagr_years",
+    "sustainability_dividend_cagr_years", "sustainability_dividend_cagr_annual",
     "sustainability_payout_ratio",
     # 下一年度前瞻股息率：纯函数两端对账
     "forward_year", "forward_eps", "forward_payout_assumed", "forward_dps",
@@ -360,6 +360,8 @@ def compute_python(raw: dict) -> dict:
     result["sustainability_dividend_trend"] = getattr(sus, "dividend_trend", None) if sus else None
     result["sustainability_dividend_cagr_years"] = (
         getattr(sus, "dividend_cagr_years", None) if sus else None)
+    result["sustainability_dividend_cagr_annual"] = (
+        getattr(sus, "dividend_cagr_annual", None) if sus is not None else None)
     result["sustainability_payout_ratio"] = sus_m.get("payout_ratio")
     from src.sustainability_calculator import explain_sustainability
     result["sustainability_explanation"] = (

@@ -119,7 +119,8 @@ class DividendHistory:
     cagr: Optional[float] = None            # 年化增长率（小数）
     trend: Optional[str] = None             # 增长 / 平稳 / 萎缩
     cagr_years: int = 0                     # 参与计算的连续年数
-    cagr_note: Optional[str] = None         # 数据不足原因 / 特别分红警示
+    cagr_note: Optional[str] = None         # 数据不足原因 / 特别分红 / 口径差异
+    cagr_annual: Optional[float] = None     # 仅年报口径的年化增长率（对照用）
 
 
 @dataclass
@@ -162,7 +163,8 @@ class SustainabilityResult:
     dividend_cagr: Optional[float] = None       # 年化增长率（小数）
     dividend_trend: Optional[str] = None        # 增长 / 平稳 / 萎缩
     dividend_cagr_years: int = 0                # 参与计算的连续年数
-    dividend_cagr_note: Optional[str] = None    # 数据不足原因 / 特别分红警示
+    dividend_cagr_note: Optional[str] = None    # 数据不足原因 / 特别分红 / 口径差异
+    dividend_cagr_annual: Optional[float] = None  # 仅年报口径的年化增长率（对照用）
 
 
 # ---------------------------------------------------------------------------
@@ -224,11 +226,14 @@ class DividendCagr:
     cagr: Optional[float] = None
     trend: Optional[str] = None      # 增长 / 平稳 / 萎缩
     years: int = 0                   # 参与计算的连续年数
-    note: Optional[str] = None       # 人类可读说明（数据不足原因 / 特别分红警示）
+    note: Optional[str] = None       # 人类可读说明（数据不足原因 / 特别分红 / 口径差异）
+    cagr_annual: Optional[float] = None  # 仅年报口径的 CAGR（分红次数变化时对照用）
 
 
 def compute_dividend_cagr(year_amount: Dict[str, float],
                           complete_years: Optional[Sequence] = None,
+                          annual_amount: Optional[Dict[str, float]] = None,
+                          mid_year_years: Optional[Sequence] = None,
                           *, max_years: int = CAGR_MAX_YEARS,
                           min_years: int = CAGR_MIN_YEARS) -> DividendCagr:
     """按年分红总额 → 年化增长率（CAGR）与趋势。
@@ -290,14 +295,38 @@ def compute_dividend_cagr(year_amount: Dict[str, float],
     else:
         trend = "平稳"
 
-    note = None
+    window_years = [latest - i for i in range(len(chain))]
+    notes = []
     others = sorted(chain[1:])
     if others:
         baseline = others[len(others) // 2]
         if baseline > 0 and max(chain) > baseline * WARN_SPECIAL_DIV_MULTIPLE:
-            note = "窗口内某年分红远超其余年份（周期高峰或特别分红），增长率会被放大"
+            notes.append("窗口内某年分红远超其余年份（周期高峰或特别分红），增长率会被放大")
 
-    return DividendCagr(cagr=cagr, trend=trend, years=len(chain), note=note)
+    # 分红次数变化（某年开始加中期分配）会让「年度现金分红」口径跳变：
+    # 伊利 2025 起增加中期分配，年度总额 12.2 → 13.8，而年报单次从 12.2 降到 9.0。
+    # 两者都不是错，但增速必须说明来源，否则读成「盈利驱动的分红高增长」。
+    cagr_annual = None
+    if annual_amount:
+        ann_chain = [annual_amount.get(str(y)) for y in window_years]
+        if all(a and a > 0 for a in ann_chain):
+            cagr_annual = (ann_chain[0] / ann_chain[-1]) ** (1.0 / (len(ann_chain) - 1)) - 1.0
+    if mid_year_years:
+        mid_set = set()
+        for y in mid_year_years:
+            try:
+                mid_set.add(int(str(y)[:4]))
+            except (TypeError, ValueError):
+                continue
+        has_mid = {y in mid_set for y in window_years}
+        if len(has_mid) > 1 and cagr_annual is not None:
+            notes.append(
+                "窗口内分红次数不一致（某年起增加中期分配），增速含分红政策变化；"
+                f"仅按年报口径为 {cagr_annual * 100:+.1f}%/年")
+
+    return DividendCagr(cagr=cagr, trend=trend, years=len(chain),
+                        note="；".join(notes) if notes else None,
+                        cagr_annual=cagr_annual)
 
 
 def compute_payout_ratio(dividend_total: Optional[float],

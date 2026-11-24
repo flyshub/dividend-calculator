@@ -1336,3 +1336,21 @@ test('goodwillWarning 阈值 50%：以上警示、以下与缺数据不警示', 
   assert.equal(Calc.goodwillWarning(100, 0), null);
   assert.equal(Calc.goodwillWarning(0, 1000), null);
 });
+
+test('computeDividendCagr 分红次数变化 → 给年报口径对照（伊利 #30）', () => {
+  const ya = { 2021: 9.6, 2022: 10.4, 2023: 12.0, 2024: 12.2, 2025: 13.8 };
+  const aa = { 2021: 9.6, 2022: 10.4, 2023: 12.0, 2024: 12.2, 2025: 9.0 };
+  const r = Calc.computeDividendCagr(ya, { 2021: 1, 2022: 1, 2023: 1, 2024: 1, 2025: 1 }, aa, ['2025']);
+  assert.equal(r.trend, '增长');
+  assert.ok(Math.abs(r.cagr - (Math.pow(13.8 / 9.6, 0.25) - 1)) < 1e-12);
+  assert.ok(r.cagr_annual < 0);
+  assert.match(r.note, /分红次数不一致/);
+  assert.match(r.note, /-1\.6%\/年/);
+});
+
+test('computeDividendCagr 次数不变时无口径说明，年报口径等于总口径', () => {
+  const ya = { 2021: 10, 2022: 11, 2023: 12 };
+  const r = Calc.computeDividendCagr(ya, { 2021: 1, 2022: 1, 2023: 1 }, { 2021: 10, 2022: 11, 2023: 12 }, []);
+  assert.equal(r.note, null);
+  assert.ok(Math.abs(r.cagr_annual - r.cagr) < 1e-12);
+});

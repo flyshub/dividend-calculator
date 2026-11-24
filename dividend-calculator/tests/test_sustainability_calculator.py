@@ -606,3 +606,41 @@ class TestDividendCagrCompleteYears:
         from src.sustainability_calculator import compute_dividend_cagr
         r = compute_dividend_cagr({"2026": 6.5e9}, ["2025"])
         assert r.cagr is None and "完整财年" in (r.note or "")
+
+
+# ---------------------------------------------------------------------------
+# #30 分红次数变化：年报口径对照（伊利真实数据）
+# ---------------------------------------------------------------------------
+
+def test_cagr_flags_frequency_change_with_annual_only_reference():
+    """伊利 600887：2021-2025 年度总额 9.6→10.4→12.0→12.2→13.8 元/10股，
+    但 2025 起新增中期分配（4.8），年报单次由 12.2 降到 9.0。
+
+    总额口径 CAGR 9.50%/年（真实现金增加），年报口径 9.0/9.6 四年 = -1.6%/年。
+    两个数都对，混为一谈会被读成「盈利驱动的高增长」，所以必须给对照 + 说明。
+    （实盘按元计并逐年用行股本，伊利实际输出为 +9.18% / -1.89%。）
+    """
+    from src.sustainability_calculator import compute_dividend_cagr
+
+    year_amount = {"2021": 9.6, "2022": 10.4, "2023": 12.0, "2024": 12.2, "2025": 13.8}
+    annual_amount = {"2021": 9.6, "2022": 10.4, "2023": 12.0, "2024": 12.2, "2025": 9.0}
+    complete = [2021, 2022, 2023, 2024, 2025]
+
+    r = compute_dividend_cagr(year_amount, complete,
+                              annual_amount=annual_amount, mid_year_years=[2025])
+    assert r.trend == "增长"
+    assert abs(r.cagr - ((13.8 / 9.6) ** 0.25 - 1)) < 1e-12
+    assert r.cagr_annual is not None and r.cagr_annual < 0
+    assert "分红次数不一致" in r.note
+    assert "-1.6%/年" in r.note
+
+
+def test_cagr_no_frequency_change_has_no_note_and_matches_annual():
+    from src.sustainability_calculator import compute_dividend_cagr
+
+    year_amount = {"2021": 10, "2022": 11, "2023": 12}
+    annual_amount = dict(year_amount)
+    r = compute_dividend_cagr(year_amount, [2021, 2022, 2023],
+                              annual_amount=annual_amount, mid_year_years=[])
+    assert r.note is None
+    assert r.cagr_annual == pytest.approx(r.cagr)

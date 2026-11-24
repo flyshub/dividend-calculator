@@ -307,7 +307,17 @@ def aggregate_dividend_history(records: List[DividendRecord],
 
     # 股息增长率（#30）：复用同一年份聚合，不新增取数。
     # complete_years = 有年报记录的财年 —— 只有中期分配的当年分红不完整，不能当窗口端点
-    growth = compute_dividend_cagr(year_amount, [int(y) for y in annual_amount])
+    # annual_amount / mid_year_years 用于识别「分红次数变化」，给出年报口径对照
+    mid_year_years = set()
+    for rec in records:
+        _t = rec.report_time or ""
+        if rec.dividend_per_10 > 0 and "年报" not in _t:
+            ym = re.match(r"(\d{4})", _t)
+            if ym:
+                mid_year_years.add(int(ym.group(1)))
+    growth = compute_dividend_cagr(year_amount, [int(y) for y in annual_amount],
+                                   annual_amount=annual_amount,
+                                   mid_year_years=sorted(mid_year_years))
 
     return DividendHistory(
         consecutive_years=consecutive,
@@ -319,6 +329,7 @@ def aggregate_dividend_history(records: List[DividendRecord],
         trend=growth.trend,
         cagr_years=growth.years,
         cagr_note=growth.note,
+        cagr_annual=growth.cagr_annual,
     )
 
 
@@ -415,6 +426,7 @@ def assess_for_stock(*,
         result.dividend_trend = history.trend
         result.dividend_cagr_years = history.cagr_years
         result.dividend_cagr_note = history.cagr_note
+        result.dividend_cagr_annual = getattr(history, "cagr_annual", None)
     return result
 
 
