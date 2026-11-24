@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  actions: read        # deploy-pages 需要列出本 run 的 github-pages 产物
   pages: write
   id-token: write
 
