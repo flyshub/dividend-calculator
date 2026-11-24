@@ -134,14 +134,14 @@
     </div>
 
     <div id="errors-card" class="card hidden">
-      <h2>未计入的持仓</h2>
+      <h2>需要留意的持仓</h2>
       <div id="errors-list" class="hint"></div>
     </div>
   </section>
 
   <footer>
     口径：每股分红 = 最新完整财年现金分红总额 ÷ 当前总股本（总额法），与单股主卡同源。
-    无分红或取数失败的持仓不进入加权股息率的分母，单列在「未计入」。可持续性沿用单股规则（税前股息率 &gt; 4% 才评估）。
+    无分红（真实 0 元）的持仓计入市值分母、按 0 收入稀释加权股息率；取数失败的持仓市值不可知，不计入任何合计，单列在「需要留意的持仓」。可持续性沿用单股规则（税前股息率 &gt; 4% 才评估）。
   </footer>
 </div>
 
@@ -208,7 +208,10 @@
         tr.appendChild(td);
       });
       const td = document.createElement('td');
-      td.innerHTML = p.error ? '<span class="badge gray">未计入</span>' : verdictBadge(p.verdict);
+      /* 无分红（市值仍可知）与取数失败要分开：前者进了市值分母，只是收入 0 */
+      td.innerHTML = p.error
+        ? '<span class="badge gray">' + (p.market_value != null ? '无分红' : '取数失败') + '</span>'
+        : verdictBadge(p.verdict);
       tr.appendChild(td);
       body.appendChild(tr);
     });

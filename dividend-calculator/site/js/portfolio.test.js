@@ -74,3 +74,19 @@ test('summarize 行业占比排序与未知行业/未评估兜底', () => {
   assert.equal(s.verdict_summary['偏弱'], 1);
   assert.equal(s.verdict_summary['未评估'], 1);
 });
+
+test('summarize 无分红持仓进市值分母（稀释加权股息率）', () => {
+  const s = P.summarize([
+    { code: 'A', market_value: 20000, annual_income: 1000, industry: '银行', verdict: '可持续', error: null },
+    { code: 'Z', market_value: 20000, annual_income: null, industry: '电力', verdict: '未评估',
+      error: '最新完整财年无现金分红' },
+  ]);
+  assert.equal(s.total_market_value, 40000);
+  assert.equal(s.weighted_yield, 2.5);
+  assert.deepStrictEqual(s.industry_breakdown.map(r => r[0]), ['银行']);
+  assert.deepStrictEqual(s.errors, ['Z: 最新完整财年无现金分红']);
+});
+
+test('parseHoldings 支持空格分隔（与 Python 一致）', () => {
+  assert.deepStrictEqual(P.parseHoldings('600900 1000'), [{ code: '600900', shares: 1000 }]);
+});

@@ -141,3 +141,27 @@ def test_summarize_empty_has_no_yield():
     s = summarize([])
     assert s.weighted_yield is None
     assert s.total_market_value == 0 and s.total_annual_income == 0
+
+
+def test_summarize_counts_dividend_free_holding_in_market_value():
+    """「无分红」是真实事实（0 元），不是缺数据：它必须进市值分母，稀释加权股息率。
+
+    2026-11 review 修正：此前把所有带 error 的持仓都排除，导致含无分红股的组合
+    市值偏小、加权股息率虚高。
+    """
+    s = summarize([
+        _pos("A", 1000, 20000, "银行"),
+        _pos("Z", None, 20000, "电力", verdict="未评估", error="最新完整财年无现金分红"),
+    ])
+    assert s.total_market_value == pytest.approx(40000)
+    assert s.total_annual_income == pytest.approx(1000)
+    assert s.weighted_yield == pytest.approx(2.5)      # 不是 5.0
+    assert s.errors == ["Z: 最新完整财年无现金分红"]
+    # 行业分布只统计有分红的持仓（0 元不占份额）
+    assert [row[0] for row in s.industry_breakdown] == ["银行"]
+
+
+def test_parse_holdings_accepts_space_separator_like_js():
+    assert parse_holdings("600900 1000") == [Holding("600900", 1000.0)]
+    with pytest.raises(ValueError):
+        parse_holdings("600900 1000 2000")

@@ -70,9 +70,13 @@ def parse_holdings(text: str) -> List[Holding]:
         item = chunk.strip()
         if not item:
             continue
-        if ":" not in item:
-            raise ValueError(f"持仓格式应为 代码:股数，收到 {item!r}")
-        code, _, shares_text = item.partition(":")
+        if ":" in item:
+            code, _, shares_text = item.partition(":")
+        else:
+            parts = item.split()
+            if len(parts) != 2:
+                raise ValueError(f"持仓格式应为 代码:股数（或「代码 股数」），收到 {item!r}")
+            code, shares_text = parts
         code = code.strip()
         if not code:
             raise ValueError(f"持仓缺少股票代码：{item!r}")
@@ -127,17 +131,23 @@ def build_position(stock_code: str, shares: float, analysis) -> PortfolioPositio
 
 
 def summarize(positions: Sequence[PortfolioPosition]) -> PortfolioSummary:
-    """聚合持仓行（纯函数）。失败持仓不进分母、也不计收入。"""
-    usable = [p for p in positions if p.error is None]
+    """聚合持仓行（纯函数）。
+
+    口径（2026-11 review 修正）：
+    - **市值**包含所有持股，包括「无分红」的持仓——你确实持有它们，
+      把它们排除会让市值偏小、加权股息率虚高。
+    - **收入**只累加有分红数据的持仓；无分红 = 真实 0 元，靠市值进分母实现稀释。
+    - **取数失败**的持仓 market_value / annual_income 均为 None，自然不进任何合计。
+    """
     errors = [f"{p.stock_code}: {p.error}" for p in positions if p.error]
 
-    market_value = sum(p.market_value for p in usable if p.market_value)
-    income = sum(p.annual_income for p in usable if p.annual_income)
+    market_value = sum(p.market_value for p in positions if p.market_value)
+    income = sum(p.annual_income for p in positions if p.annual_income)
 
     weighted_yield = (income / market_value * 100) if market_value > 0 else None
 
     by_industry: Dict[str, float] = {}
-    for p in usable:
+    for p in positions:
         if p.annual_income:
             key = p.industry or "未知行业"
             by_industry[key] = by_industry.get(key, 0.0) + p.annual_income
@@ -147,7 +157,9 @@ def summarize(positions: Sequence[PortfolioPosition]) -> PortfolioSummary:
         key=lambda row: row[1], reverse=True)
 
     verdict_summary: Dict[str, int] = {}
-    for p in usable:
+    for p in positions:
+        if p.market_value is None:      # 取数失败：连市值都不可知，不计入概览
+            continue
         key = p.verdict or "未评估"
         verdict_summary[key] = verdict_summary.get(key, 0) + 1
 

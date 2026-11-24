@@ -59,16 +59,17 @@
   }
 
   /* 聚合（对齐 Python summarize）：失败持仓不进分子也不进分母 */
+  /* 口径与 Python summarize 一致：市值含所有持股（含无分红），
+   * 收入只加有分红数据的；取数失败的持仓市值/收入均为 null，自然不进合计。 */
   function summarize(positions) {
-    var usable = positions.filter(function (p) { return !p.error; });
     var mv = 0, income = 0;
-    usable.forEach(function (p) {
+    positions.forEach(function (p) {
       if (p.market_value) mv += p.market_value;
       if (p.annual_income) income += p.annual_income;
     });
 
     var byIndustry = {};
-    usable.forEach(function (p) {
+    positions.forEach(function (p) {
       if (!p.annual_income) return;
       var key = p.industry || '未知行业';
       byIndustry[key] = (byIndustry[key] || 0) + p.annual_income;
@@ -78,7 +79,8 @@
     }).sort(function (a, b) { return b[1] - a[1]; });
 
     var verdicts = {};
-    usable.forEach(function (p) {
+    positions.forEach(function (p) {
+      if (p.market_value == null) return;   // 取数失败：市值都不可知，不计入概览
       var key = p.verdict || '未评估';
       verdicts[key] = (verdicts[key] || 0) + 1;
     });
