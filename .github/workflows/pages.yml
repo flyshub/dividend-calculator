@@ -7,7 +7,7 @@ on:
 
 permissions:
   contents: read
-  actions: read        # deploy-pages 需要列出本 run 的 github-pages 产物
+  actions: read        # deploy-pages 需要列出 build job 的 github-pages 产物
   pages: write
   id-token: write
 
@@ -16,10 +16,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  # 拆成两个 job：upload 与 deploy 分开后，产物在部署前有时间完成注册。
+  # 单 job 内 upload 后立即 deploy 时曾出现 deploy-pages 查不到产物
+  # （Found 0 artifact(s) → "Fetching artifact metadata failed"，
+  #  2026-11-24 run 45405088267 连续 3 次复现），拆开可规避该竞态。
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -34,6 +35,28 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           path: dividend-calculator/site
+
+  deploy:
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for artifact registration
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          for i in $(seq 1 12); do
+            count=$(gh api "repos/${{ github.repository }}/actions/runs/$RUN_ID/artifacts" \
+              --jq '[.artifacts[] | select(.name == "github-pages")] | length' 2>/dev/null || echo 0)
+            echo "attempt $i: github-pages artifacts = $count"
+            if [ "$count" -ge 1 ]; then exit 0; fi
+            sleep 5
+          done
+          echo "::error::github-pages artifact 未在 60s 内出现"
+          exit 1
 
       - name: Deploy to GitHub Pages
         id: deployment
