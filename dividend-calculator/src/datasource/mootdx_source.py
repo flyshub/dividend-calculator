@@ -21,7 +21,9 @@ from ..utils import infer_fiscal_year, ensure_6digit
 
 logger = logging.getLogger(__name__)
 
-# 模块级单例 — 避免每次调用重新连接通达信服务器
+# 模块级单例 — 避免每次调用重新连接通达信服务器。
+# #21 已知约束：Quotes 连接非线程安全，ThreadingHTTPServer 的多请求共享同一
+# client 是既有妥协（每次重建要重连 mootdx，代价高于冲突风险）；改动前先评估。
 _quotes_client: Optional[Quotes] = None
 
 
@@ -33,6 +35,12 @@ def get_quotes_client() -> Quotes:
             market='std', multithread=True, heartbeat=True
         )
     return _quotes_client
+
+
+def reset_quotes_client() -> None:
+    """清除客户端单例（#21 测试隔离用），下次 get_quotes_client() 重连。"""
+    global _quotes_client
+    _quotes_client = None
 
 
 

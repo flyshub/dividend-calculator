@@ -160,3 +160,16 @@ def get_data_source_manager() -> DataSourceManager:
     if _data_source_manager is None:
         _data_source_manager = DataSourceManager()
     return _data_source_manager
+
+
+# #21 测试隔离钩子：单例在用例间会泄漏数据源注册/连接状态。
+# 生产调用点仍走隐式获取（惰性重建），只有测试用这两个钩子。
+def set_data_source_manager(manager: Optional[DataSourceManager]) -> None:
+    """显式替换单例（注入测试替身或 None）。"""
+    global _data_source_manager
+    _data_source_manager = manager
+
+
+def reset_data_source_manager() -> None:
+    """清除单例，下次 get_data_source_manager() 惰性重建。"""
+    set_data_source_manager(None)
