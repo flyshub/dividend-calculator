@@ -9,3 +9,6 @@
 
 # 环境残留
 dividend-calculator/backtest_data.db
+
+# 一次性架构评审产物（生成物，不入库）
+docs/architecture-review-*.html

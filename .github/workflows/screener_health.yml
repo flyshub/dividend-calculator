@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check recent runs
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             // 判据：最近一次成功运行距今超过 4 天。用「距今」而不是「窗口内有几条」：
