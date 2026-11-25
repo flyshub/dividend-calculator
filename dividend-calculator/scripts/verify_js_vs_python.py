@@ -47,12 +47,18 @@ FIELDS_NUMERIC = [
     # 下一年度前瞻股息率：纯函数两端对账
     "forward_year", "forward_eps", "forward_payout_assumed", "forward_dps",
     "forward_yield_before_tax", "forward_coverage",
+    # 现金回报率（#29）：分红 + 注销类回购 ÷ 市值
+    "cash_return_year", "cash_return_dividend", "cash_return_repurchase",
+    "cash_return_repurchase_events", "cash_return_incentive_excluded",
+    "cash_return_in_progress", "cash_return_dividend_yield",
+    "cash_return_repurchase_yield", "cash_return_total_yield",
 ]
 
 FIELDS_STR = ["dividend_year", "valuation_zone", "pr_warning", "industry", "is_loss_stock", "explanation",
               "sustainability_verdict", "sustainability_explanation",
               "ttm_period", "ttm_source", "roe_period",
               "forward_eps_kind", "forward_status", "forward_warnings",
+              "cash_return_status", "cash_return_note",
     "sustainability_dividend_cagr_note",
               "is_cyclical", "is_tech", "is_growth"]
 
@@ -166,6 +172,12 @@ def fetch_forecast_rows(code: str):
     from src.eastmoney_fetcher import fetch_earnings_forecast
     return fetch_earnings_forecast(code)
 
+def fetch_repurchase_rows(code: str):
+    """东财回购行：直接复用生产实现（None=取数失败、[]=真无回购）。"""
+    from src.eastmoney_fetcher import fetch_repurchase_rows as _f
+    return _f(code)
+
+
 def fetch_raw(code: str) -> dict:
     return {
         "quote": fetch_tencent_quote(code),
@@ -174,6 +186,7 @@ def fetch_raw(code: str) -> dict:
         "cashflow_rows": fetch_cashflow_rows(code),
         "industry": fetch_industry(code),
         "forecast_rows": fetch_forecast_rows(code),
+        "repurchase_rows": fetch_repurchase_rows(code),
     }
 
 
@@ -270,6 +283,17 @@ def compute_python(raw: dict) -> dict:
         total_shares=total_shares,
     )
 
+    # 4c. 现金回报率（#29）：与 JS computeCashReturn 消费同一批回购行
+    from src.cash_return import compute_cash_return
+    cr_rows = raw.get("repurchase_rows")
+    cr = compute_cash_return(
+        dividend_total=total_div,
+        market_cap=total_market_cap,
+        repurchase_rows=cr_rows,
+        fiscal_year=year,
+        fetch_error=cr_rows is None,
+    )
+
     # 5. 股息可持续性（与 JS assessSustainability 相同算法，纯函数消费相同 raw）
     # JS 端 computeFromRaw 仅在 yields[0] > 4 时调用 assessSustainability，
     # 故 yield ≤ 阈值时 sustainability 为 None（镜像该门控）。
@@ -347,6 +371,18 @@ def compute_python(raw: dict) -> dict:
         "forward_status": fwd.forward_status,
         # 警示集合对账：文案一致性也纳入，防止两端规则漂移
         "forward_warnings": sorted(fwd.forward_warnings or []),
+        # 现金回报率（#29）
+        "cash_return_status": cr.cash_return_status,
+        "cash_return_year": cr.cash_return_year,
+        "cash_return_dividend": cr.cash_return_dividend,
+        "cash_return_repurchase": cr.cash_return_repurchase,
+        "cash_return_repurchase_events": cr.cash_return_repurchase_events,
+        "cash_return_incentive_excluded": cr.cash_return_incentive_excluded,
+        "cash_return_in_progress": cr.cash_return_in_progress,
+        "cash_return_dividend_yield": cr.cash_return_dividend_yield,
+        "cash_return_repurchase_yield": cr.cash_return_repurchase_yield,
+        "cash_return_total_yield": cr.cash_return_total_yield,
+        "cash_return_note": cr.cash_return_note,
     }
     # 衍生指标拍平（sus 可能为 None，对应字段也为 None，双端一致）
     sus_m = sus.metrics if sus else {}
@@ -563,6 +599,8 @@ def main():
             return 2
         fc = raw.get("forecast_rows")
         print(f"[{code}] 一致预期: " + ("取数失败" if fc is None else f"{len(fc)} 行"))
+        rc = raw.get("repurchase_rows")
+        print(f"[{code}] 回购记录: " + ("取数失败" if rc is None else f"{len(rc)} 行"))
 
         # 修正表出口校验（CI 防护）：东财已知错误行（如长电 2015 年度 10派1.2946→4）
         # 必须在取数出口被替换，防止修正表/应用逻辑回归

@@ -209,6 +209,23 @@
     return jsonFetchWithTimeout(url, FORECAST_TIMEOUT_MS).then(forecastRowsFromPayload);
   }
 
+  /* ── 东财回购明细（RPTA_WEB_GETHGLIST_NEW，#29）──
+   * 语义同 forecastRowsFromPayload：null=取数失败、[]=真无回购（code 9201）。
+   * 600036/601398 实测返回 9201「返回数据为空」，是真实结论，不是故障。 */
+  var REPURCHASE_TIMEOUT_MS = 8000;
+
+  function repurchaseRowsFromPayload(payload) {
+    return forecastRowsFromPayload(payload);
+  }
+
+  function fetchRepurchaseRows(stockCode) {
+    var url = 'https://datacenter-web.eastmoney.com/api/data/v1/get' +
+      '?reportName=RPTA_WEB_GETHGLIST_NEW&columns=ALL&source=WEB' +
+      '&filter=(DIM_SCODE%3D%22' + stockCode + '%22)&pageNumber=1&pageSize=50' +
+      '&sortColumns=DIM_DATE&sortTypes=-1';
+    return jsonFetchWithTimeout(url, REPURCHASE_TIMEOUT_MS).then(repurchaseRowsFromPayload);
+  }
+
   function fetchFinancials(stockCode) {
     var market = stockCode[0] === '6' ? '.SH' : '.SZ';
     var secucode = stockCode + market;
@@ -385,6 +402,8 @@
     fetchDividendRecords: fetchDividendRecords,
     fetchFinancials: fetchFinancials,
     fetchEarningsForecast: fetchEarningsForecast,
+    fetchRepurchaseRows: fetchRepurchaseRows,
+    repurchaseRowsFromPayload: repurchaseRowsFromPayload,
     forecastRowsFromPayload: forecastRowsFromPayload,
     fetchCashflow: fetchCashflow,
     fetchGoodwill: fetchGoodwill,

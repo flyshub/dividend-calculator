@@ -12,6 +12,7 @@ from .api import get_stock_info
 from .datasource.base import StockInfo
 from .dividend import get_latest_full_year_dividend
 from .forward_yield import ForwardYieldResult, estimate_forward_yield
+from .cash_return import CashReturnResult, estimate_cash_return
 from .pr import calculate_pr, PRResult
 from .sustainability import assess_with_auto_fetch
 from .eastmoney_fetcher import fetch_goodwill
@@ -30,6 +31,7 @@ class StockAnalysisResult:
     pr_result: PRResult
     sustainability: Optional[SustainabilityResult] = None  # 仅股息率 > 阈值时评估，否则 None
     forward_yield: Optional[ForwardYieldResult] = None      # 下一财年前瞻股息率（模型估算，仅展示）
+    cash_return: Optional[CashReturnResult] = None          # 现金回报率（分红+注销类回购，仅展示）
 
 
 def attach_goodwill_warning(sustainability: SustainabilityResult, stock_code: str) -> None:
@@ -113,6 +115,19 @@ def run_stock_analysis(stock_input: str) -> Optional[StockAnalysisResult]:
         except Exception as e:
             logger.warning("前瞻股息率计算失败 %s: %s", stock_code, e)
 
+    # #29 现金回报率（现金分红 + 注销类回购，仅展示，不进判据）
+    cash_return = None
+    if dividend_year:
+        try:
+            cash_return = estimate_cash_return(
+                stock_code=stock_code,
+                dividend_total=dividend_total,
+                market_cap=market_cap,
+                fiscal_year=dividend_year,
+            )
+        except Exception as e:
+            logger.warning("现金回报率计算失败 %s: %s", stock_code, e)
+
     return StockAnalysisResult(
         stock_info=stock_info,
         dividend_total=dividend_total,
@@ -120,4 +135,5 @@ def run_stock_analysis(stock_input: str) -> Optional[StockAnalysisResult]:
         pr_result=pr_result,
         sustainability=sustainability,
         forward_yield=forward_yield,
+        cash_return=cash_return,
     )

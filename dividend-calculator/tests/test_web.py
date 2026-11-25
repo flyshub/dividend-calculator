@@ -313,13 +313,14 @@ class TestForwardYieldRoute:
         server.shutdown()
         server.server_close()
 
-    def _fake_analysis(self, forward):
+    def _fake_analysis(self, forward, cash_return=None):
         from types import SimpleNamespace
         return SimpleNamespace(
             pr_result=None,
             dividend_yield_before_tax=3.44,
             sustainability=None,
             forward_yield=forward,
+            cash_return=cash_return,
         )
 
     def test_pr_payload_includes_forward(self, _server, monkeypatch):
@@ -346,6 +347,40 @@ class TestForwardYieldRoute:
         assert forward["forward_eps_kind"] == "E"
         assert forward["forward_yield_before_tax"] == 3.44
         assert forward["forward_coverage"] == 43
+
+    def test_pr_payload_includes_cash_return(self, _server, monkeypatch):
+        import src.web as web_module
+        from src.cash_return import CashReturnResult
+
+        cr = CashReturnResult(
+            cash_return_status="ok", cash_return_year=2025,
+            cash_return_dividend=2e10, cash_return_repurchase=6e9,
+            cash_return_repurchase_events=1,
+            cash_return_dividend_yield=2.0, cash_return_repurchase_yield=0.6,
+            cash_return_total_yield=2.6, cash_return_note="按回购完成日归属财年，未按日拆分",
+        )
+        monkeypatch.setattr(web_module, "run_stock_analysis", lambda code: self._fake_analysis(None, cr))
+        monkeypatch.setattr(web_module, "serialize_pr_result", lambda r: {"stock_code": "600519"})
+
+        with urllib.request.urlopen(f"{_server}/api/pr?stock=600519") as r:
+            body = json.loads(r.read().decode("utf-8"))
+
+        data = body["data"]["cash_return"]
+        assert data["cash_return_status"] == "ok"
+        assert data["cash_return_year"] == 2025
+        assert data["cash_return_repurchase"] == 6e9
+        assert data["cash_return_total_yield"] == 2.6
+
+    def test_pr_payload_cash_return_null_without_fiscal_year(self, _server, monkeypatch):
+        import src.web as web_module
+
+        monkeypatch.setattr(web_module, "run_stock_analysis", lambda code: self._fake_analysis(None))
+        monkeypatch.setattr(web_module, "serialize_pr_result", lambda r: {"stock_code": "000000"})
+
+        with urllib.request.urlopen(f"{_server}/api/pr?stock=000000") as r:
+            body = json.loads(r.read().decode("utf-8"))
+
+        assert body["data"]["cash_return"] is None
 
     def test_pr_payload_forward_null_when_not_estimated(self, _server, monkeypatch):
         import src.web as web_module

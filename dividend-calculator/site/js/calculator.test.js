@@ -1365,3 +1365,107 @@ test('computeDividendCagr 次数不变时无口径说明，年报口径等于总
   assert.equal(r.note, null);
   assert.ok(Math.abs(r.cagr_annual - r.cagr) < 1e-12);
 });
+
+// ---- 现金回报率（#29，对齐 tests/test_cash_return.py）----
+function crRow(amount, purpose, finish, start, end) {
+  return {
+    REPURAMOUNT: amount, REPUROBJECTIVE: purpose,
+    FINISHDATE: finish === undefined ? '2025-06-30' : finish,
+    REPURSTARTDATE: start || '2025-01-10',
+    REPURENDDATE: end || '2025-07-01',
+  };
+}
+
+test('classifyRepurchasePurpose 含注销 → buyback', () => {
+  assert.equal(Calc.classifyRepurchasePurpose('回购股份将用于注销并减少注册资本'), 'buyback');
+});
+test('classifyRepurchasePurpose 混合计划 → buyback', () => {
+  assert.equal(Calc.classifyRepurchasePurpose('用于注销减少注册资本及股权激励计划'), 'buyback');
+});
+test('classifyRepurchasePurpose 仅激励 → incentive', () => {
+  assert.equal(Calc.classifyRepurchasePurpose('用于股权激励计划及/或员工持股计划'), 'incentive');
+});
+test('classifyRepurchasePurpose 空 → unknown', () => {
+  assert.equal(Calc.classifyRepurchasePurpose(''), 'unknown');
+  assert.equal(Calc.classifyRepurchasePurpose(null), 'unknown');
+});
+
+test('aggregateRepurchase 只计当年完成的注销类', () => {
+  const agg = Calc.aggregateRepurchase([
+    crRow(1e9, '用于注销', '2025-08-29'),
+    crRow(3e9, '股权激励', '2025-04-08'),
+    crRow(2e9, '用于注销', '2026-05-27'),
+  ], 2025);
+  assert.equal(agg.amount, 1e9);
+  assert.equal(agg.events, 1);
+  assert.equal(agg.incentive, 3e9);
+});
+
+test('aggregateRepurchase 未完成计入 in_progress', () => {
+  const agg = Calc.aggregateRepurchase([
+    crRow(1.21e10, '用于注销', null, '2026-03-30', '2027-03-30'),
+  ], 2026);
+  assert.equal(agg.amount, 0);
+  assert.equal(agg.in_progress, 1.21e10);
+});
+
+test('aggregateRepurchase 未完成且窗口不重叠不计', () => {
+  const agg = Calc.aggregateRepurchase([
+    crRow(5e8, '用于注销', null, '2022-01-01', '2022-12-31'),
+  ], 2026);
+  assert.equal(agg.in_progress, 0);
+});
+
+test('aggregateRepurchase 用途未标注进 unclassified', () => {
+  const agg = Calc.aggregateRepurchase([crRow(5e8, '', '2025-03-01')], 2025);
+  assert.equal(agg.amount, 0);
+  assert.equal(agg.unclassified, 5e8);
+});
+
+test('computeCashReturn 分项与合计', () => {
+  const res = Calc.computeCashReturn({
+    dividendTotal: 2e10, marketCap: 1e12, fiscalYear: 2025,
+    repurchaseRows: [crRow(6e9, '用于注销', '2025-08-29')],
+  });
+  assert.equal(res.cash_return_status, 'ok');
+  assert.equal(round2(res.cash_return_dividend_yield), 2);
+  assert.equal(round2(res.cash_return_repurchase_yield), 0.6);
+  assert.equal(round2(res.cash_return_total_yield), 2.6);
+});
+
+test('computeCashReturn 无回购记录仍给分红', () => {
+  const res = Calc.computeCashReturn({ dividendTotal: 2e10, marketCap: 1e12, fiscalYear: 2025, repurchaseRows: [] });
+  assert.equal(res.cash_return_status, 'no_repurchase');
+  assert.equal(res.cash_return_repurchase, 0);
+  assert.equal(round2(res.cash_return_total_yield), 2);
+  assert.ok(res.cash_return_note.indexOf('无回购记录') >= 0);
+});
+
+test('computeCashReturn 取数失败不把未知当 0', () => {
+  const res = Calc.computeCashReturn({
+    dividendTotal: 2e10, marketCap: 1e12, fiscalYear: 2025, repurchaseRows: null, fetchError: true,
+  });
+  assert.equal(res.cash_return_status, 'fetch_error');
+  assert.equal(res.cash_return_repurchase, null);
+  assert.equal(res.cash_return_total_yield, null);
+  assert.equal(round2(res.cash_return_dividend_yield), 2);
+});
+
+test('computeCashReturn 缺市值/缺财年', () => {
+  assert.equal(Calc.computeCashReturn({ dividendTotal: 1, marketCap: 0, fiscalYear: 2025 }).cash_return_status, 'missing_inputs');
+  assert.equal(Calc.computeCashReturn({ dividendTotal: 1, marketCap: 1e12, fiscalYear: null }).cash_return_status, 'no_fiscal_year');
+});
+
+test('computeCashReturn 说明含未计入金额与混合计划', () => {
+  const res = Calc.computeCashReturn({
+    dividendTotal: 0, marketCap: 1e12, fiscalYear: 2025,
+    repurchaseRows: [
+      crRow(3e9, '股权激励', '2025-04-08'),
+      crRow(1e10, '用于注销减少注册资本及股权激励计划', '2025-06-01'),
+      crRow(1.21e10, '用于注销', null, '2025-03-30', '2027-03-30'),
+    ],
+  });
+  assert.ok(res.cash_return_note.indexOf('激励类回购 30.00 亿元未计入') >= 0);
+  assert.ok(res.cash_return_note.indexOf('进行中回购 121.00 亿元未完成') >= 0);
+  assert.ok(res.cash_return_note.indexOf('混合计划') >= 0);
+});

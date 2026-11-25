@@ -202,6 +202,10 @@ class DividendRequestHandler(BaseHTTPRequestHandler):
         data["forward"] = (
             asdict(analysis.forward_yield) if analysis.forward_yield is not None else None
         )
+        # 现金回报率（现金分红 + 注销类回购，仅展示，与上面 ROE 口径的 tsr 无关）
+        data["cash_return"] = (
+            asdict(analysis.cash_return) if analysis.cash_return is not None else None
+        )
         self._send_json(200, {"success": True, "data": data})
 
     def _handle_historical_data(self, query: str):

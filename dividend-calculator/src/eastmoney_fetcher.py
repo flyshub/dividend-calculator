@@ -12,6 +12,7 @@
   - 前十大股东：RPT_F10_EH_HOLDERS（datacenter/securities，HOLD_NUM_RATIO 占比百分数）
   - 近1年涨跌幅：腾讯 fqkline 前复权日K（web.ifzq.gtimg.cn）
   - 盈利预测：RPT_WEB_RESPREDICT（datacenter-web，券商一致预期 EPS1..4 + MARK1..4）
+  - 回购明细：RPTA_WEB_GETHGLIST_NEW（datacenter-web，已回购金额 + 回购用途）
 
 严禁虚构数据：数据源不可用即返回空/None，由调用方显式标注缺失。
 """
@@ -78,6 +79,14 @@ _FORECAST_URL = (
     "https://datacenter-web.eastmoney.com/api/data/v1/get"
     "?reportName=RPT_WEB_RESPREDICT&columns=ALL"
     '&filter=(SECURITY_CODE%3D"{code}")&pageNumber=1&pageSize=5'
+)
+
+# 东财回购明细（datacenter-web，页面直连同源；无回购记录时 code=9201、result.data=null）
+_REPURCHASE_URL = (
+    "https://datacenter-web.eastmoney.com/api/data/v1/get"
+    "?reportName=RPTA_WEB_GETHGLIST_NEW&columns=ALL&source=WEB"
+    '&filter=(DIM_SCODE%3D"{code}")&pageNumber=1&pageSize=50'
+    "&sortColumns=DIM_DATE&sortTypes=-1"
 )
 
 def _fetch_eastmoney_rows(url: str, stock_code: str, label: str) -> List[dict]:
@@ -196,12 +205,13 @@ def _apply_dividend_fixes(rows: List[dict], stock_code: str) -> List[dict]:
 FORECAST_NO_DATA_CODE = 9201  # 东财「返回数据为空」＝真·无覆盖，不是接口故障
 
 
-def _forecast_rows_from_payload(payload) -> Optional[List[dict]]:
-    """一致预期响应三分类：行列表 / []（无覆盖）/ None（取数失败）。
+def _datacenter_rows_from_payload(payload) -> Optional[List[dict]]:
+    """东财 datacenter 响应三分类：行列表 / []（真无数据）/ None（取数失败）。
 
-    东财对「无机构覆盖」和「服务端错误」都返回 HTTP 200 + success=false，只能靠
-    code 区分：9201 = 返回数据为空（真实结论）；其他非 0 code（如 9501 参数错误）
-    是接口故障，必须报成取数失败，否则 UI 会把故障说成"无预测"。
+    东财对「本来就没有数据」和「服务端错误」都返回 HTTP 200 + success=false，只能靠
+    code 区分：9201 = 返回数据为空（真实结论，如无一致预期、无回购记录）；其他非 0
+    code（如 9501 参数错误）是接口故障，必须报成取数失败，否则 UI 会把故障说成
+    「无数据」——那会把取数问题伪装成公司的真实结论（数据铁律 1/2）。
     """
     if not payload:
         return None
@@ -213,6 +223,35 @@ def _forecast_rows_from_payload(payload) -> Optional[List[dict]]:
     if payload.get("code") == FORECAST_NO_DATA_CODE:
         return []
     return None
+
+
+def _forecast_rows_from_payload(payload) -> Optional[List[dict]]:
+    """一致预期行（语义同 _datacenter_rows_from_payload，保留旧名给既有调用方）。"""
+    return _datacenter_rows_from_payload(payload)
+
+
+def fetch_repurchase_rows(stock_code: str) -> Optional[List[dict]]:
+    """东财回购明细行（RPTA_WEB_GETHGLIST_NEW，#29）。
+
+    语义同 fetch_dividend_rows：网络/HTTP/接口故障 → None（取数失败）；请求成功但
+    该公司无回购记录 → []（真无回购，600036/601398 实测 code=9201）。
+
+    字段（2026-11 实测）：DIM_SCODE 代码、DIM_DATE 公告日、REPURAMOUNT 已回购金额（元）、
+    JEXX/JESX 计划金额下限/上限、REPUROBJECTIVE 回购用途（区分「注销」与「股权激励」）、
+    REPURPROGRESS 实施进度、REPURSTARTDATE/REPURENDDATE 实施区间、FINISHDATE 完成日。
+    """
+    try:
+        resp = requests.get(_REPURCHASE_URL.format(code=stock_code), headers=_UA, timeout=20)
+        resp.raise_for_status()
+        payload = resp.json()
+    except Exception as e:
+        logger.warning("东财回购接口获取失败 %s: %s", stock_code, e)
+        return None
+    rows = _datacenter_rows_from_payload(payload)
+    if rows is None:
+        logger.warning("东财回购接口异常 %s: code=%s %s", stock_code,
+                       payload.get("code"), str(payload.get("message"))[:40])
+    return rows
 
 
 def fetch_earnings_forecast(stock_code: str) -> Optional[List[dict]]:

@@ -756,6 +756,127 @@
     return null;
   }
 
+  /* ── 现金回报率（现金分红 + 注销类回购，#29）──
+   * 与 computeFromRaw 里的 tsr（ROE 口径「估值不变下的股东总回报率」）无关：
+   * 本条只看**已发生**的现金流出 =（现金分红总额 + 注销类回购金额）÷ 当前总市值，
+   * 不假设未来 ROE 与估值。对齐 Python src/cash_return.py，字段同为 snake_case。
+   * 口径：只计用途含「注销」的回购；以回购完成日归属财年；取数失败不当 0。 */
+  var CR_BUYBACK_KEYWORD = '注销';
+  var CR_INCENTIVE_KEYWORDS = ['股权激励', '员工持股'];
+
+  function classifyRepurchasePurpose(text) {
+    var s = (text == null) ? '' : String(text);
+    if (s.indexOf(CR_BUYBACK_KEYWORD) >= 0) return 'buyback';
+    for (var i = 0; i < CR_INCENTIVE_KEYWORDS.length; i++) {
+      if (s.indexOf(CR_INCENTIVE_KEYWORDS[i]) >= 0) return 'incentive';
+    }
+    return 'unknown';
+  }
+
+  function _crNum(v) {
+    if (v == null) return null;
+    var n = Number(v);
+    return isFinite(n) ? n : null;
+  }
+
+  function _crYear(v) {
+    var s = (v == null ? '' : String(v)).slice(0, 4);
+    return /^\d{4}$/.test(s) ? Number(s) : null;
+  }
+
+  function aggregateRepurchase(rows, fiscalYear) {
+    var amount = 0, incentive = 0, inProgress = 0, unclassified = 0, events = 0, mixed = 0;
+    rows = rows || [];
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i] || {};
+      var amt = _crNum(row.REPURAMOUNT) || 0;
+      if (amt <= 0) continue;
+      var kind = classifyRepurchasePurpose(row.REPUROBJECTIVE);
+      var finished = _crYear(row.FINISHDATE);
+      if (finished == null) {
+        var startYear = _crYear(row.REPURSTARTDATE) || _crYear(row.DIM_DATE);
+        var endYear = _crYear(row.REPURENDDATE);
+        if (startYear != null && startYear <= fiscalYear && (endYear == null || endYear >= fiscalYear)) {
+          inProgress += amt;
+        }
+        continue;
+      }
+      if (finished !== fiscalYear) continue;
+      if (kind === 'buyback') {
+        amount += amt;
+        events += 1;
+        var purpose = String(row.REPUROBJECTIVE || '');
+        for (var k = 0; k < CR_INCENTIVE_KEYWORDS.length; k++) {
+          if (purpose.indexOf(CR_INCENTIVE_KEYWORDS[k]) >= 0) { mixed += 1; break; }
+        }
+      } else if (kind === 'incentive') {
+        incentive += amt;
+      } else {
+        unclassified += amt;
+      }
+    }
+    return { amount: amount, events: events, incentive: incentive,
+             in_progress: inProgress, unclassified: unclassified, mixed: mixed };
+  }
+
+  function computeCashReturn(input) {
+    input = input || {};
+    var fiscalYear = _crNum(input.fiscalYear);
+    var marketCap = _crNum(input.marketCap);
+    var res = {
+      cash_return_status: 'missing_inputs', cash_return_year: fiscalYear,
+      cash_return_dividend: null, cash_return_repurchase: null,
+      cash_return_repurchase_events: 0, cash_return_incentive_excluded: null,
+      cash_return_in_progress: null, cash_return_dividend_yield: null,
+      cash_return_repurchase_yield: null, cash_return_total_yield: null,
+      cash_return_note: '',
+    };
+    if (fiscalYear == null) {
+      res.cash_return_status = 'no_fiscal_year';
+      res.cash_return_note = '无完整财年，不做股东总回报';
+      return res;
+    }
+    if (marketCap == null || marketCap <= 0) {
+      res.cash_return_status = 'missing_inputs';
+      res.cash_return_note = '缺少总市值，不做股东总回报';
+      return res;
+    }
+
+    var div = (_crNum(input.dividendTotal) || 0) > 0 ? _crNum(input.dividendTotal) : 0;
+    res.cash_return_dividend = div;
+    res.cash_return_dividend_yield = div / marketCap * 100;
+
+    if (input.fetchError) {
+      res.cash_return_status = 'fetch_error';
+      res.cash_return_note = '回购取数失败，只显示分红收益率（不把未知当 0）';
+      return res;
+    }
+
+    var agg = aggregateRepurchase(input.repurchaseRows || [], fiscalYear);
+    res.cash_return_repurchase = agg.amount;
+    res.cash_return_repurchase_events = agg.events;
+    res.cash_return_incentive_excluded = agg.incentive || null;
+    res.cash_return_in_progress = agg.in_progress || null;
+    res.cash_return_repurchase_yield = agg.amount / marketCap * 100;
+    res.cash_return_total_yield = (div + agg.amount) / marketCap * 100;
+
+    var notes = [];
+    if (!input.repurchaseRows || !input.repurchaseRows.length) {
+      res.cash_return_status = 'no_repurchase';
+      notes.push('该股无回购记录');
+    } else {
+      res.cash_return_status = 'ok';
+      if (agg.events === 0) notes.push('该财年无完成的注销类回购');
+    }
+    if (agg.incentive > 0) notes.push('激励类回购 ' + (agg.incentive / 1e8).toFixed(2) + ' 亿元未计入（属薪酬支出）');
+    if (agg.in_progress > 0) notes.push('进行中回购 ' + (agg.in_progress / 1e8).toFixed(2) + ' 亿元未完成，未计入');
+    if (agg.unclassified > 0) notes.push('用途未标注的 ' + (agg.unclassified / 1e8).toFixed(2) + ' 亿元未计入');
+    if (agg.mixed > 0) notes.push('含 ' + agg.mixed + ' 笔「注销+激励」混合计划，按注销类计入');
+    notes.push('按回购完成日归属财年，未按日拆分');
+    res.cash_return_note = notes.join('；');
+    return res;
+  }
+
   function computeForwardYield(input) {
     var price = input.price, totalShares = input.totalShares;
     var isCyclical = !!input.isCyclical;
@@ -1550,6 +1671,9 @@
     computeTtmDividend: computeTtmDividend,
     parseFinancials: parseFinancials,
     computeForwardYield: computeForwardYield,
+    computeCashReturn: computeCashReturn,
+    aggregateRepurchase: aggregateRepurchase,
+    classifyRepurchasePurpose: classifyRepurchasePurpose,
     computeBasicPR: computeBasicPR,
     computeCorrectedPR: computeCorrectedPR,
     computePbPR: computePbPR,

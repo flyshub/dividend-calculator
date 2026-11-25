@@ -43,6 +43,7 @@
         price_change_1y: results[5],
         top10_holding: results[6],
         forecast_rows: undefined,  // 非阻塞：由 fetchForward 二次填充
+        repurchase_rows: undefined, // 非阻塞：由 fetchCashReturn 二次填充
       });
     });
   }
@@ -54,6 +55,17 @@
       return Calculator.computeForwardYield(Object.assign({}, inputs, { forecast_rows: rows }));
     }).catch(function () {
       return Calculator.computeForwardYield(Object.assign({}, inputs, { forecast_rows: null }));
+    });
+  }
+
+  /* 现金回报率取数 + 计算（主结果渲染后调用）：失败 → 降级为「取数失败」，不抛出 */
+  function fetchCashReturn(inputs) {
+    if (!inputs || !inputs.stock_code) return Promise.resolve(null);
+    return DS.fetchRepurchaseRows(inputs.stock_code).then(function (rows) {
+      return Calculator.computeCashReturn(Object.assign({}, inputs, {
+        repurchaseRows: rows,
+        fetchError: rows == null,
+      }));
     });
   }
 
@@ -129,6 +141,21 @@
         forecast_rows: raw.forecast_rows,
       }));
 
+    /* 现金回报率（#29）：分红 + 注销类回购 ÷ 市值，仅展示。
+     * repurchase_rows === undefined 表示"尚未取数"（页面非阻塞二次填充），不是取数失败 */
+    var cashReturnInputs = {
+      stock_code: quote.stock_code,
+      dividendTotal: div.totalDividend,
+      marketCap: totalMarketCap,
+      fiscalYear: div.year,
+    };
+    var cashReturn = raw.repurchase_rows === undefined
+      ? null
+      : Calculator.computeCashReturn(Object.assign({}, cashReturnInputs, {
+        repurchaseRows: raw.repurchase_rows,
+        fetchError: raw.repurchase_rows == null,
+      }));
+
     return {
       stock_info: {
         stock_code: quote.stock_code,
@@ -157,7 +184,11 @@
         ttm_source: ttm.source,
         /* 下一财年前瞻股息率（模型估算，仅展示，不进入判定） */
         forward: forward,
+        /* 现金回报率（分红 + 注销类回购，仅展示） */
+        cash_return: cashReturn,
       },
+      /* 现金回报率非阻塞二次填充的输入 */
+      cash_return_inputs: cashReturnInputs,
       pr: {
         pr_basic: pr.pr_basic,
         pr_corrected: pr.pr_corrected,
@@ -195,5 +226,6 @@
     analyzeStock: analyzeStock,
     computeFromRaw: computeFromRaw,
     fetchForward: fetchForward,
+    fetchCashReturn: fetchCashReturn,
   };
 }));

@@ -149,6 +149,15 @@ CSV/JSON 按 **90 天保留周期**自动清理；DB 快照表**不做时间裁�
 - 腾讯行情 **Index 72**：仅A股股本/流通股本 ❌
 - 腾讯行情 **Index 73**：总股本 ✓
 
+### 现金回报率口径（#29）
+
+`现金回报率 = (最新完整财年现金分红总额 + 该财年完成的注销类回购金额) ÷ 当前总市值`，仅展示、不进判据。
+
+- **只计注销类**：`REPUROBJECTIVE` 含「注销」才计入；纯「股权激励/员工持股」回购是薪酬支出，计入会虚增回报（美的 2025 年 30 亿即此类）。「注销+激励」混合计划按注销类计入并在 note 标注。
+- **时间窗口按回购完成日 `FINISHDATE` 归属财年**，未完成事件（`FINISHDATE` 为空）单独统计、不按比例推算。
+- **取数失败不当 0**：`fetch_repurchase_rows` 返回 `None`（故障）时 `cash_return_status=fetch_error`、`cash_return_total_yield=None`，只显示分红收益率；返回 `[]`（东财 code 9201，如招行/工行）才是「真无回购」。
+- 单一实现在 `src/cash_return.py`，页面镜像 `site/js/calculator.js::computeCashReturn`，`verify_js_vs_python.py` 对账 11 个字段。
+
 ### 财年判断
 
 **仅 12 月报告期 = 完整财年年报**（单一实现 `sustainability.classify_fiscal_report`，Python 全链路经 `dividend_records.summarize_dividend_rows`，JS `parseDividendRecords` 同规则，双端一致，见 #37 M4）：其余月份报告期（3/4 月 Q1、6/9 月半年报）均为**中期分配**，不构成完整财年。季度分红监管扩散下，防御性收紧为 `month == 12`。
@@ -165,6 +174,7 @@ CSV/JSON 按 **90 天保留周期**自动清理；DB 快照表**不做时间裁�
 | ROE / 净利润   | 东方财富 datacenter（RPT_F10_FINANCE_MAINFINADATA）  | mootdx F10 → akshare 同花顺         |
 | 行业分类        | mootdx F10 行业分析                               | 东方财富 datacenter                  |
 | 可持续性字段      | 东方财富 datacenter                               | —                                |
+| 回购明细          | 东财 RPTA_WEB_GETHGLIST_NEW（含已回购金额/用途）        | —                                |
 
 所有数据源均为全球可用（mootdx 走二进制通达信协议，腾讯走 HTTP，akshare/同花顺经 2026-08 海外探针实测 10/10 可用、平均 2s）；可持续性模块与 JS 静态版刻意走东方财富 datacenter（浏览器可直连、与 Python 同源），其余主链路不依赖东方财富服务器。
 
