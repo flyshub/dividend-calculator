@@ -226,7 +226,7 @@ CAGR = (最新年分红总额 / 窗口首年分红总额) ^ (1 / (年数-1)) −
 
 ## 6. 阈值与权重速查（调参参考）
 
-所有值在 `src/sustainability_calculator.py` 顶部，JS 端对应常量在 `site/js/calculator.js` 的 `SUS_*` 系列。
+所有值在 `src/sustainability_thresholds.py`（阈值/权重常量，`sustainability_calculator.py` 再导出保持兼容），JS 端对应常量在 `site/js/calculator.js` 的 `SUS_*` 系列；`THRESHOLD_YIELD` 的 JS 镜像由 `scripts/policy_parity.check_sustainability_threshold` 校验。
 
 ```python
 THRESHOLD_YIELD = 4.0              # 触发判断的税前股息率下限（%）
@@ -261,6 +261,32 @@ WARN_HIGH_PAYOUT = 0.80            # 高派息门槛
 # 数据缺失惩罚（T4）
 # _weighted_score 返回 (score, missing_ratio)；缺失维度计 0 分（非归一化），missing_ratio ≥ 0.30 标低置信
 ```
+
+### 6.1 `THRESHOLD_YIELD` 的含义与调参影响（#28）
+
+阈值只决定**是否进入深度六维评估**，不参与任何计算：
+
+| 项 | 是否受阈值影响 |
+| --- | --- |
+| 股息率（税前/税后）、市赚率、现金回报率、前瞻股息率 | 否，始终计算 |
+| 选股漏斗 ①②③④（用月度快照） | 否 |
+| 六维评分、三档结论、致命/情境红旗 | 是——只有超过阈值才会跑 |
+
+**低于阈值时的行为**：返回 `triggered=False, verdict="未评估"`，并带一行说明
+`股息率 X% 未超过评估阈值 Y%，未做可持续性评估`。该文案单一来源是
+`sustainability_thresholds.skip_note`，JS 镜像 `calculator.js::thresholdSkipNote`，
+由 `verify_js_vs_python.py` 的 `sustainability_notes` 字段逐字对拍——两端只改一侧会红。
+该路径**不发起任何取数请求**。
+
+**调参影响**：
+
+- 调高（如 5.0）：只看更高股息标的，响应更快，但 2.5–5% 的蓝筹看不到评估结论。
+- 调低（如 2.5）：覆盖更多蓝筹（海天味业 2.91% 这类），代价是每只多约 4 次东财请求。
+- 传 0 或负数会被 CLI 拒绝（`--threshold` 校验 `> 0`）——那等于关掉门控。
+
+实现入口：`assess_sustainability(..., threshold=)` / `assess_for_stock(..., threshold=)` /
+`assess_with_auto_fetch(..., threshold=)`，以及 `calc_pr.py --threshold`。
+默认值 4.0 保持不变；改默认属于产品定位变更，需单独评估。
 
 ---
 

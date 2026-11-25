@@ -4,7 +4,7 @@
 本条只看**已发生**的现金流出（分红总额 + 注销类回购金额）÷ 当前总市值，不假设
 未来 ROE 与估值，回答「今年公司把多少市值以现金方式还给了股东」。
 
-口径（2026-11 定案，双端镜像 `site/js/calculator.js::computeTSR`）：
+口径（2026-11 定案，双端镜像 `site/js/calculator.js::computeCashReturn`）：
 
 1. **只计注销类回购**：`REPUROBJECTIVE` 含「注销」才计入。纯股权激励/员工持股回购
    是薪酬支出，不是股东回报——美的 2025 年 30 亿即属此类，计入会虚增回报。
@@ -18,7 +18,7 @@
 状态 `fetch_error`（数据铁律：未知不等于零）。
 """
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional
 
 from .eastmoney_fetcher import fetch_repurchase_rows

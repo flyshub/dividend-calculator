@@ -8,7 +8,7 @@
 
 数据来源（多源降级）：
   PE-TTM / PB: 腾讯行情 [主] → akshare 同花顺 EPS 推算 → 东方财富 push2 [备]（f164=PE-TTM、f167=PB，实测对照腾讯吻合）
-  ROE / 净利润: mootdx F10 [主] → akshare 同花顺 [备]
+  ROE / 净利润: 东方财富 datacenter(RPT_F10_FINANCE_MAINFINADATA) [主] → mootdx F10 → akshare 同花顺 [降级]
   行业分类:     mootdx F10 → 东方财富 datacenter(RPT_F10_BASIC_ORGINFO) → 降级为 "未知行业"
 """
 import logging
@@ -83,17 +83,9 @@ class PRResult:
 
 
 # ---------------------------------------------------------------------------
-# 行业映射
+# 数据层 re-export（实现在 pr_data.py，#24 纯移动）
 # ---------------------------------------------------------------------------
-
-
-
-
-# ---------------------------------------------------------------------------
-# 数据获取 — PE / PB
-# ---------------------------------------------------------------------------
-
-# 数据层从 pr_data 导入；私有名一并 re-export，保持 tests/外部调用点兼容（#24 纯移动）
+# 私有名一并 re-export，保持 tests/外部调用点兼容
 from .pr_data import (
     _amount_to_float,
     _get_financial,
