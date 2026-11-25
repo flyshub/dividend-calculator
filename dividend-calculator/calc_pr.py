@@ -5,6 +5,7 @@
     python calc_pr.py 600900          # 长江电力
     python calc_pr.py 600519          # 贵州茅台
     python calc_pr.py 600887          # 伊利股份
+    python calc_pr.py 603288 --threshold 2.5   # 自定义可持续性评估阈值（默认 4.0%）
 
 数据来源（多源自动降级）：
     PE-TTM / PB: 腾讯行情 → 东方财富
@@ -30,7 +31,11 @@ sys.path.insert(0, _project_root)
 from src.analysis import run_stock_analysis
 from src.forward_yield import ForwardYieldResult
 from src.pr import PRResult
-from src.sustainability_calculator import SustainabilityResult, explain_sustainability
+from src.sustainability_calculator import (
+    THRESHOLD_YIELD,
+    SustainabilityResult,
+    explain_sustainability,
+)
 
 
 def _fmt_money(value):
@@ -206,7 +211,7 @@ def print_sustainability(yield_pct, result: SustainabilityResult):
     print("=" * 60)
 
     if not result.triggered:
-        print(f"  股息率未超过阈值，未做可持续性评估（{'; '.join(result.notes) or ''}）")
+        print(f"  {'；'.join(result.notes) or '股息率未超过阈值，未做可持续性评估'}")
         print()
         return
 
@@ -252,17 +257,43 @@ def print_sustainability(yield_pct, result: SustainabilityResult):
     print()
 
 
+def _build_parser():
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="市赚率（PR）计算 CLI 工具",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "示例:\n"
+            "  python calc_pr.py 600900\n"
+            "  python calc_pr.py 603288 --threshold 2.5"
+        ),
+    )
+    parser.add_argument("stock", nargs="?", help="股票代码或名称")
+    parser.add_argument(
+        "--threshold", type=float, default=THRESHOLD_YIELD,
+        help=f"可持续性评估触发阈值（税前股息率 %%，默认 {THRESHOLD_YIELD:.1f}）",
+    )
+    return parser
+
+
+def parse_args(argv=None):
+    """解析 CLI 参数（抽成函数便于测试）。"""
+    return _build_parser().parse_args(argv)
+
+
 def main():
-    if len(sys.argv) < 2:
-        print("用法: python calc_pr.py <股票代码>")
-        print("示例: python calc_pr.py 600900")
+    parser = _build_parser()
+    args = parser.parse_args()
+    if not args.stock:
+        parser.print_usage()
         sys.exit(1)
 
-    stock_input = sys.argv[1].strip()
+    stock_input = args.stock.strip()
 
     # 执行综合分析流水线
     print(f"\n正在获取 {stock_input} 的股票数据...")
-    analysis = run_stock_analysis(stock_input)
+    analysis = run_stock_analysis(stock_input, sus_threshold=args.threshold)
     if analysis is None:
         print(f"错误: 无法获取股票 {stock_input} 的数据，请检查代码是否正确")
         sys.exit(1)
@@ -285,8 +316,8 @@ def main():
     if analysis.forward_yield is not None:
         print_forward_yield(analysis.forward_yield)
 
-    # 股息可持续性（仅高股息率触发时输出）
-    if analysis.sustainability is not None and analysis.sustainability.triggered:
+    # 股息可持续性（达阈值时评估；低于阈值输出「未评估」说明行）
+    if analysis.sustainability is not None:
         print_sustainability(analysis.dividend_yield_before_tax, analysis.sustainability)
 
 

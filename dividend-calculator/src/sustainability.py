@@ -378,11 +378,14 @@ def assess_for_stock(*,
                      cashflow_rows: Optional[List[dict]] = None,
                      price_change_1y: Optional[float] = None,
                      top10_holding: Optional[float] = None,
-                     dividend_fetch_failed: bool = False) -> SustainabilityResult:
+                     dividend_fetch_failed: bool = False,
+                     threshold: Optional[float] = None) -> SustainabilityResult:
     """可持续性评估编排入口：取数据 → 喂纯评估器。
 
     dividend_records / industry / financial_rows / cashflow_rows 可外部注入（verify 复用），
     未注入时现场走东财 HTTP 取数。
+
+    threshold（#28）：触发评估的税前股息率阈值（百分数），None 用 THRESHOLD_YIELD。
 
     dividend_fetch_failed（#38 M5）：网络取数路径（assess_with_auto_fetch）下
     分红记录为空时无法区分"真无分红"与"取数失败"，由调用方置 True 后本函数
@@ -418,6 +421,7 @@ def assess_for_stock(*,
         price_change_1y=price_change_1y,
         top10_holding=top10_holding,
         current_year=datetime.now().year,
+        threshold=threshold,
     )
     if dividend_fetch_failed and not dividend_records:
         result.notes.append("分红历史数据获取失败，历史维度不参与评分")
@@ -441,13 +445,15 @@ def assess_with_auto_fetch(stock_code: str,
                           cashflow_rows: Optional[List[dict]] = None,
                           price_change_1y: Optional[float] = None,
                           top10_holding: Optional[float] = None,
-                          dividend_fetch_failed: bool = False) -> SustainabilityResult:
+                          dividend_fetch_failed: bool = False,
+                          threshold: Optional[float] = None) -> SustainabilityResult:
     """全自取数版编排：财务/分红/行业/近1年涨跌/股东集中度全走 HTTP 取数。
 
     供 analysis.py 调用 —— 可持续性模块自洽，无需 pr.py 的 mootdx 行业、
     也无需 dividend.py 的 mootdx 分红记录。
     price_change_1y / top10_holding / cashflow_rows 可选注入（测试/预缓存用），
     默认 None 现场自取；网络失败返回 None 不阻塞评估（#40 B1）。
+    threshold（#28）：触发评估的税前股息率阈值（百分数），None 用 THRESHOLD_YIELD。
     dividend_fetch_failed（#95 透传）：调用方已知分红取数失败时可置 True 强制走
     失败分支（history=None + 失败 note）；默认 False 由本函数按
     `dividend_rows is None` 自动判定（#38 M5），行为与透传前完全一致。
@@ -482,6 +488,7 @@ def assess_with_auto_fetch(stock_code: str,
         cashflow_rows=cashflow_rows,
         price_change_1y=price_change_1y,
         top10_holding=top10_holding,
+        threshold=threshold,
     )
 
 

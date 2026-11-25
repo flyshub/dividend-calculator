@@ -4,6 +4,7 @@ from pathlib import Path
 from scripts.policy_parity import (
     check_industry_keywords,
     check_pr_cutoffs,
+    check_sustainability_threshold,
     python_industry_sets,
 )
 
@@ -50,3 +51,20 @@ class TestPrCutoffs:
         js = "var PR_ZONE_CUTOFFS = { undervalued: 0.6, fair_low: 1.0, fair_max: 3.0 };"
         problems = check_pr_cutoffs(js)
         assert len(problems) == 1 and "undervalued" in problems[0]
+
+
+class TestSustainabilityThreshold:
+    """#28：可持续性评估阈值双端一致（Python THRESHOLD_YIELD ←→ JS SUS_THRESHOLD_YIELD）。"""
+
+    def test_real_files_are_consistent(self):
+        assert check_sustainability_threshold(CALCULATOR_JS) == []
+
+    def test_detects_value_drift(self):
+        js = CALCULATOR_JS.replace("var SUS_THRESHOLD_YIELD = 4.0;",
+                                   "var SUS_THRESHOLD_YIELD = 3.5;")
+        problems = check_sustainability_threshold(js)
+        assert len(problems) == 1 and "3.5" in problems[0]
+
+    def test_missing_declaration_reported(self):
+        problems = check_sustainability_threshold("var OTHER = 1;")
+        assert len(problems) == 1 and "SUS_THRESHOLD_YIELD" in problems[0]

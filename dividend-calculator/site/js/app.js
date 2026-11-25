@@ -107,9 +107,10 @@
         : '该股为亏损股，市赚率不适用';
     }
 
-    /* 股息可持续性：仅税前股息率 > 4% 时评估（对齐 Python analysis.py） */
+    /* 股息可持续性：有股息率即调用评估（低于阈值由 assessSustainability 返回「未评估」说明，
+     * 对齐 Python analysis.py #28；阈值默认 Calculator.SUS_THRESHOLD_YIELD） */
     var sustainability = null;
-    if (yields[0] > 4) {
+    if (yields[0] > 0) {
       sustainability = Calculator.assessSustainability({
         dividend_yield_before_tax: yields[0],
         dividend_total: div.totalDividend > 0 ? div.totalDividend : null,

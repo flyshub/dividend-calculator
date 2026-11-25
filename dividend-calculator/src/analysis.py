@@ -29,7 +29,7 @@ class StockAnalysisResult:
     dividend_total: float
     dividend_yield_before_tax: Optional[float]   # 税前股息率（百分数），无有效分红为 None
     pr_result: PRResult
-    sustainability: Optional[SustainabilityResult] = None  # 仅股息率 > 阈值时评估，否则 None
+    sustainability: Optional[SustainabilityResult] = None  # 达阈值才评估；低于阈值为轻量「未评估」结果，无股息率为 None
     forward_yield: Optional[ForwardYieldResult] = None      # 下一财年前瞻股息率（模型估算，仅展示）
     cash_return: Optional[CashReturnResult] = None          # 现金回报率（分红+注销类回购，仅展示）
 
@@ -48,16 +48,22 @@ def attach_goodwill_warning(sustainability: SustainabilityResult, stock_code: st
         sustainability.warning_flags.append(flag)
 
 
-def run_stock_analysis(stock_input: str) -> Optional[StockAnalysisResult]:
+def run_stock_analysis(stock_input: str,
+                       sus_threshold: Optional[float] = None) -> Optional[StockAnalysisResult]:
     """执行股票综合分析流水线。
 
     依次获取股票基本信息、分红数据、市赚率，
     当税前股息率 > 可持续性阈值时追加可持续性评估，
     三步中任一步失败即返回 None。
 
+    sus_threshold（#28）：可持续性评估触发阈值（税前股息率，百分数），
+    None 时用 sustainability_calculator.THRESHOLD_YIELD；股息率存在但未达阈值
+    时返回轻量的「未评估」结果（不发起任何网络请求）。
+
     CLI 和 Web 路径共用一个编排入口，
     将来加第三个入口（定时任务/通知）零成本。
     """
+    thr = THRESHOLD_YIELD if sus_threshold is None else sus_threshold
     stock_info = get_stock_info(stock_input)
     if stock_info is None:
         logger.error("无法获取股票信息: %s", stock_input)
@@ -80,7 +86,7 @@ def run_stock_analysis(stock_input: str) -> Optional[StockAnalysisResult]:
 
     # 可持续性评估：仅高股息率触发（避免低股息股浪费网络请求）
     sustainability = None
-    if dividend_yield is not None and dividend_yield > THRESHOLD_YIELD:
+    if dividend_yield is not None and dividend_yield > thr:
         try:
             sustainability = assess_with_auto_fetch(
                 stock_code=stock_code,
@@ -89,13 +95,21 @@ def run_stock_analysis(stock_input: str) -> Optional[StockAnalysisResult]:
                 dividend_yield_before_tax=dividend_yield,
                 latest_dividend_year=dividend_year,
                 industry=pr_result.industry,
+                threshold=thr,
             )
         except Exception as e:
             logger.warning("可持续性评估失败 %s: %s", stock_code, e)
+    elif dividend_yield is not None:
+        # #28 低于阈值不再返回 None：给页面/CLI 一行说明，不发起任何取数
+        sustainability = SustainabilityResult(
+            triggered=False, verdict="未评估", score=None,
+            notes=[f"股息率 {dividend_yield:.2f}% 未超过评估阈值 "
+                   f"{thr:.1f}%，未做可持续性评估"],
+        )
 
     # #26 商誉/净资产警示：只在高股息触发可持续性评估时复核（单股路径）。
     # 取不到（金融报表无此表/无商誉）即跳过，不补 0、不推断；不改评分与判定。
-    if sustainability is not None:
+    if sustainability is not None and sustainability.triggered:
         try:
             attach_goodwill_warning(sustainability, stock_code)
         except Exception as e:

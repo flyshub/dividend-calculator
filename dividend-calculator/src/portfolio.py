@@ -120,7 +120,8 @@ def build_position(stock_code: str, shares: float, analysis) -> PortfolioPositio
             pos.warnings.append(pr.pr_warning)
 
     sus = analysis.sustainability
-    if sus is not None:
+    # #28：低于阈值时 analysis 返回轻量「未评估」结果，持仓表只记录真正评估过的结论
+    if sus is not None and sus.triggered:
         pos.verdict = sus.verdict
         pos.score_100 = sus.score_100
         pos.warnings.extend(sus.warning_flags)

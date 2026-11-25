@@ -54,7 +54,8 @@
     }
 
     pos.industry = pr.industry || null;
-    if (sus) { pos.verdict = sus.verdict || null; }
+    /* #28：低于阈值时 sustainability 为轻量「未评估」结果，持仓表只记录真正评估过的结论 */
+    if (sus && sus.triggered) { pos.verdict = sus.verdict || null; }
     return pos;
   }
 

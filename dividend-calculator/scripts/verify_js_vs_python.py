@@ -302,7 +302,7 @@ def compute_python(raw: dict) -> dict:
     sus_triggered = None
     sus_verdict = None
     sus_score = None
-    if yld > 4:  # 与 JS app.js 的 `yields[0] > 4` 门控一致
+    if yld > 4:  # 与 JS assessSustainability 的阈值判定一致（默认 4.0）
         div_records, em_year = parse_dividend_rows(raw["dividend_rows"])
         sus_year = year if year else em_year
         sus = assess_for_stock(
@@ -319,6 +319,11 @@ def compute_python(raw: dict) -> dict:
         sus_triggered = 1 if sus.triggered else 0
         sus_verdict = sus.verdict
         sus_score = sus.score
+    elif yld > 0:
+        # #28：有股息率但低于阈值 → JS 返回轻量「未评估」结果，Python 侧同口径镜像
+        sus_triggered = 0
+        sus_verdict = "未评估"
+        sus_score = None
 
     result = {
         "current_price": quote["price"],
@@ -403,9 +408,11 @@ def compute_python(raw: dict) -> dict:
         getattr(sus, "dividend_cagr_note", None) if sus is not None else None)
     result["sustainability_payout_ratio"] = sus_m.get("payout_ratio")
     from src.sustainability_calculator import explain_sustainability
-    result["sustainability_explanation"] = (
-        "\n".join(explain_sustainability(sus)) if sus is not None else None
-    )
+    if sus is not None:
+        result["sustainability_explanation"] = "\n".join(explain_sustainability(sus))
+    else:
+        # 低于阈值（未评估）JS 侧 explainSustainability 返回空串；无股息率则两端都是 null
+        result["sustainability_explanation"] = "" if yld and yld > 0 else None
     return result
 
 
@@ -541,8 +548,9 @@ def compute_portfolio_python(py_by_code: dict, boundary_rows: bool = False) -> d
             pr_result=SimpleNamespace(stock_name=py.get("stock_name"),
                                       industry=py.get("industry"),
                                       pr_warning=py.get("pr_warning") or ""),
-            sustainability=(SimpleNamespace(verdict=sus_verdict, score_100=None,
-                                            warning_flags=[])
+            # #28：只有真正评估过（triggered）的结论才进持仓表；低股息为「未评估」
+            sustainability=(SimpleNamespace(triggered=True, verdict=sus_verdict,
+                                            score_100=None, warning_flags=[])
                             if sus_verdict else None),
         )
         positions.append(build_position(code, PORTFOLIO_SHARES, analysis))
@@ -568,12 +576,18 @@ def policy_parity_problems() -> list:
     字段值比对看不见「集合成员差异」与「页面文案写死阈值」，这两类由
     scripts/policy_parity.py 独立检查。
     """
-    from scripts.policy_parity import check_industry_keywords, check_pr_cutoffs
+    from scripts.policy_parity import (
+        check_industry_keywords,
+        check_pr_cutoffs,
+        check_sustainability_threshold,
+    )
 
     site = PROJECT_ROOT / "site" / "js"
     calculator_js = (site / "calculator.js").read_text(encoding="utf-8")
     policy_js = (site / "policy.js").read_text(encoding="utf-8")
-    return check_industry_keywords(calculator_js) + check_pr_cutoffs(policy_js)
+    return (check_industry_keywords(calculator_js)
+            + check_pr_cutoffs(policy_js)
+            + check_sustainability_threshold(calculator_js))
 
 
 def main():
@@ -660,7 +674,7 @@ def main():
     else:
         print(f"  ✔ 一致（加权股息率 {round(py_port.get('weighted_yield') or 0, 4)}%）")
 
-    print("\n[policy] 行业关键词 / 估值档位切点双端一致性")
+    print("\n[policy] 行业关键词 / 估值档位切点 / 可持续性阈值 双端一致性")
     problems = policy_parity_problems()
     if problems:
         ok = False

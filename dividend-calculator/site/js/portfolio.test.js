@@ -19,7 +19,7 @@ function analysis(over) {
     stock_info: { stock_name: '测试股', current_price: 10, total_shares: 1e9 },
     dividend: { total_dividend: 5e8 },
     pr: { industry: '制造业' },
-    sustainability: { verdict: '偏弱' },
+    sustainability: { triggered: true, verdict: '偏弱' },
   };
   return Object.assign(a, over || {});
 }

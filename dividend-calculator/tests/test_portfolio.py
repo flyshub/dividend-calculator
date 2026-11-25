@@ -55,7 +55,7 @@ def _analysis(price=10.0, shares=1e9, dividend=5e8, name="测试股",
         dividend_total=dividend,
         pr_result=SimpleNamespace(stock_name=name, industry=industry,
                                   pr_warning=pr_warning),
-        sustainability=SimpleNamespace(verdict=verdict, score_100=score,
+        sustainability=SimpleNamespace(triggered=True, verdict=verdict, score_100=score,
                                        warning_flags=list(sus_warnings)),
     )
 

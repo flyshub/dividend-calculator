@@ -528,6 +528,25 @@ test('assessSustainability 未达阈值不触发', () => {
   assert.equal(r.verdict, '未评估');
 });
 
+test('assessSustainability 阈值可配置 (#28)：默认不变，显式阈值生效', () => {
+  const base = {
+    dividend_yield_before_tax: 3.5, dividend_total: 214e8,
+    latest: healthyFin(), history: healthyHistory(), industry: '公用事业-电力-水电',
+  };
+  assert.equal(Calc.SUS_THRESHOLD_YIELD, 4.0);
+  const off = Calc.assessSustainability(base);
+  assert.equal(off.triggered, false);
+  assert.ok(off.notes[0].includes('3.50%'));
+  assert.ok(off.notes[0].includes('4.0%'));
+  const on = Calc.assessSustainability(Object.assign({}, base, { threshold: 3.0 }));
+  assert.equal(on.triggered, true);
+  /* 边界与 Python 一致：<= 阈值不评估 */
+  const edge = Calc.assessSustainability(Object.assign({}, base, { dividend_yield_before_tax: 3.0, threshold: 3.0 }));
+  assert.equal(edge.triggered, false);
+  const over = Calc.assessSustainability(Object.assign({}, base, { dividend_yield_before_tax: 3.01, threshold: 3.0 }));
+  assert.equal(over.triggered, true);
+});
+
 test('assessSustainability 亏损却分红→不可持续', () => {
   const fin = healthyFin(); fin.net_profit = -10e8; fin.net_profit_yoy = -120.0;
   const r = Calc.assessSustainability({

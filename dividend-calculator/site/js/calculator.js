@@ -1375,9 +1375,14 @@
   /* 主入口：assessSustainability（对齐 Python assess_sustainability） */
   function assessSustainability(opts) {
     var yld = opts.dividend_yield_before_tax;
-    if (yld == null || yld <= SUS_THRESHOLD_YIELD) {
+    /* #28 阈值可配置：默认 SUS_THRESHOLD_YIELD（对齐 Python THRESHOLD_YIELD） */
+    var thr = opts.threshold == null ? SUS_THRESHOLD_YIELD : opts.threshold;
+    if (yld == null || yld <= thr) {
+      var notes = (yld == null)
+        ? ['股息率未超过阈值，未做可持续性评估']
+        : ['股息率 ' + yld.toFixed(2) + '% 未超过评估阈值 ' + thr.toFixed(1) + '%，未做可持续性评估'];
       return { triggered: false, verdict: '未评估', score: null, fatal_flags: [], warning_flags: [],
-               dimension_scores: {}, metrics: {}, branch: 'general', notes: ['股息率未超过阈值，未做可持续性评估'] };
+               dimension_scores: {}, metrics: {}, branch: 'general', notes: notes };
     }
     var result = { triggered: true, verdict: '不可持续', score: null,
                    fatal_flags: [], warning_flags: [], dimension_scores: {}, metrics: {}, branch: 'general', notes: [] };
@@ -1689,6 +1694,7 @@
     goodwillWarning: goodwillWarning,
     assessSustainability: assessSustainability,
     explainSustainability: explainSustainability,
+    SUS_THRESHOLD_YIELD: SUS_THRESHOLD_YIELD,
     aggregateDividendHistory: _aggregateDividendHistory,
     computeDividendCagr: computeDividendCagr,
     round2: round2,

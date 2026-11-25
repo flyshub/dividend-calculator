@@ -649,7 +649,8 @@ def assess_sustainability(*,
                           price_change_1y: Optional[float] = None,
                           top10_holding: Optional[float] = None,
                           roe_series: Optional[List[float]] = None,
-                          current_year: Optional[int] = None) -> SustainabilityResult:
+                          current_year: Optional[int] = None,
+                          threshold: Optional[float] = None) -> SustainabilityResult:
     """股息可持续性主评估入口（纯函数）。
 
     Args:
@@ -662,11 +663,18 @@ def assess_sustainability(*,
         top10_holding: 前十大股东合计持股比例（小数，如 0.6）
         roe_series: 多年 ROE 序列（百分数，最新在前），用于稳定性判断
         current_year: 当前年份，用于数据新鲜度判定（#13）；None 时不判 stale
+        threshold: 触发评估的税前股息率阈值（百分数，#28）；None 时用 THRESHOLD_YIELD
     """
+    thr = THRESHOLD_YIELD if threshold is None else threshold
     # 未达触发阈值 → 不评估
-    if dividend_yield_before_tax is None or dividend_yield_before_tax <= THRESHOLD_YIELD:
+    if dividend_yield_before_tax is None:
         return SustainabilityResult(triggered=False, verdict="未评估", score=None,
                                     notes=["股息率未超过阈值，未做可持续性评估"])
+    if dividend_yield_before_tax <= thr:
+        return SustainabilityResult(
+            triggered=False, verdict="未评估", score=None,
+            notes=[f"股息率 {dividend_yield_before_tax:.2f}% 未超过评估阈值 "
+                   f"{thr:.1f}%，未做可持续性评估"])
 
     result = SustainabilityResult(triggered=True, verdict="不可持续")
 

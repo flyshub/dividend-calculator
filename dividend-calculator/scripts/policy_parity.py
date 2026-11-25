@@ -103,6 +103,27 @@ def check_pr_cutoffs(js_source: str,
     return problems
 
 
+def check_sustainability_threshold(js_source: str,
+                                   py_threshold: Optional[float] = None) -> List[str]:
+    """可持续性评估阈值双端比对（JS 的 SUS_THRESHOLD_YIELD ←→ Python THRESHOLD_YIELD，#28）。"""
+    if py_threshold is None:
+        import sys
+
+        root = Path(__file__).resolve().parent.parent
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+        from src.sustainability_calculator import THRESHOLD_YIELD
+
+        py_threshold = THRESHOLD_YIELD
+    m = re.search(r"var\s+SUS_THRESHOLD_YIELD\s*=\s*([0-9.]+)", js_source)
+    if not m:
+        return ["JS 缺少 SUS_THRESHOLD_YIELD 声明（可持续性阈值未镜像 Python THRESHOLD_YIELD）"]
+    got = float(m.group(1))
+    if abs(got - py_threshold) > 1e-9:
+        return [f"可持续性评估阈值双端不一致：JS {got} / Python {py_threshold}"]
+    return []
+
+
 def check_html_thresholds(html: str, pattern: Pattern, expected: Iterable[str],
                           where: str) -> List[str]:
     """网页散文里必须出现的阈值片段（防止文案写死旧数字）。"""

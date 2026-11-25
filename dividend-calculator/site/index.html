@@ -7,10 +7,10 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232e5be6'/%3E%3Ctext x='16' y='22' font-size='17' text-anchor='middle' fill='%23fff' font-family='-apple-system,sans-serif'%3E息%3C/text%3E%3C/svg%3E">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
   <!-- BUILD：改任何 js/*.js 必须同步升版，否则旧缓存会与新 HTML 混用（fetchForward is not a function） -->
-  <script src="js/policy.js?v=20261125-1"></script>
-  <script src="js/calculator.js?v=20261125-1"></script>
-  <script src="js/datasources.js?v=20261125-1"></script>
-  <script src="js/app.js?v=20261125-1"></script>
+  <script src="js/policy.js?v=20261125-2"></script>
+  <script src="js/calculator.js?v=20261125-2"></script>
+  <script src="js/datasources.js?v=20261125-2"></script>
+  <script src="js/app.js?v=20261125-2"></script>
   <style>
     :root {
       color-scheme: light;
@@ -342,6 +342,15 @@
     }
 
     .hidden {
+      display: none !important;
+    }
+
+    /* 未达可持续性评估阈值：只显示说明行（#28） */
+    .sus-skip .metric-row,
+    .sus-skip #sus-explanation,
+    .sus-skip #sus-fatal,
+    .sus-skip #sus-warnings,
+    .sus-skip #sus-notes {
       display: none !important;
     }
 
@@ -945,6 +954,7 @@
 
       <div class="result-card full hidden" id="sustainability-card">
         <div class="label">股息可持续性分析</div>
+        <p id="sus-skip" class="note note--sm hidden"></p>
         <div class="metric-row metric-row--center">
           <div class="metric">
             <div class="label">可持续性结论</div>
@@ -1579,9 +1589,27 @@
       paintSusWarnings();
     }
 
-    function renderSustainability(s) {
+    function renderSustainability(s, yieldPct) {
       const card = document.getElementById('sustainability-card');
-      if (!s || !s.triggered) { card.classList.add('hidden'); return; }
+      const skipEl = document.getElementById('sus-skip');
+      if (!s) { card.classList.add('hidden'); return; }
+
+      /* #28 低于阈值：不评估但也不再空白 —— 显示一行说明（含阈值数字），
+       * 无股息率时保持整卡隐藏（与之前一致） */
+      if (!s.triggered) {
+        const note = (s.notes && s.notes.length) ? s.notes[0] : '';
+        if (!note || yieldPct == null || !(yieldPct > 0)) {
+          card.classList.add('hidden');
+          return;
+        }
+        skipEl.textContent = note;
+        skipEl.classList.remove('hidden');
+        card.classList.add('sus-skip');
+        card.classList.remove('hidden');
+        return;
+      }
+      skipEl.classList.add('hidden');
+      card.classList.remove('sus-skip');
 
       const verdictEl = document.getElementById('sus-verdict');
       verdictEl.textContent = s.verdict;
@@ -1892,7 +1920,7 @@
         }));
       }
       if (data.sustainability) {
-        renderSustainability(data.sustainability);
+        renderSustainability(data.sustainability, di.dividend_yield_before_tax);
         /* #26 商誉警示：非阻塞二次取数（东财资产负债表），失败或取不到即不显示 */
         if (typeof DataSources.fetchGoodwill === 'function') {
           DataSources.fetchGoodwill(si.stock_code).then((gw) => {
