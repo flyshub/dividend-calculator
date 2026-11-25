@@ -1,0 +1,405 @@
+"""
+市赚率数据获取层（从 pr.py 抽出，#24 纯移动，行为不变）
+
+源优先级：
+  PE-TTM / PB: 腾讯行情 [主] → akshare 同花顺 EPS 推算 → 东方财富 push2 [备]
+  ROE / 净利润: 东财 F10 [主] → mootdx F10 [备] → akshare 同花顺 [降级]
+  行业分类:     mootdx F10 → 东方财富 datacenter(RPT_F10_BASIC_ORGINFO) → "未知行业"
+
+本模块只做取数与降级链；PR 计算与判定留在 pr.py。
+"""
+import logging
+import statistics
+from typing import Optional, List, Tuple
+
+import requests
+
+from .tencent_quote import fetch_tencent_quote
+from .eastmoney_fetcher import fetch_industry as fetch_eastmoney_industry
+
+logger = logging.getLogger(__name__)
+
+
+def _get_pe_pb_tencent(stock_code: str) -> Tuple[Optional[float], Optional[float], Optional[str]]:
+    """从腾讯行情获取 PE-TTM、PB 和股票名称（通过统一的 TencentQuote 模块）。"""
+    quote = fetch_tencent_quote(stock_code)
+    if quote is None:
+        return None, None, None
+    logger.debug("腾讯行情 PE/PB %s: PE=%s PB=%s", stock_code, quote.pe_ttm, quote.pb)
+    return quote.pe_ttm, quote.pb, quote.name
+
+
+def _get_pe_pb_eastmoney(stock_code: str) -> Tuple[Optional[float], Optional[float]]:
+    """从东方财富 push2 接口获取 PE-TTM 和 PB（备选）
+
+    字段实测（2026-08，600900/600036 对照腾讯行情）：
+      f164 = PE-TTM（与腾讯 f39 逐位吻合：19.15/6.49）
+      f167 = PB（fltt=2 时与腾讯 f46 吻合：3.31/0.88；不带 fltt=2 会返回 ×100 缩放值）
+      f9（动态PE）/ f115（PE-TTM）在本接口均不返回有效值（f9 缺失、f115=0），弃用
+    """
+    try:
+        market = "1" if stock_code.startswith("6") else "0"
+        url = (
+            f"https://push2.eastmoney.com/api/qt/stock/get"
+            f"?secid={market}.{stock_code}&fields=f164,f167&fltt=2"
+        )
+        headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://quote.eastmoney.com/"}
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            return None, None
+
+        data = resp.json()
+        d = data.get("data")
+        if not d:
+            return None, None
+
+        pe_ttm = None
+        try:
+            val = float(d.get("f164", 0))
+            if val > 0:
+                pe_ttm = val
+        except (ValueError, TypeError):
+            pass
+
+        pb = None
+        try:
+            val = float(d.get("f167", 0))
+            if val > 0:
+                pb = val
+        except (ValueError, TypeError):
+            pass
+
+        logger.debug("东方财富 PE/PB %s: PE=%s PB=%s", stock_code, pe_ttm, pb)
+        return pe_ttm, pb
+
+    except Exception as e:
+        logger.warning("东方财富获取PE/PB失败 %s: %s", stock_code, e)
+        return None, None
+
+
+def _get_pe_pb(stock_code: str) -> Tuple[Optional[float], Optional[float], Optional[str], str, List[str]]:
+    """
+    获取 PE-TTM 和 PB，多源自动降级
+    返回: (pe_ttm, pb, stock_name, source_label, errors)
+    """
+    errors: List[str] = []
+
+    # 主：腾讯行情
+    pe, pb, name = _get_pe_pb_tencent(stock_code)
+    if pe is not None and pb is not None:
+        return pe, pb, name, "腾讯行情", errors
+
+    # 若PE缺失但PB有，尝试用 akshare 同花顺 EPS 推算 PE
+    if pe is None and pb is not None:
+        try:
+            import akshare as ak
+            df = ak.stock_financial_abstract_ths(symbol=stock_code, indicator="按年度")
+            if not df.empty:
+                latest = df.iloc[-1]
+                eps_str = str(latest.get("基本每股收益", ""))
+                if eps_str:
+                    eps = float(eps_str)
+                    if eps > 0:
+                        # 从腾讯行情取价格（已有 name 和 pb）
+                        from .tencent_quote import fetch_tencent_quote
+                        quote = fetch_tencent_quote(stock_code)
+                        if quote is not None and quote.price is not None:
+                            pe = round(quote.price / eps, 2)
+                            logger.info("从同花顺EPS推算PE %s: price=%.2f EPS=%.4f PE=%.2f",
+                                        stock_code, quote.price, eps, pe)
+                            return pe, pb, name, "腾讯+同花顺(EPS推算)", errors
+        except Exception as e:
+            errors.append(f"同花顺EPS推算PE失败: {e}")
+
+    if pe is not None or pb is not None:
+        errors.append("腾讯行情仅返回部分PE/PB数据")
+        return pe, pb, name, "腾讯行情(部分)", errors
+
+    errors.append("腾讯行情PE/PB获取失败")
+    # 备：东方财富
+    pe, pb = _get_pe_pb_eastmoney(stock_code)
+    if pe is not None or pb is not None:
+        return pe, pb, name, "东方财富", errors
+
+    errors.append("东方财富PE/PB获取失败")
+    return None, None, name, "无", errors
+
+
+# ---------------------------------------------------------------------------
+# 数据获取 — ROE / 净利润（mootdx F10 为主，akshare 同花顺为备）
+# ---------------------------------------------------------------------------
+
+def _pct_to_float(value) -> float:
+    """将百分比字符串转为浮点数，如 '15.90%' -> 15.9"""
+    s = str(value)
+    return float(s.replace("%", "").strip())
+
+
+def _amount_to_float(value) -> float:
+    """将金额字符串转为元，如 '345.03亿' -> 34503000000.0"""
+    s = str(value).replace(",", "").strip()
+    multiplier = 1.0
+    if "亿" in s:
+        multiplier = 1e8
+        s = s.replace("亿", "")
+    elif "万" in s:
+        multiplier = 1e4
+        s = s.replace("万", "")
+    return float(s) * multiplier
+
+
+def _get_financial_ths(stock_code: str) -> Tuple[
+    Optional[float], Optional[float], Optional[float], Optional[float], str, List[str], Optional[int],
+]:
+    """从 akshare/同花顺财报获取 ROE 和净利润（mootdx 不可用时的备选）
+
+    返回：roe_latest, roe_5y_median, net_profit_latest_period, net_profit_annual, src, errors, roe_period(年报年份)
+    """
+    errors: List[str] = []
+    try:
+        import akshare as ak
+
+        # akshare 1.20.41 起移除该接口（2026-11 事故：CI 静默返回全 None）
+        if not hasattr(ak, "stock_financial_abstract_ths"):
+            errors.append(
+                f"akshare {getattr(ak, '__version__', '?')} 已移除 stock_financial_abstract_ths"
+                "（同花顺路径不可用，需东财数据源）")
+            return None, None, None, None, "无", errors, None
+
+        # 年度数据
+        df_annual = ak.stock_financial_abstract_ths(symbol=stock_code, indicator="按年度")
+        if df_annual.empty:
+            errors.append("同花顺年度财报数据为空")
+            return None, None, None, None, "无", errors, None
+
+        latest_annual = df_annual.iloc[-1]
+        roe_latest = _pct_to_float(latest_annual["净资产收益率"])
+        net_profit_annual = _amount_to_float(latest_annual["净利润"])
+
+        # 5年 ROE 中位数
+        years = df_annual["报告期"].astype(int).values
+        last5_mask = years >= (years.max() - 4)
+        roe_5y_vals = [
+            _pct_to_float(v) for v in df_annual.loc[last5_mask, "净资产收益率"]
+        ]
+        roe_5y_median = float(statistics.median(roe_5y_vals)) if roe_5y_vals else None
+
+        # 最新报告期累计净利润（非 TTM；仅展示）：对齐 JS 真 TTM 算法
+        # TTM = 最新累计 + 上年全年 − 上年同期（最新为年报时 TTM=全年）
+        net_profit_latest_period = None
+        try:
+            df_q = ak.stock_financial_abstract_ths(symbol=stock_code, indicator="按报告期")
+            if not df_q.empty and "报告期" in df_q.columns:
+                dated = []
+                for _, row in df_q.iterrows():
+                    rp = str(row["报告期"]).strip()
+                    if len(rp) == 10 and rp[4] == "-" and rp[7] == "-":
+                        dated.append((rp, _amount_to_float(row["净利润"])))
+                dated.sort(key=lambda x: x[0])
+                if len(dated) >= 2:
+                    latest_date, latest_np = dated[-1]
+                    latest_year = int(latest_date[:4])
+                    latest_md = latest_date[5:]
+                    prev_year = None
+                    prev_same = None
+                    for d, np in reversed(dated[:-1]):
+                        if d[5:] == "12-31" and d[:4] != str(latest_year):
+                            prev_year = np
+                            break
+                    if latest_md != "12-31":
+                        target_prev = f"{latest_year - 1}-{latest_md}"
+                        for d, np in dated[:-1]:
+                            if d == target_prev:
+                                prev_same = np
+                                break
+                        if prev_year is not None and prev_same is not None:
+                            net_profit_latest_period = latest_np + prev_year - prev_same
+                        else:
+                            net_profit_latest_period = None  # 数据不全不猜，置 None
+                    else:
+                        net_profit_latest_period = latest_np  # 最新为年报 → 全年
+        except Exception as e:
+            errors.append(f"同花顺季度财报获取失败: {e}")
+
+        logger.debug(
+            "同花顺财报 %s: ROE最新=%.2f%% ROE5Y中位=%.2f%% 最新报告期净利润=%.2f亿 年报净利润=%.2f亿",
+            stock_code,
+            roe_latest,
+            roe_5y_median or -1,
+            (net_profit_latest_period or 0) / 1e8,
+            net_profit_annual / 1e8,
+        )
+        # roe_period = 最新年报年份（同花顺「报告期」为 4 位年份如 2025，非 8 位日期）
+        return roe_latest, roe_5y_median, net_profit_latest_period, net_profit_annual, "同花顺（akshare）", errors, int(years.max())
+
+    except Exception as e:
+        errors.append(f"同花顺财报获取失败: {e}")
+        return None, None, None, None, "无", errors, None
+
+
+def _get_financial_em(stock_code: str) -> Tuple[
+    Optional[float], Optional[float], Optional[float], Optional[float], str, List[str], Optional[int],
+]:
+    """东方财富 F10 主要财务指标（RPT_F10_FINANCE_MAINFINADATA）。
+
+    与同花顺路径同口径（roe_latest / roe_5y_median 取年报行，net_profit_latest_period
+    取最新报告期累计值），但与分红/行业/现金流共用同一数据源与域名，全球可用。
+
+    引入原因（2026-11）：mootdx F10 走 TDX 7709 TCP，GitHub Actions 出网被封（Timeout/
+    Refused）；akshare 1.20.41 起移除 stock_financial_abstract_ths 且同花顺对机房 IP 返回
+    403，两条旧路径在 CI 上同时失效，财务快照静默冻结。
+    """
+    from src.eastmoney_fetcher import fetch_financial_rows
+    from src.sustainability import parse_financial_rows
+
+    errors: List[str] = []
+    try:
+        rows = fetch_financial_rows(stock_code)
+    except Exception as e:  # fetch_financial_rows 内部已吞异常返空，这里兜未预期形状
+        return None, None, None, None, "无", [f"东财财务接口异常: {e}"], None
+
+    if not rows:
+        return None, None, None, None, "无", ["东财财务数据为空"], None
+
+    annuals = parse_financial_rows(rows)  # 已按年度降序、仅 12-31
+    if not annuals:
+        return None, None, None, None, "无", ["东财财务无年报行"], None
+
+    roe_latest = annuals[0].roe
+    net_profit_annual = annuals[0].net_profit
+    roe_vals = [a.roe for a in annuals[:5] if a.roe is not None]
+    roe_5y_median = float(statistics.median(roe_vals)) if roe_vals else None
+
+    # 最新报告期累计净利润（可为季报/中报，仅展示；与同花顺口径一致）
+    net_profit_latest_period = None
+    latest_np = rows[0].get("PARENTNETPROFIT")
+    if latest_np is not None:
+        try:
+            net_profit_latest_period = float(latest_np)
+        except (TypeError, ValueError):
+            net_profit_latest_period = None
+
+    logger.debug(
+        "东财财报 %s: ROE年报=%.2f%% ROE5Y中位=%.2f%% 最新报告期净利润=%.2f亿 年报净利润=%.2f亿",
+        stock_code,
+        roe_latest if roe_latest is not None else float("nan"),
+        roe_5y_median if roe_5y_median is not None else float("nan"),
+        (net_profit_latest_period or 0) / 1e8,
+        (net_profit_annual or 0) / 1e8,
+    )
+    return (roe_latest, roe_5y_median, net_profit_latest_period, net_profit_annual,
+            "东方财富", errors, annuals[0].year)
+
+
+def _get_financial(stock_code: str) -> Tuple[
+    Optional[float], Optional[float], Optional[float], Optional[float], str, List[str], Optional[int],
+]:
+    """获取 ROE 和净利润：东方财富 F10 优先，mootdx F10、akshare/同花顺备用
+
+    返回：roe_latest, roe_5y_median, net_profit_latest_period, net_profit_annual, src, errors, roe_period(年报年份)
+
+    降级链顺序理由：东财 HTTP 全球可用（与分红/行业/现金流同源），mootdx 走 TDX 7709
+    TCP（GitHub Actions 出网被封），同花顺对机房 IP 403 且 akshare 已移除对应接口。
+    """
+    errors: List[str] = []
+
+    # 主：东方财富 F10（CI 与本地均可用）
+    roe_em, roe5y_em, np_cur_em, np_annual_em, src_em, errs_em, period_em = _get_financial_em(stock_code)
+    if roe_em is not None:
+        return roe_em, roe5y_em, np_cur_em, np_annual_em, src_em, errs_em, period_em
+    errors.extend(errs_em)
+
+    # 备 1：mootdx F10
+    try:
+        from .datasource.mootdx_source import MootdxSource, get_quotes_client
+        source = MootdxSource()
+
+        # ROE 历史（多年年报数据）
+        roe_history = source.get_roe_history(stock_code)
+        roe_latest = None
+        roe_5y_median = None
+        if roe_history:
+            years = sorted(roe_history.keys(), reverse=True)
+            if years:
+                roe_latest = roe_history[years[0]]
+            last5 = sorted(roe_history.items(), reverse=True)[:5]
+            if last5:
+                vals = [v for _, v in last5]
+                roe_5y_median = float(statistics.median(vals))
+
+        # 净利润（年报）
+        np_history = source.get_net_profit_annual(stock_code)
+        net_profit_annual = None
+        if np_history:
+            np_years = sorted(np_history.keys(), reverse=True)
+            if np_years:
+                net_profit_annual = np_history[np_years[0]]
+
+        # 最新报告期累计净利润（非 TTM；仅展示）：finance() 是最新报告期快照，
+        # 无历史期次（无上年同期），无法构造真 TTM（审查 #5）
+        net_profit_latest_period = None
+        try:
+            client = get_quotes_client()
+            fin = client.finance(symbol=stock_code)
+            if fin is not None and len(fin) > 0 and 'jinglirun' in fin.columns:
+                net_profit_latest_period = float(fin['jinglirun'].iloc[0])
+        except Exception as e:
+            errors.append(f"finance 快照获取失败: {e}")
+
+        if roe_latest is not None:
+            logger.debug(
+                "mootdx F10 财报 %s: ROE最新=%.2f%% ROE5Y中位=%.2f%% 最新报告期净利润=%.2f亿 年报净利润=%.2f亿",
+                stock_code,
+                roe_latest,
+                roe_5y_median or -1,
+                (net_profit_latest_period or 0) / 1e8,
+                (net_profit_annual or 0) / 1e8,
+            )
+            roe_period = max(roe_history.keys()) if roe_history else None
+            return roe_latest, roe_5y_median, net_profit_latest_period, net_profit_annual, "mootdx F10", errors, roe_period
+
+        errors.append("mootdx F10 未获取到有效 ROE 数据")
+    except Exception as e:
+        errors.append(f"mootdx F10 财报获取失败: {e}")
+
+    # 备 2：akshare/同花顺（历史路径；CI 上对机房 IP 403 且新版 akshare 已移除接口）
+    logger.info("东财与 mootdx 财报均不可用，回退到 akshare/同花顺")
+    roe, roe5y, np_ttm, np_annual, src, errs2, roe_period = _get_financial_ths(stock_code)
+    errors.extend(errs2)
+    return roe, roe5y, np_ttm, np_annual, src, errors, roe_period
+
+
+# ---------------------------------------------------------------------------
+# 数据获取 — 行业分类
+# ---------------------------------------------------------------------------
+
+def _get_industry(stock_code: str) -> Tuple[str, str]:
+    """获取行业分类：mootdx F10 优先，东方财富 datacenter 备用（与 JS 端同源）"""
+    # 主：mootdx F10 行业分析
+    try:
+        from .datasource.mootdx_source import MootdxSource
+        source = MootdxSource()
+        industry = source.get_industry(stock_code)
+        if industry and industry != "未知行业":
+            logger.debug("mootdx F10 行业 %s: %s", stock_code, industry)
+            return industry, "mootdx F10"
+    except Exception as e:
+        logger.debug("mootdx F10 行业获取失败 %s: %s", stock_code, e)
+
+    # 备：东方财富 datacenter RPT_F10_BASIC_ORGINFO（与 sustainability/JS 端同源，全球可用）
+    try:
+        industry = fetch_eastmoney_industry(stock_code)
+        if industry:
+            logger.debug("东方财富行业 %s: %s", stock_code, industry)
+            return industry, "东方财富"
+    except Exception as e:
+        logger.debug("东方财富行业获取失败 %s: %s", stock_code, e)
+
+    return "未知行业", "无"
+
+
+# ---------------------------------------------------------------------------
+# 核心计算
+# ---------------------------------------------------------------------------
+
+

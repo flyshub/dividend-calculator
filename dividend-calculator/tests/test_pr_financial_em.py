@@ -85,7 +85,7 @@ class TestFinancialFallbackChain:
     def test_em_preferred_over_mootdx(self):
         """东财可用时不碰 mootdx（否则 CI 上每只股票白等 TCP 超时）。"""
         with patch("src.eastmoney_fetcher.fetch_financial_rows", return_value=ROWS), \
-             patch("src.pr._get_financial_ths") as ths, \
+             patch("src.pr_data._get_financial_ths") as ths, \
              patch("src.datasource.mootdx_source.MootdxSource") as mootdx:
             out = _get_financial("600900")
         assert out[4] == "东方财富"
@@ -96,7 +96,7 @@ class TestFinancialFallbackChain:
         with patch("src.eastmoney_fetcher.fetch_financial_rows", return_value=[]), \
              patch("src.datasource.mootdx_source.MootdxSource",
                    side_effect=Exception("tdx blocked")), \
-             patch("src.pr._get_financial_ths",
+             patch("src.pr_data._get_financial_ths",
                    return_value=(None, None, None, None, "无", ["同花顺不可用"], None)):
             roe, _, _, _, src, errors, _ = _get_financial("600900")
         assert roe is None and src == "无"

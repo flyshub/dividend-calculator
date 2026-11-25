@@ -188,7 +188,7 @@ class TestGetIndustryFallback:
 
     def test_mootdx_fail_falls_back_to_eastmoney_datacenter(self):
         with patch("src.datasource.mootdx_source.MootdxSource", side_effect=Exception("mootdx down")), \
-             patch("src.pr.fetch_eastmoney_industry", return_value="公用事业-电力-水电") as mock_em:
+             patch("src.pr_data.fetch_eastmoney_industry", return_value="公用事业-电力-水电") as mock_em:
             industry, source = _get_industry("600900")
         assert industry == "公用事业-电力-水电"
         assert source == "东方财富"
@@ -196,7 +196,7 @@ class TestGetIndustryFallback:
 
     def test_both_fail_returns_unknown(self):
         with patch("src.datasource.mootdx_source.MootdxSource", side_effect=Exception("mootdx down")), \
-             patch("src.pr.fetch_eastmoney_industry", return_value=""):
+             patch("src.pr_data.fetch_eastmoney_industry", return_value=""):
             industry, source = _get_industry("600900")
         assert (industry, source) == ("未知行业", "无")
 
@@ -206,7 +206,7 @@ class TestGetIndustryFallback:
                 return "电力"
 
         with patch("src.datasource.mootdx_source.MootdxSource", return_value=FakeSource()), \
-             patch("src.pr.fetch_eastmoney_industry") as mock_em:
+             patch("src.pr_data.fetch_eastmoney_industry") as mock_em:
             industry, source = _get_industry("600900")
         assert industry == "电力"
         assert source == "mootdx F10"
@@ -255,7 +255,7 @@ class TestGetPePbEastmoney:
             def json(self):
                 return payload
 
-        return patch("src.pr.requests.get", return_value=FakeResp())
+        return patch("src.pr_data.requests.get", return_value=FakeResp())
 
     def test_parses_f164_and_f167(self):
         # 实测 600900 返回形状（fltt=2）：f164=19.15 与腾讯 f39 吻合，f167=3.31 与腾讯 f46 吻合
@@ -265,7 +265,7 @@ class TestGetPePbEastmoney:
         assert pb == 3.31
 
     def test_requests_fltt2_and_f164(self):
-        with patch("src.pr.requests.get") as mock_get:
+        with patch("src.pr_data.requests.get") as mock_get:
             mock_get.return_value.status_code = 200
             mock_get.return_value.json.return_value = {"data": {"f164": 6.49, "f167": 0.88}}
             _get_pe_pb_eastmoney("600036")
