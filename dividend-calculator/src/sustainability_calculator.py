@@ -35,6 +35,7 @@ from .sustainability_thresholds import (
     DIM_INTEREST_COVERAGE,
     DIM_CONSECUTIVE_YEARS,
     CUT_WINDOW_YEARS,
+    skip_note,
     WEIGHTS,
     WARN_PAYOUT_OVER_100,
     WARN_PRICE_DROP,
@@ -138,7 +139,7 @@ class SustainabilityResult:
     # 股息增长率（#30）：仅展示，不参与评分与判据
     dividend_cagr: Optional[float] = None       # 年化增长率（小数）
     dividend_trend: Optional[str] = None        # 增长 / 平稳 / 萎缩
-    dividend_cagr_years: int = 0                # 参与计算的连续年数
+    dividend_cagr_years: Optional[int] = 0     # 参与计算的连续年数（未评估时为 None）
     dividend_cagr_note: Optional[str] = None    # 数据不足原因 / 特别分红 / 口径差异
     dividend_cagr_annual: Optional[float] = None  # 仅年报口径的年化增长率（对照用）
 
@@ -645,12 +646,13 @@ def assess_sustainability(*,
     # 未达触发阈值 → 不评估
     if dividend_yield_before_tax is None:
         return SustainabilityResult(triggered=False, verdict="未评估", score=None,
-                                    notes=["股息率未超过阈值，未做可持续性评估"])
+                                    notes=[skip_note(None, thr)],
+                                    dividend_cagr_years=None)
     if dividend_yield_before_tax <= thr:
         return SustainabilityResult(
             triggered=False, verdict="未评估", score=None,
-            notes=[f"股息率 {dividend_yield_before_tax:.2f}% 未超过评估阈值 "
-                   f"{thr:.1f}%，未做可持续性评估"])
+            notes=[skip_note(dividend_yield_before_tax, thr)],
+            dividend_cagr_years=None)
 
     result = SustainabilityResult(triggered=True, verdict="不可持续")
 

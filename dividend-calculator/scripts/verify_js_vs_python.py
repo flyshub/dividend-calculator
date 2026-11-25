@@ -56,6 +56,7 @@ FIELDS_NUMERIC = [
 
 FIELDS_STR = ["dividend_year", "valuation_zone", "pr_warning", "industry", "is_loss_stock", "explanation",
               "sustainability_verdict", "sustainability_explanation",
+              "sustainability_notes",
               "ttm_period", "ttm_source", "roe_period",
               "forward_eps_kind", "forward_status", "forward_warnings",
               "cash_return_status", "cash_return_note",
@@ -295,14 +296,18 @@ def compute_python(raw: dict) -> dict:
     )
 
     # 5. 股息可持续性（与 JS assessSustainability 相同算法，纯函数消费相同 raw）
-    # JS 端 computeFromRaw 仅在 yields[0] > 4 时调用 assessSustainability，
-    # 故 yield ≤ 阈值时 sustainability 为 None（镜像该门控）。
+    # JS 端 app.js 仅在 yields[0] > 0 时调用 assessSustainability；阈值门控在
+    # assessSustainability 内部（#28），故 yield ≤ 阈值时返回「未评估」轻量结果。
     from src.sustainability import parse_dividend_rows, assess_for_stock
+    from src.sustainability_thresholds import THRESHOLD_YIELD
     sus = None
     sus_triggered = None
     sus_verdict = None
     sus_score = None
-    if yld > 4:  # 与 JS assessSustainability 的阈值判定一致（默认 4.0）
+    if yld and yld > 0:
+        # 不再在脚本里复制阈值门控：直接调生产函数，由 assess_for_stock 内部判定
+        # （> 阈值 → 评估；≤ 阈值 → triggered=False + skip_note）。
+        # 这样「阈值说明文案」走的就是生产那一条路径，而不是验证脚本另写一份。
         div_records, em_year = parse_dividend_rows(raw["dividend_rows"])
         sus_year = year if year else em_year
         sus = assess_for_stock(
@@ -319,11 +324,6 @@ def compute_python(raw: dict) -> dict:
         sus_triggered = 1 if sus.triggered else 0
         sus_verdict = sus.verdict
         sus_score = sus.score
-    elif yld > 0:
-        # #28：有股息率但低于阈值 → JS 返回轻量「未评估」结果，Python 侧同口径镜像
-        sus_triggered = 0
-        sus_verdict = "未评估"
-        sus_score = None
 
     result = {
         "current_price": quote["price"],
@@ -413,6 +413,8 @@ def compute_python(raw: dict) -> dict:
     else:
         # 低于阈值（未评估）JS 侧 explainSustainability 返回空串；无股息率则两端都是 null
         result["sustainability_explanation"] = "" if yld and yld > 0 else None
+    # #28 阈值说明文案：两端各写一份，必须逐字一致（防止只改一侧 CI 仍绿）
+    result["sustainability_notes"] = "\n".join(sus.notes) if sus is not None else None
     return result
 
 

@@ -423,6 +423,10 @@ def assess_for_stock(*,
         current_year=datetime.now().year,
         threshold=threshold,
     )
+    if not result.triggered:
+        # 低于阈值 → 未评估：不得挂上分红增长率/趋势（JS 的未评估结果也没有这些字段），
+        # 否则「未评估」会带着一份完整结论出现在页面上（#28，verify 抓到）。
+        return result
     if dividend_fetch_failed and not dividend_records:
         result.notes.append("分红历史数据获取失败，历史维度不参与评分")
     if history is not None:

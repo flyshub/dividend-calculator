@@ -13,6 +13,7 @@
     行业分类: 东方财富
     分红数据: 复用项目股息率链路
 """
+import argparse
 import os
 import sys
 
@@ -257,6 +258,17 @@ def print_sustainability(yield_pct, result: SustainabilityResult):
     print()
 
 
+def _positive_threshold(value):
+    """--threshold 必须是正数（0/负数会把门控整条关掉，静默变成「全评估」）。"""
+    try:
+        v = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"阈值必须是数字，收到 {value!r}")
+    if v <= 0:
+        raise argparse.ArgumentTypeError(f"阈值必须大于 0（当前 {v}）；传 0 或负数会关闭可持续性评估门控")
+    return v
+
+
 def _build_parser():
     import argparse
 
@@ -271,8 +283,8 @@ def _build_parser():
     )
     parser.add_argument("stock", nargs="?", help="股票代码或名称")
     parser.add_argument(
-        "--threshold", type=float, default=THRESHOLD_YIELD,
-        help=f"可持续性评估触发阈值（税前股息率 %%，默认 {THRESHOLD_YIELD:.1f}）",
+        "--threshold", type=_positive_threshold, default=THRESHOLD_YIELD,
+        help=f"可持续性评估触发阈值（税前股息率 %%，须 > 0，默认 {THRESHOLD_YIELD:.1f}）",
     )
     return parser
 

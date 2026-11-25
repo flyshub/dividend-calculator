@@ -18,6 +18,7 @@ from .sustainability import assess_with_auto_fetch
 from .eastmoney_fetcher import fetch_goodwill
 from .risk_flags import goodwill_warning
 from .sustainability_calculator import SustainabilityResult, THRESHOLD_YIELD
+from .sustainability_thresholds import skip_note
 
 logger = logging.getLogger(__name__)
 
@@ -103,8 +104,7 @@ def run_stock_analysis(stock_input: str,
         # #28 低于阈值不再返回 None：给页面/CLI 一行说明，不发起任何取数
         sustainability = SustainabilityResult(
             triggered=False, verdict="未评估", score=None,
-            notes=[f"股息率 {dividend_yield:.2f}% 未超过评估阈值 "
-                   f"{thr:.1f}%，未做可持续性评估"],
+            notes=[skip_note(dividend_yield, thr)],
         )
 
     # #26 商誉/净资产警示：只在高股息触发可持续性评估时复核（单股路径）。

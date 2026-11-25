@@ -157,3 +157,24 @@ class TestCliArgs:
         args = parse_args(["603288", "--threshold", "2.5"])
         assert args.stock == "603288"
         assert args.threshold == 2.5
+
+    def test_threshold_zero_rejected(self):
+        """0 会把门控整条关掉（全评估），必须拒绝而不是静默接受。"""
+        import pytest
+        with pytest.raises(SystemExit):
+            parse_args(["600900", "--threshold", "0"])
+
+    def test_threshold_negative_rejected(self):
+        import pytest
+        with pytest.raises(SystemExit):
+            parse_args(["600900", "--threshold", "-1.5"])
+
+
+class TestSkipNote:
+    def test_note_matches_page_wording(self):
+        from src.sustainability_thresholds import skip_note
+        assert skip_note(3.42, 4.0) == "股息率 3.42% 未超过评估阈值 4.0%，未做可持续性评估"
+
+    def test_none_yield_note(self):
+        from src.sustainability_thresholds import skip_note
+        assert skip_note(None, 4.0) == "股息率未超过阈值，未做可持续性评估"

@@ -80,6 +80,9 @@ module.exports = function formatResult(r) {
     sustainability_dividend_cagr_annual: r.sustainability && r.sustainability.dividend_cagr_annual != null
       ? r.sustainability.dividend_cagr_annual : null,
     sustainability_explanation: r.sustainability ? (r.sustainability.explanation || []).join('\n') : null,
+    /* #28 阈值说明文案：与 Python skip_note 逐字对拍，防止两端各写一份后漂移 */
+    sustainability_notes: r.sustainability && r.sustainability.notes
+      ? r.sustainability.notes.join('\n') : null,
   };
 };
 

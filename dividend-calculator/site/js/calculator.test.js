@@ -547,6 +547,17 @@ test('assessSustainability 阈值可配置 (#28)：默认不变，显式阈值�
   assert.equal(over.triggered, true);
 });
 
+test('assessSustainability 未评估：文案逐字对齐 Python skip_note 且不带增速字段 (#28)', () => {
+  const r = Calc.assessSustainability({
+    dividend_yield_before_tax: 3.42, dividend_total: 214e8,
+    latest: healthyFin(), history: healthyHistory(), industry: '公用事业-电力-水电',
+  });
+  assert.equal(r.notes[0], '股息率 3.42% 未超过评估阈值 4.0%，未做可持续性评估');
+  /* 未评估 ≠ 评估后 0 年：不挂增速，页面才不会在「未评估」卡上显示一份结论 */
+  assert.equal(r.dividend_cagr, undefined);
+  assert.equal(r.dividend_cagr_years, undefined);
+});
+
 test('assessSustainability 亏损却分红→不可持续', () => {
   const fin = healthyFin(); fin.net_profit = -10e8; fin.net_profit_yoy = -120.0;
   const r = Calc.assessSustainability({

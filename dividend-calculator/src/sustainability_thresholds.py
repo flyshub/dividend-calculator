@@ -47,3 +47,15 @@ WARN_PRICE_DROP = -0.30        # 近1年股价跌幅 < -30%
 WARN_SPECIAL_DIV_MULTIPLE = 2.0  # 当年分红 > 近3年均值 × 2.0（避免早期低基数拉偏误判稳定增长股）
 WARN_HOLDING_CONCENTRATION = 0.50  # 前十大持股 > 50%
 WARN_HIGH_PAYOUT = 0.80        # 高派息门槛（情境画像用）
+
+
+def skip_note(dividend_yield, threshold):
+    """低于阈值时给用户看的一行说明（单一来源，#28）。
+
+    文案双端镜像 `site/js/calculator.js::thresholdSkipNote`，由
+    `scripts/verify_js_vs_python.py` 逐字对拍，避免两端各写一份后悄悄漂移。
+    """
+    if dividend_yield is None:
+        return "股息率未超过阈值，未做可持续性评估"
+    return (f"股息率 {dividend_yield:.2f}% 未超过评估阈值 "
+            f"{threshold:.1f}%，未做可持续性评估")

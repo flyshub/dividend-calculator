@@ -1372,15 +1372,21 @@
     return verdict;
   }
 
+  /* 低于阈值时的说明文案（单一来源，#28）。
+     与 Python `sustainability_thresholds.skip_note` 逐字镜像，
+     由 scripts/verify_js_vs_python.py 的 sustainability_notes 字段对拍。 */
+  function thresholdSkipNote(yld, thr) {
+    if (yld == null) return '股息率未超过阈值，未做可持续性评估';
+    return '股息率 ' + yld.toFixed(2) + '% 未超过评估阈值 ' + thr.toFixed(1) + '%，未做可持续性评估';
+  }
+
   /* 主入口：assessSustainability（对齐 Python assess_sustainability） */
   function assessSustainability(opts) {
     var yld = opts.dividend_yield_before_tax;
     /* #28 阈值可配置：默认 SUS_THRESHOLD_YIELD（对齐 Python THRESHOLD_YIELD） */
     var thr = opts.threshold == null ? SUS_THRESHOLD_YIELD : opts.threshold;
     if (yld == null || yld <= thr) {
-      var notes = (yld == null)
-        ? ['股息率未超过阈值，未做可持续性评估']
-        : ['股息率 ' + yld.toFixed(2) + '% 未超过评估阈值 ' + thr.toFixed(1) + '%，未做可持续性评估'];
+      var notes = [thresholdSkipNote(yld, thr)];
       return { triggered: false, verdict: '未评估', score: null, fatal_flags: [], warning_flags: [],
                dimension_scores: {}, metrics: {}, branch: 'general', notes: notes };
     }
