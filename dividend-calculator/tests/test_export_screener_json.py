@@ -101,6 +101,41 @@ class TestParseCsv:
         assert r["行业"] == ""
         assert r["代码"] == "600900"
 
+    def test_forward_columns_numeric_conversion(self, ex, tmp_path):
+        """#157：前瞻股息率转 float；财年/状态保持字符串（年份不能被渲染成 2026.0）。"""
+        p = tmp_path / "screener_20261126_100000.csv"
+        rows = _sample_rows()
+        rows[0].update({"前瞻股息率%": "5.43", "前瞻财年": "2026", "前瞻状态": "ok"})
+        _write_csv(p, rows)
+        r = ex.parse_csv(p)[0]
+        assert isinstance(r["前瞻股息率%"], float) and r["前瞻股息率%"] == 5.43
+        assert r["前瞻财年"] == "2026"
+        assert r["前瞻状态"] == "ok"
+        # 不可估行：股息率空串，状态保留（页面据此解释原因）
+        r2 = ex.parse_csv(p)[1]
+        assert r2["前瞻股息率%"] == ""
+        assert r2["前瞻状态"] == ""
+
+    def test_accepts_pre_forward_14_column_header(self, ex, tmp_path):
+        """#157 上线前写入的 14 列 CSV（无前瞻三列）仍可导出，历史行不补算。"""
+        p = tmp_path / "screener_20261120_100000.csv"
+        header = ["代码", "名称", "TTM股息率%", "真实股息率%", "估值区间", "市赚率PR",
+                  "行业", "可持续性", "ROE%", "股东总回报率%", "总市值(亿)", "数据来源",
+                  "分红CAGR%", "分红趋势"]
+        row = {"代码": "600900", "名称": "长江电力", "TTM股息率%": "3.80",
+               "真实股息率%": "3.80", "估值区间": "低估", "市赚率PR": "0.52",
+               "行业": "公用事业-电力", "可持续性": "可持续", "ROE%": "16.00",
+               "股东总回报率%": "13.32", "总市值(亿)": "6800.5",
+               "数据来源": "mootdx", "分红CAGR%": "8.4", "分红趋势": "增长"}
+        with open(p, "w", encoding="utf-8", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=header)
+            w.writeheader()
+            w.writerow(row)
+        r = ex.parse_csv(p)[0]
+        assert r["代码"] == "600900"
+        assert r["分红趋势"] == "增长"
+        assert "前瞻股息率%" not in r, "历史行不补算前瞻列"
+
 
 class TestMain:
     def test_generates_three_files_with_history(self, ex, tmp_path, monkeypatch):
@@ -217,9 +252,9 @@ class TestHeaderValidation:
         """
         p = tmp_path / "screener_20261123_221036.csv"
         with open(p, "w", encoding="utf-8", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=ex.LEGACY_FIELDS_14)
+            writer = csv.DictWriter(f, fieldnames=ex.LEGACY_FIELDS_14_OLD_NAMES)
             writer.writeheader()
-            writer.writerow({c: "x" for c in ex.LEGACY_FIELDS_14})
+            writer.writerow({c: "x" for c in ex.LEGACY_FIELDS_14_OLD_NAMES})
         rows = ex.parse_csv(p)
         assert len(rows) == 1
         assert "股息趋势" in rows[0] and "分红趋势" not in rows[0]

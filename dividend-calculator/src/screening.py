@@ -11,7 +11,7 @@
 由编排层注入 evaluate_pr / evaluate_sustainability 两个回调；测试用假回调离线验证。
 """
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Sequence
 
 from src.pr_calculator import (
     compute_basic_pr,
@@ -20,6 +20,9 @@ from src.pr_calculator import (
 )
 from src.screener_cache import DividendSnapshot, FinanceSnapshot, QuoteSnapshot
 
+if TYPE_CHECKING:  # 仅类型引用：screening 保持不依赖网络/取数模块
+    from src.forward_yield import ForwardYieldResult
+
 # 漏斗默认阈值——全项目唯一来源：CLI 默认值、批量评估、回测脚本都从这里取
 # （与 spec #67 / 页面口径卡一致，page-parity 测试引用）
 DEFAULT_MIN_TTM = 5.0
@@ -27,9 +30,12 @@ DEFAULT_MIN_REAL = 5.0
 DEFAULT_PR_ZONE = ("合理偏低", "低估")
 DEFAULT_SUS_VERDICT = ("可持续", "偏弱")
 
-# CSV 12 列契约（export_screener_json.py 与选股页列定义共用；改动需三处同步；
+# CSV 列契约（export_screener_json.py 与选股页列定义共用；改动需三处同步；
 # 「股东总回报率%」于 2026-09 起 11 列 → 12 列，历史 11 列表头由 export 白名单放行，见 ADR-0003）
-FIELDS = ["代码", "名称", "TTM股息率%", "真实股息率%", "估值区间", "市赚率PR",
+# 「前瞻股息率% / 前瞻财年 / 前瞻状态」于 2026-11 起追加（#157），紧跟真实股息率%
+FIELDS = ["代码", "名称", "TTM股息率%", "真实股息率%",
+          "前瞻股息率%", "前瞻财年", "前瞻状态",
+          "估值区间", "市赚率PR",
           "行业", "可持续性", "ROE%", "股东总回报率%", "总市值(亿)", "数据来源",
           "分红CAGR%", "分红趋势"]
 
@@ -64,6 +70,8 @@ class FunnelCandidate:
     dividend_trend: Optional[str] = None
     dividend_cagr_years: int = 0
     dividend_cagr_note: Optional[str] = None
+    # 前瞻股息率评估结果（#157，编排层在漏斗结束后填充；不进漏斗判定）
+    forward: Optional["ForwardYieldResult"] = None
     # 四级通过标记
     pass_viability: bool = False
     pass_yield: bool = False
@@ -234,12 +242,13 @@ def run_funnel(
 
 
 def build_output_rows(result: FunnelResult) -> List[dict]:
-    """FunnelResult → 14 列 CSV 行（与 FIELDS 契约一致），按真实股息率降序。
+    """FunnelResult → 17 列 CSV 行（与 FIELDS 契约一致），按真实股息率降序。
 
     与既有输出口径一致：实时股息率 = 分红总额 / 当日市值（缺失显示空串，
     不使用漏斗② 的回退旧值——CSV 如实标注缺失）。
     TSR = (ROE − 真实股息率×PB) + 真实股息率，周期股 ROE 取 5 年中位数
     （compute_tsr 单点实现）；输入缺失（如腾讯无 PB）→ 空串。
+    前瞻三列（#157）：仅展示，不进判据；不可估时股息率空串、状态如实保留。
     """
     rows = []
     for c in result.candidates:
@@ -252,11 +261,17 @@ def build_output_rows(result: FunnelResult) -> List[dict]:
             fin.roe_5y_median if fin else None,
             bool(fin.is_cyclical) if fin else False,
             real_yield_now, q.pb if q else None)
+        fwd = c.forward
+        fwd_ok = fwd is not None and fwd.forward_status == "ok"
+        fwd_yield = fwd.forward_yield_before_tax if fwd_ok else None
         rows.append({
             "代码": c.code,
             "名称": q.name if q else "",
             "TTM股息率%": round(ttm_yield_now, 2) if ttm_yield_now else "",
             "真实股息率%": round(real_yield_now, 2) if real_yield_now else "",
+            "前瞻股息率%": round(fwd_yield, 2) if fwd_yield is not None else "",
+            "前瞻财年": fwd.forward_year if fwd and fwd.forward_year is not None else "",
+            "前瞻状态": (fwd.forward_status or "") if fwd else "",
             "估值区间": c.valuation_zone,
             "市赚率PR": c.pr if c.pr is not None else "",
             "行业": c.industry,

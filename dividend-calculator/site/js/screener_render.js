@@ -80,12 +80,29 @@
     return '<td class="num"><span style="color:' + color + '">' + esc(trend) + pct + '</span></td>';
   }
 
+  /* #157 前瞻股息率列：数字 + 目标财年/口径提示（仅展示，不参与漏斗判据）。
+   * 口径 = 下一财年一致预期 EPS × 近 3 年支付率中位数 ÷ 现价（税前，模型估算）。
+   * 不可估（状态见 CSV「前瞻状态」）与历史 JSON 无该列 → —，不填 0（数据铁律）。
+   * 不可估原因文案见 #158。 */
+  function forwardCell(r) {
+    var y = fmtNum(r['前瞻股息率%'], 2);
+    var year = r['前瞻财年'];
+    var basis = '模型估算，税前，非公司公告';
+    if (!y) {
+      if (year == null || year === '') return '<td class="num">—</td>';
+      return '<td class="num" title="' + esc('前瞻财年 ' + year + '；不可估；' + basis) + '">—</td>';
+    }
+    var tip = (year ? '前瞻财年 ' + year + '；' : '') + basis;
+    return '<td class="num" title="' + esc(tip) + '">' + y + '</td>';
+  }
+
   // 单行渲染（行字段拼接，返回值拼进 innerHTML；字符串列已 esc）
   // 列序须与 site/screener.html 的 <th> 表头一致
   function rowHtml(r) {
     return '<td>' + esc(r['代码']) + '</td>' +
       '<td>' + esc(r['名称']) + '</td>' +
       '<td class="num yield">' + fmtNum(r['真实股息率%'], 2) + '</td>' +
+      forwardCell(r) +
       '<td>' + susBadge(esc(r['可持续性'])) + susNote(r) + '</td>' +
       divTrendCell(r) +
       '<td>' + zoneBadge(esc(r['估值区间'])) + '</td>' +
@@ -98,5 +115,5 @@
       '<td>' + esc(r['数据来源']) + '</td>';
   }
 
-  return { esc: esc, fmtNum: fmtNum, zoneBadge: zoneBadge, susBadge: susBadge, noteBadge: noteBadge, prNote: prNote, susNote: susNote, tsrNote: tsrNote, divTrendCell: divTrendCell, rowHtml: rowHtml };
+  return { esc: esc, fmtNum: fmtNum, zoneBadge: zoneBadge, susBadge: susBadge, noteBadge: noteBadge, prNote: prNote, susNote: susNote, tsrNote: tsrNote, divTrendCell: divTrendCell, forwardCell: forwardCell, rowHtml: rowHtml };
 }));

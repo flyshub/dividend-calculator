@@ -141,3 +141,44 @@ test('divTrendCell 兼容改名前的历史 JSON（股息趋势/股息CAGR%）',
   const html = R.divTrendCell({ '股息趋势': '增长', '股息CAGR%': 5.5 });
   assert.ok(html.includes('增长') && html.includes('+5.5%'));
 });
+
+/* #157 前瞻股息率列：数字 + 目标财年/口径提示；不可估与历史行显示 — */
+test('forwardCell 可估行：两位小数 + 财年与口径提示', () => {
+  const html = R.forwardCell({ '前瞻股息率%': 5.4321, '前瞻财年': 2026, '前瞻状态': 'ok' });
+  assert.ok(html.includes('>5.43<'));
+  assert.ok(html.includes('title="前瞻财年 2026'), '悬停含目标财年');
+  assert.ok(html.includes('模型估算'), '悬停标注模型估算');
+  assert.ok(html.includes('税前'));
+  assert.ok(html.includes('非公司公告'));
+});
+
+test('forwardCell 不可估/历史行显示 —，不渲染 NaN/undefined', () => {
+  const blank = R.forwardCell({ '前瞻股息率%': '', '前瞻财年': 2026, '前瞻状态': 'no_coverage' });
+  assert.ok(blank.includes('—'));
+  assert.ok(!blank.includes('NaN') && !blank.includes('undefined'));
+  assert.ok(blank.includes('<td class="num"'), '占位符保持数值列样式');
+  assert.ok(blank.includes('title="前瞻财年 2026；不可估；'), '不可估行仍给出财年与口径');
+  const legacy = R.forwardCell({});   // 历史按日 JSON 无前瞻 key
+  assert.ok(legacy.includes('—'));
+  assert.ok(!legacy.includes('title='), '无值时不给误导性提示');
+});
+
+test('forwardCell 财年与提示经转义（XSS）', () => {
+  const html = R.forwardCell({ '前瞻股息率%': 5.0, '前瞻财年': '" onmouseover="alert(1)' });
+  assert.ok(!html.includes('onmouseover="alert'));
+  assert.ok(html.includes('&quot;'));
+});
+
+test('rowHtml 前瞻列紧跟真实股息率（第 4 列）', () => {
+  const r = {
+    '代码': '600900', '名称': '长江电力', '真实股息率%': 3.8,
+    '前瞻股息率%': 4.25, '前瞻财年': 2026, '前瞻状态': 'ok',
+    '估值区间': '低估', '可持续性': '可持续',
+  };
+  const html = R.rowHtml(r);
+  const realIdx = html.indexOf('yield">3.80');
+  const fwdIdx = html.indexOf('>4.25<');
+  const susIdx = html.indexOf('badge-green');
+  assert.ok(realIdx !== -1 && fwdIdx !== -1 && susIdx !== -1);
+  assert.ok(realIdx < fwdIdx && fwdIdx < susIdx, '列序：真实股息率 → 前瞻 → 可持续性');
+});

@@ -2,7 +2,7 @@
 """选股器每日结果 → GitHub Pages JSON（spec: Pages 展示每日选股）。
 
 将 data/screener/screener_*.csv 转换为 site/screener/ 下的 JSON：
-- latest.json：最新一日的股票列表（11 字段，数字转 float）
+- latest.json：最新一日的股票列表（FIELDS 全列，数字转 float）
 - history.json：所有历史日期索引 [{date, file}]（按日期聚合，同日多批次取最新）
 - screener_<date>.json：每个历史日期的独立文件（供历史切换读取）
 
@@ -41,12 +41,14 @@ LEGACY_FIELDS_11 = ["代码", "名称", "TTM股息率%", "真实股息率%", "�
 LEGACY_FIELDS_12 = LEGACY_FIELDS_11[:9] + ["股东总回报率%"] + LEGACY_FIELDS_11[9:]
 # 2026-11-24 前写入的 14 列 CSV：后两列用旧名「股息CAGR%」「股息趋势」（当日跑了两次日更，
 # 磁盘上确有这种文件）。改名后仍要能解析，否则 export 会拒收历史 CSV。
-LEGACY_FIELDS_14 = LEGACY_FIELDS_12 + ["股息CAGR%", "股息趋势"]
+LEGACY_FIELDS_14_OLD_NAMES = LEGACY_FIELDS_12 + ["股息CAGR%", "股息趋势"]
+# #157 上线前写入的 14 列 CSV：后两列为现名「分红CAGR%」「分红趋势」，无前瞻三列。
+LEGACY_FIELDS_14_NO_FORWARD = LEGACY_FIELDS_12 + ["分红CAGR%", "分红趋势"]
 
-# CSV 14 列 → JSON 字段（数字列转 float）。列定义来自 src.screening.FIELDS，
+# CSV 列 → JSON 字段（数字列转 float）。列定义来自 src.screening.FIELDS，
 # （screener_daily.yml 每日跑本脚本时，export 会校验 CSV 表头与 FIELDS 一致，防漂移）。
-NUMERIC = {"TTM股息率%", "真实股息率%", "市赚率PR", "ROE%", "股东总回报率%", "总市值(亿)",
-           "分红CAGR%", "股息CAGR%"}   # 旧名保留：历史 CSV 仍要能解析
+NUMERIC = {"TTM股息率%", "真实股息率%", "前瞻股息率%", "市赚率PR", "ROE%", "股东总回报率%",
+           "总市值(亿)", "分红CAGR%", "股息CAGR%"}   # 旧名保留：历史 CSV 仍要能解析
 
 
 def _csv_date(path: Path):
@@ -88,7 +90,8 @@ def parse_csv(path: Path) -> list:
     with open(path, encoding="utf-8") as f:
         reader = csv.DictReader(f)
         header = reader.fieldnames or []
-        if header not in (FIELDS, LEGACY_FIELDS_11, LEGACY_FIELDS_12, LEGACY_FIELDS_14):
+        if header not in (FIELDS, LEGACY_FIELDS_11, LEGACY_FIELDS_12,
+                          LEGACY_FIELDS_14_OLD_NAMES, LEGACY_FIELDS_14_NO_FORWARD):
             missing = [c for c in FIELDS if c not in header]
             extra = [c for c in header if c not in FIELDS]
             raise ValueError(

@@ -81,6 +81,100 @@ class TestRunScreener:
                 assert len(called_codes) == 10
 
 
+    @patch("src.screener._load_stock_list", return_value=["600900", "600987"])
+    @patch("src.screener_quotes.fetch_all_quotes")
+    @patch("src.screener_sustainability.make_sustainability_evaluator")
+    def test_forward_enrichment_fills_candidates(self, mock_sus, mock_fetch, mock_list,
+                                                 tmp_path, capsys):
+        """漏斗结束后逐只填充前瞻结果，随 CSV 行输出（#157，不进漏斗判定）。"""
+        from types import SimpleNamespace
+        from src.screening import build_output_rows
+
+        cache = ScreenerCache(tmp_path / "s.db")
+        _seed_cache(cache)
+        mock_fetch.side_effect = lambda codes, cache=None: [
+            cache.get_quote(c) for c in codes if cache.get_quote(c) is not None]
+        mock_sus.return_value = lambda candidate: "可持续"
+
+        seen = []
+
+        def fake_forward(candidate):
+            seen.append(candidate.code)
+            return SimpleNamespace(forward_status="ok", forward_year=2026,
+                                   forward_yield_before_tax=4.567)
+
+        result = run_screener(cache, forward_evaluator=fake_forward)
+        assert sorted(seen) == ["600900", "600987"]
+        assert all(c.forward is not None for c in result.candidates)
+        rows = build_output_rows(result)
+        assert all(r["前瞻股息率%"] == 4.57 for r in rows)
+        assert all(r["前瞻状态"] == "ok" for r in rows)
+        assert "前瞻股息率: 2/2 可估" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("forecast_factory,expected", [
+        (lambda: [], "no_coverage"),
+        (lambda: None, "fetch_error"),
+        (lambda: [{"YEAR1": 2025, "YEAR_MARK1": "A", "EPS1": 1.0,
+                   "YEAR2": 2026, "YEAR_MARK2": "E", "EPS2": -2.0,
+                   "RATING_ORG_NUM": 5}], "no_positive_eps"),
+    ])
+    @patch("src.screener._load_stock_list", return_value=["600900", "600987"])
+    @patch("src.screener_quotes.fetch_all_quotes")
+    @patch("src.screener_sustainability.make_sustainability_evaluator")
+    def test_forward_unestimable_statuses_reach_rows(self, mock_sus, mock_fetch, mock_list,
+                                                     forecast_factory, expected, tmp_path):
+        """真实评估器接进编排：无覆盖/取数失败/预测亏损 → 数值空、状态与财年如实输出；
+        缺快照的另一只 → missing_inputs（两种不可估来源在同一张表里可区分，#157/#158）。"""
+        import json
+        from src.screening import build_output_rows
+        from src.screener_cache import SustainabilitySnapshot
+        from src.screener_forward import make_forward_evaluator
+
+        cache = ScreenerCache(tmp_path / "s.db")
+        _seed_cache(cache)
+        shares = 1e9
+        cache.upsert_sustainability(SustainabilitySnapshot(
+            code="600900",
+            dividend_rows=json.dumps([
+                {"REPORT_DATE": f"{y}-12-31", "PRETAX_BONUS_RMB": 3.0,
+                 "ASSIGN_PROGRESS": "实施", "EX_DIVIDEND_DATE": f"{y + 1}-06-20",
+                 "TOTAL_SHARES": shares}
+                for y in (2023, 2024, 2025)]),
+            financial_rows=json.dumps([
+                {"REPORT_DATE": f"{y}-12-31", "ROEJQ": 16.0, "PARENTNETPROFIT": 1e9}
+                for y in (2023, 2024, 2025)]),
+            source="东财"))
+        mock_fetch.side_effect = lambda codes, cache=None: [
+            cache.get_quote(c) for c in codes if cache.get_quote(c) is not None]
+        mock_sus.return_value = lambda candidate: "可持续"
+
+        ev = make_forward_evaluator(cache, forecast_fetcher=lambda code: forecast_factory())
+        result = run_screener(cache, forward_evaluator=ev)
+        rows = {r["代码"]: r for r in build_output_rows(result)}
+
+        assert rows["600900"]["前瞻状态"] == expected
+        assert rows["600900"]["前瞻股息率%"] == ""
+        assert rows["600900"]["前瞻财年"] == 2026
+        assert rows["600987"]["前瞻状态"] == "missing_inputs"
+        assert rows["600987"]["前瞻股息率%"] == ""
+
+    @patch("src.screener._load_stock_list", return_value=["600900"])
+    @patch("src.screener_quotes.fetch_all_quotes")
+    @patch("src.screener_sustainability.make_sustainability_evaluator")
+    def test_with_forward_false_skips_enrichment(self, mock_sus, mock_fetch, mock_list, tmp_path):
+        cache = ScreenerCache(tmp_path / "s.db")
+        _seed_cache(cache)
+        mock_fetch.side_effect = lambda codes, cache=None: [
+            cache.get_quote(c) for c in codes if cache.get_quote(c) is not None]
+        mock_sus.return_value = lambda candidate: "可持续"
+
+        def boom(candidate):
+            raise AssertionError("with_forward=False 不应调用前瞻评估器")
+
+        result = run_screener(cache, with_forward=False, forward_evaluator=boom)
+        assert all(c.forward is None for c in result.candidates)
+
+
 class TestWriteCsv:
     def test_writes_stdout(self):
         rows = [{"代码": "600900", "名称": "长江电力", "真实股息率%": 6.0}]

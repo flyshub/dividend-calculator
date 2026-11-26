@@ -584,6 +584,19 @@ def prefetch_and_cache(cache, code: str) -> Optional[SustainabilitySnapshot]:
     return snap
 
 
+def cached_snapshot_inputs(cache, code: str) -> Optional[dict]:
+    """读可持续性缓存快照 → 原始输入 dict（未命中 → None）。
+
+    对外只读访问器：快照 JSON 列的反序列化只发生在本模块（#95 序列化契约）。
+    行数据是历史事实，不按 staleness 拒绝——调用方自行决定是否使用
+    （选股器前瞻 enrichment 用缓存行、只对一致预期发网络请求）。
+    """
+    snap = cache.get_sustainability(code)
+    if snap is None:
+        return None
+    return _snapshot_to_dict(snap)
+
+
 def assess_from_cache(cache, code: str,
                       total_shares: float,
                       dividend_total: Optional[float],

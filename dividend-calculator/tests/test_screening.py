@@ -433,6 +433,54 @@ class TestBuildOutputRows:
         r = build_output_rows(result)[0]
         assert r["股东总回报率%"] == ""
 
+    def test_forward_columns_ok(self):
+        """可估行：两位小数 + 目标财年 + 状态枚举（#157）。"""
+        from types import SimpleNamespace
+        c = _candidate()
+        c.forward = SimpleNamespace(
+            forward_status="ok", forward_year=2026, forward_yield_before_tax=5.4321)
+        c.valuation_zone = "低估"
+        c.verdict = "可持续"
+        r = build_output_rows(FunnelResult(stage_counts=[1, 1, 1, 1], candidates=[c]))[0]
+        assert r["前瞻股息率%"] == 5.43
+        assert r["前瞻财年"] == 2026
+        assert r["前瞻状态"] == "ok"
+
+    def test_forward_columns_blank_when_not_estimable(self):
+        """不可估：股息率空串（不是 0），状态如实保留供页面解释（#157）。"""
+        from types import SimpleNamespace
+        c = _candidate()
+        c.forward = SimpleNamespace(
+            forward_status="no_coverage", forward_year=2026, forward_yield_before_tax=None)
+        c.valuation_zone = "低估"
+        c.verdict = "可持续"
+        r = build_output_rows(FunnelResult(stage_counts=[1, 1, 1, 1], candidates=[c]))[0]
+        assert r["前瞻股息率%"] == ""
+        assert r["前瞻财年"] == 2026
+        assert r["前瞻状态"] == "no_coverage"
+
+    def test_forward_columns_blank_when_status_not_ok(self):
+        """契约：仅 ok 出数值；未来某状态带值也不得输出（口径守卫）。"""
+        from types import SimpleNamespace
+        c = _candidate()
+        c.forward = SimpleNamespace(
+            forward_status="no_positive_eps", forward_year=2026, forward_yield_before_tax=3.0)
+        c.valuation_zone = "低估"
+        c.verdict = "可持续"
+        r = build_output_rows(FunnelResult(stage_counts=[1, 1, 1, 1], candidates=[c]))[0]
+        assert r["前瞻股息率%"] == ""
+        assert r["前瞻状态"] == "no_positive_eps"
+
+    def test_forward_columns_blank_without_result(self):
+        """历史/未算（forward=None）：三列全空，不虚构（#157）。"""
+        c = _candidate()
+        c.valuation_zone = "低估"
+        c.verdict = "可持续"
+        r = build_output_rows(FunnelResult(stage_counts=[1, 1, 1, 1], candidates=[c]))[0]
+        assert r["前瞻股息率%"] == ""
+        assert r["前瞻财年"] == ""
+        assert r["前瞻状态"] == ""
+
     def test_empty_result(self):
         assert build_output_rows(FunnelResult(stage_counts=[0, 0, 0, 0], candidates=[])) == []
 
@@ -444,13 +492,16 @@ class TestDefaults:
         assert DEFAULT_PR_ZONE == ("合理偏低", "低估")
         assert DEFAULT_SUS_VERDICT == ("可持续", "偏弱")
 
-    def test_fields_contract_14_columns(self):
+    def test_fields_contract_17_columns(self):
         # #30 追加两列（分红CAGR% / 分红趋势）在末尾，既有 12 列顺序不变
         # 2026-11-24 改名：股息CAGR%/股息趋势 → 分红CAGR%/分红趋势（现金分红 ≠ 股息率）
-        assert len(FIELDS) == 14
+        # #157 追加三列（前瞻股息率% / 前瞻财年 / 前瞻状态）紧跟真实股息率%
+        assert len(FIELDS) == 17
         assert FIELDS[-2:] == ["分红CAGR%", "分红趋势"]
         assert FIELDS[0] == "代码"
         assert "行业" in FIELDS
+        i = FIELDS.index("真实股息率%")
+        assert FIELDS[i + 1:i + 4] == ["前瞻股息率%", "前瞻财年", "前瞻状态"]
         # TSR 列插在 ROE% 之后、总市值(亿) 之前（Q7-A：双端同序）
         assert FIELDS.index("股东总回报率%") == FIELDS.index("ROE%") + 1
         assert FIELDS[FIELDS.index("股东总回报率%") + 1] == "总市值(亿)"

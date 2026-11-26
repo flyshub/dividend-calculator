@@ -67,11 +67,15 @@ def run_screener(
     sus_verdict: List[str] = DEFAULT_SUS_VERDICT,
     refresh_quotes: bool = True,
     limit: int = 0,
+    with_forward: bool = True,
+    forward_evaluator=None,
 ) -> FunnelResult:
     """四级漏斗主流程（编排 + 数据获取），判定语义集中在 src.screening.run_funnel。
 
     数据获取：股票列表 → 行情快照（腾讯批量）→ 缓存股息/财务快照；
     判定、降级回退、输出整形由选股漏斗 module 完成（ADR-0001）。
+    漏斗结束后逐只填充前瞻股息率（#157，仅展示、不进判据）；`forward_evaluator`
+    可注入（测试/离线），`with_forward=False` 跳过（CLI `--no-forward`）。
     """
     codes = _load_stock_list(cache)
     if limit:
@@ -122,6 +126,22 @@ def run_screener(
         print(f"漏斗② 降级: {result.fallback_count} 只用存储旧值"
               + (f"（{detail}）" if detail else "")
               + f"，其中 {result.fallback_passed} 只入选", file=sys.stderr)
+
+    # 前瞻股息率 enrichment（#157）：只对幸存行取一次一致预期，不进漏斗判定
+    if with_forward and result.candidates:
+        if forward_evaluator is None:
+            from src.screener_forward import make_forward_evaluator
+            forward_evaluator = make_forward_evaluator(cache)
+        status_counts = {}
+        for c in result.candidates:
+            c.forward = forward_evaluator(c)
+            status = c.forward.forward_status or "unknown"
+            status_counts[status] = status_counts.get(status, 0) + 1
+        ok = status_counts.pop("ok", 0)
+        fwd_detail = "、".join(f"{k} {v} 只" for k, v in
+                              sorted(status_counts.items(), key=lambda kv: -kv[1]))
+        print(f"前瞻股息率: {ok}/{len(result.candidates)} 可估"
+              + (f"（不可估: {fwd_detail}）" if fwd_detail else ""), file=sys.stderr)
     return result
 
 
@@ -177,6 +197,8 @@ def main():
     parser.add_argument("--refresh", choices=["quotes", "dividend", "all", "none"],
                         default="quotes", help="增量刷新范围（默认仅行情）")
     parser.add_argument("--limit", type=int, default=0, help="调试：只扫前 N 只")
+    parser.add_argument("--no-forward", action="store_true",
+                        help="跳过前瞻股息率估算（离线调试用；默认对入选行逐只取一致预期）")
     args = parser.parse_args()
 
     cache = ScreenerCache()
@@ -188,6 +210,7 @@ def main():
         sus_verdict=tuple(args.sus_verdict),
         refresh_quotes=args.refresh in ("quotes", "all"),
         limit=args.limit,
+        with_forward=not args.no_forward,
     )
     rows = build_output_rows(result)
     write_csv(rows, args.output)
