@@ -10,6 +10,7 @@
 import io
 import sys
 from contextlib import redirect_stdout
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -56,7 +57,10 @@ class TestRunScreener:
         mock_fetch.side_effect = fake_fetch
         # 可持续性评估注入：全通过（判定语义由 test_screening.py 覆盖）
         mock_sus.return_value = lambda candidate: "可持续"
-        result = run_screener(cache, min_ttm=5.0, min_real=5.0)
+        result = run_screener(
+            cache, min_ttm=5.0, min_real=5.0,
+            forward_evaluator=lambda c: SimpleNamespace(
+                forward_status="ok", forward_year=2026, forward_yield_before_tax=4.0))
         assert mock_sus.called, "make_sustainability_evaluator 应被调用"
         # 漏斗② 拒掉 600919（低股息），应剩 2 只
         codes = {c.code for c in result.candidates}
@@ -148,14 +152,18 @@ class TestRunScreener:
             cache.get_quote(c) for c in codes if cache.get_quote(c) is not None]
         mock_sus.return_value = lambda candidate: "可持续"
 
-        ev = make_forward_evaluator(cache, forecast_fetcher=lambda code: forecast_factory())
+        ev = make_forward_evaluator(
+            cache, forecast_fetcher=lambda code: forecast_factory(),
+            # 600987 无快照 → 本测试把按需补拉模拟成取数失败，避免触网
+            dividend_fetcher=lambda code: (None if code == "600987" else []),
+            financial_fetcher=lambda code: [])
         result = run_screener(cache, forward_evaluator=ev)
         rows = {r["代码"]: r for r in build_output_rows(result)}
 
         assert rows["600900"]["前瞻状态"] == expected
         assert rows["600900"]["前瞻股息率%"] == ""
         assert rows["600900"]["前瞻财年"] == 2026
-        assert rows["600987"]["前瞻状态"] == "missing_inputs"
+        assert rows["600987"]["前瞻状态"] == "fetch_error", "补拉失败走取数失败，不误报缺失"
         assert rows["600987"]["前瞻股息率%"] == ""
 
     @patch("src.screener._load_stock_list", return_value=["600900", "600987"])

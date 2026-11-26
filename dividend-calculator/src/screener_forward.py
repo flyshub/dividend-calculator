@@ -1,13 +1,13 @@
 """选股器前瞻股息率 enrichment（#157）。
 
 漏斗③/④ 幸存行在编排层末尾逐只估算「下一财年前瞻股息率」：
-- 分红明细 / 财务行取自可持续性缓存快照（`cached_snapshot_inputs`），零网络；
-  快照缺失 → `missing_inputs`（不按需补拉，避免拖慢每日任务与掩盖数据缺口）
-- 只对东财一致预期发一次请求（每只 1 次），取数失败 → `fetch_error`
+- 分红明细 / 财务行优先取可持续性缓存快照（`cached_snapshot_inputs`），命中零网络；
+  未命中（如当日行情新进漏斗、快照还没预拉）按需补拉这两类数据，与主页面同源同口径
+- 东财一致预期每只 1 次请求；任一取数失败 → `fetch_error`
 - 现价 / 总股本取自行情快照；财年由分红快照的最新完整财年推导（L+1）
 
 本模块不进漏斗判定、不排序：结果只随 CSV/JSON 输出，供选股页展示。
-单只失败隔离与整批护栏见 #159（本阶段先保证正常路径与既有降级语义）。
+单只失败隔离与整批护栏见 #159。
 """
 from typing import Callable, Optional
 
@@ -22,7 +22,9 @@ from src.forward_yield import (
     STATUS_STALE,
     ForwardYieldResult,
     estimate_forward_yield,
+    fetch_dividend_rows,
     fetch_earnings_forecast,
+    fetch_financial_rows,
 )
 from src.screening import FunnelCandidate
 from src.screener_cache import ScreenerCache
@@ -98,20 +100,18 @@ def make_forward_evaluator(
     cache: ScreenerCache,
     *,
     forecast_fetcher: Callable[[str], Optional[list]] = fetch_earnings_forecast,
+    dividend_fetcher: Callable[[str], Optional[list]] = fetch_dividend_rows,
+    financial_fetcher: Callable[[str], Optional[list]] = fetch_financial_rows,
 ) -> Callable[[FunnelCandidate], ForwardYieldResult]:
-    """构造前瞻评估器（编排层注入；测试可替换预测取数）。"""
+    """构造前瞻评估器（编排层注入；测试可替换三类取数）。
+
+    分红/财务行命中可持续性快照时零网络；未命中时由 estimate_forward_yield
+    按需补拉（与主页面同一取数路径与口径），取数失败降级为 fetch_error。
+    """
 
     def evaluate(candidate: FunnelCandidate) -> ForwardYieldResult:
         latest_year = candidate.dividend.real_yield_year if candidate.dividend else None
         inputs = cached_snapshot_inputs(cache, candidate.code) or {}
-        dividend_rows = inputs.get("dividend_rows")
-        financial_rows = inputs.get("financial_rows")
-        if dividend_rows is None or financial_rows is None:
-            return ForwardYieldResult(
-                forward_status=STATUS_MISSING_INPUTS,
-                forward_year=_next_year(latest_year),
-                forward_note="缺少分红/财务快照，不做前瞻",
-            )
 
         q = candidate.quote
         fin = candidate.finance
@@ -122,11 +122,13 @@ def make_forward_evaluator(
             stock_code=candidate.code,
             price=q.price if q else None,
             total_shares=q.total_shares if q else None,
-            dividend_rows=dividend_rows,
-            financial_rows=financial_rows,
+            dividend_rows=inputs.get("dividend_rows"),
+            financial_rows=inputs.get("financial_rows"),
             forecast_rows=None,
             is_cyclical=bool(fin.is_cyclical) if fin else False,
             trailing_yield=trailing,
+            dividend_fetcher=dividend_fetcher,
+            financial_fetcher=financial_fetcher,
             forecast_fetcher=forecast_fetcher,
         )
         if res.forward_year is None and res.forward_status in _YEAR_KNOWN_STATUSES:

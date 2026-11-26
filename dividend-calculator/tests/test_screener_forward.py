@@ -79,16 +79,15 @@ def cache(tmp_path):
     return ScreenerCache(tmp_path / "s.db")
 
 
-@pytest.fixture(autouse=True)
-def no_network(monkeypatch):
-    """兜底：任何按需补拉都视为缺陷（快照缺失应走 missing_inputs）。"""
-    import src.forward_yield as fy
+def _boom(*a, **kw):
+    raise AssertionError("快照命中时不得按需补拉分红/财务")
 
-    def boom(*a, **kw):
-        raise AssertionError("前瞻 enrichment 不得按需补拉分红/财务")
 
-    monkeypatch.setattr(fy, "fetch_dividend_rows", boom)
-    monkeypatch.setattr(fy, "fetch_financial_rows", boom)
+def _make_eval(cache, **kw):
+    """默认断言「不补拉」；需要补拉的用例显式传入 fetcher。"""
+    kw.setdefault("dividend_fetcher", _boom)
+    kw.setdefault("financial_fetcher", _boom)
+    return make_forward_evaluator(cache, **kw)
 
 
 class TestForwardEvaluator:
@@ -100,7 +99,7 @@ class TestForwardEvaluator:
             calls.append(code)
             return _forecast()
 
-        ev = make_forward_evaluator(cache, forecast_fetcher=fake_forecast)
+        ev = _make_eval(cache, forecast_fetcher=fake_forecast)
         r = ev(_candidate())
 
         assert r.forward_status == "ok"
@@ -110,7 +109,7 @@ class TestForwardEvaluator:
 
     def test_no_coverage(self, cache):
         _seed_snapshot(cache)
-        ev = make_forward_evaluator(cache, forecast_fetcher=lambda code: [])
+        ev = _make_eval(cache, forecast_fetcher=lambda code: [])
         r = ev(_candidate())
         assert r.forward_status == "no_coverage"
         assert r.forward_year == 2026
@@ -118,25 +117,53 @@ class TestForwardEvaluator:
 
     def test_fetch_error(self, cache):
         _seed_snapshot(cache)
-        ev = make_forward_evaluator(cache, forecast_fetcher=lambda code: None)
+        ev = _make_eval(cache, forecast_fetcher=lambda code: None)
         r = ev(_candidate())
         assert r.forward_status == "fetch_error"
         assert r.forward_yield_before_tax is None
 
-    def test_missing_snapshot_does_not_fetch(self, cache):
-        """无可持续性快照 → missing_inputs，且不补拉、不请求预测。"""
-        calls = []
+    def test_snapshot_miss_fetches_on_demand(self, cache):
+        """无可持续性快照（当日新进漏斗的高股息股）→ 按需补拉分红/财务，照常估算。
+
+        回归 #160：600211 快照未预拉（库内 real_yield 4.48 < 5 未入选预拉名单），
+        但当日行情新进漏斗、主页面能算 → 选股页不能因缺快照就判「缺失」。
+        """
+        div_calls, fin_calls = [], []
+
+        def fake_div(code):
+            div_calls.append(code)
+            return _div_rows()
+
+        def fake_fin(code):
+            fin_calls.append(code)
+            return _fin_rows()
+
         ev = make_forward_evaluator(
-            cache, forecast_fetcher=lambda code: calls.append(code) or _forecast())
+            cache, forecast_fetcher=lambda code: _forecast(),
+            dividend_fetcher=fake_div, financial_fetcher=fake_fin)
         r = ev(_candidate())
-        assert r.forward_status == "missing_inputs"
-        assert r.forward_year == 2026, "财年可由股息快照确定，仍保留"
-        assert r.forward_yield_before_tax is None
-        assert calls == []
+
+        assert r.forward_status == "ok"
+        assert r.forward_year == 2026
+        assert r.forward_yield_before_tax == pytest.approx(4.95)
+        assert div_calls == ["600900"] and fin_calls == ["600900"]
+
+    def test_snapshot_miss_and_dividend_fetch_fails(self, cache):
+        """按需补拉失败 → fetch_error（带财年），不发预测请求。"""
+        forecast_calls = []
+        ev = make_forward_evaluator(
+            cache,
+            forecast_fetcher=lambda code: forecast_calls.append(code) or _forecast(),
+            dividend_fetcher=lambda code: None,
+            financial_fetcher=_boom)
+        r = ev(_candidate())
+        assert r.forward_status == "fetch_error"
+        assert r.forward_year == 2026
+        assert forecast_calls == []
 
     def test_missing_price(self, cache):
         _seed_snapshot(cache)
-        ev = make_forward_evaluator(cache, forecast_fetcher=lambda code: _forecast())
+        ev = _make_eval(cache, forecast_fetcher=lambda code: _forecast())
         r = ev(_candidate(price=None))
         assert r.forward_status == "missing_inputs"
         assert r.forward_yield_before_tax is None
