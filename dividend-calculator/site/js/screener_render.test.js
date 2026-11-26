@@ -150,6 +150,8 @@ test('forwardCell 可估行：两位小数 + 财年与口径提示', () => {
   assert.ok(html.includes('模型估算'), '悬停标注模型估算');
   assert.ok(html.includes('税前'));
   assert.ok(html.includes('非公司公告'));
+  assert.ok(!html.includes('市场：') && !html.includes('数据缺口：'),
+    'ok 行有数值，悬停只给财年与口径，不写原因');
 });
 
 test('forwardCell 不可估/历史行显示 —，不渲染 NaN/undefined', () => {
@@ -157,7 +159,7 @@ test('forwardCell 不可估/历史行显示 —，不渲染 NaN/undefined', () =
   assert.ok(blank.includes('—'));
   assert.ok(!blank.includes('NaN') && !blank.includes('undefined'));
   assert.ok(blank.includes('<td class="num"'), '占位符保持数值列样式');
-  assert.ok(blank.includes('title="前瞻财年 2026；不可估；'), '不可估行仍给出财年与口径');
+  assert.ok(blank.includes('title="前瞻财年 2026；市场：无机构盈利预测；'), '不可估行给出财年、原因与口径');
   const legacy = R.forwardCell({});   // 历史按日 JSON 无前瞻 key
   assert.ok(legacy.includes('—'));
   assert.ok(!legacy.includes('title='), '无值时不给误导性提示');
@@ -167,6 +169,40 @@ test('forwardCell 财年与提示经转义（XSS）', () => {
   const html = R.forwardCell({ '前瞻股息率%': 5.0, '前瞻财年': '" onmouseover="alert(1)' });
   assert.ok(!html.includes('onmouseover="alert'));
   assert.ok(html.includes('&quot;'));
+});
+
+/* #158 不可估原因：九状态全映射，市场事实与数据缺口可区分，不泄漏英文枚举 */
+const FORWARD_REASONS = [
+  ['no_coverage', '市场：无机构盈利预测'],
+  ['no_positive_eps', '市场：机构预测亏损'],
+  ['no_target_year', '市场：无目标财年预测'],
+  ['no_complete_year', '市场：近年无完整财年分红'],
+  ['stale', '市场：近年无分红'],
+  ['fetch_error', '数据缺口：前瞻取数失败'],
+  ['missing_inputs', '数据缺口：缺少分红/财务快照'],
+  ['no_payout_history', '数据缺口：无可用分红历史'],
+];
+
+for (const [status, text] of FORWARD_REASONS) {
+  test('forwardCell 状态 ' + status + ' 的悬停原因', () => {
+    const html = R.forwardCell({ '前瞻股息率%': '', '前瞻财年': 2026, '前瞻状态': status });
+    assert.ok(html.includes('—'), '数值列显示占位符');
+    assert.ok(html.includes(text), '含中文原因：' + text);
+    assert.ok(!html.includes(status), '不泄漏英文枚举');
+    assert.ok(html.includes('前瞻财年 2026'), '仍给出目标财年');
+    if (text.startsWith('市场：')) {
+      assert.ok(!html.includes('数据缺口'), '市场事实不写成数据缺口');
+    } else {
+      assert.ok(!html.includes('市场：'), '数据缺口不写成市场事实');
+    }
+  });
+}
+
+test('forwardCell 未知状态不渲染未映射枚举', () => {
+  const html = R.forwardCell({ '前瞻股息率%': '', '前瞻状态': 'some_future_status' });
+  assert.ok(html.includes('—'));
+  assert.ok(!html.includes('some_future_status'));
+  assert.ok(!html.includes('title='), '无法解释时宁可不给提示');
 });
 
 test('rowHtml 前瞻列紧跟真实股息率（第 4 列）', () => {

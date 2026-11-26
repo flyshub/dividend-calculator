@@ -80,17 +80,37 @@
     return '<td class="num"><span style="color:' + color + '">' + esc(trend) + pct + '</span></td>';
   }
 
+  /* #158 不可估原因文案（九状态全覆盖，市场事实 vs 数据缺口分开）：
+   * 市场事实 = 公司/市场层面真的没有预测或没有分红；数据缺口 = 我们这边缺数据，
+   * 不能读成「没有机构看好」。未知状态返回空串（宁可不解释，也不泄漏英文枚举）。 */
+  var FORWARD_REASONS = {
+    no_coverage: '市场：无机构盈利预测',
+    no_positive_eps: '市场：机构预测亏损',
+    no_target_year: '市场：无目标财年预测',
+    no_complete_year: '市场：近年无完整财年分红',
+    stale: '市场：近年无分红',
+    fetch_error: '数据缺口：前瞻取数失败',
+    missing_inputs: '数据缺口：缺少分红/财务快照',
+    no_payout_history: '数据缺口：无可用分红历史',
+  };
+
+  function forwardReason(status) {
+    return FORWARD_REASONS[status] || '';
+  }
+
   /* #157 前瞻股息率列：数字 + 目标财年/口径提示（仅展示，不参与漏斗判据）。
    * 口径 = 下一财年一致预期 EPS × 近 3 年支付率中位数 ÷ 现价（税前，模型估算）。
-   * 不可估（状态见 CSV「前瞻状态」）与历史 JSON 无该列 → —，不填 0（数据铁律）。
-   * 不可估原因文案见 #158。 */
+   * 不可估与历史 JSON 无该列 → —，不填 0（数据铁律）。 */
   function forwardCell(r) {
     var y = fmtNum(r['前瞻股息率%'], 2);
     var year = r['前瞻财年'];
+    var reason = forwardReason(r['前瞻状态']);
     var basis = '模型估算，税前，非公司公告';
     if (!y) {
       if (year == null || year === '') return '<td class="num">—</td>';
-      return '<td class="num" title="' + esc('前瞻财年 ' + year + '；不可估；' + basis) + '">—</td>';
+      if (!reason) return '<td class="num">—</td>';
+      return '<td class="num" title="' +
+        esc('前瞻财年 ' + year + '；' + reason + '；' + basis) + '">—</td>';
     }
     var tip = (year ? '前瞻财年 ' + year + '；' : '') + basis;
     return '<td class="num" title="' + esc(tip) + '">' + y + '</td>';
@@ -115,5 +135,5 @@
       '<td>' + esc(r['数据来源']) + '</td>';
   }
 
-  return { esc: esc, fmtNum: fmtNum, zoneBadge: zoneBadge, susBadge: susBadge, noteBadge: noteBadge, prNote: prNote, susNote: susNote, tsrNote: tsrNote, divTrendCell: divTrendCell, forwardCell: forwardCell, rowHtml: rowHtml };
+  return { esc: esc, fmtNum: fmtNum, zoneBadge: zoneBadge, susBadge: susBadge, noteBadge: noteBadge, prNote: prNote, susNote: susNote, tsrNote: tsrNote, divTrendCell: divTrendCell, forwardReason: forwardReason, forwardCell: forwardCell, rowHtml: rowHtml };
 }));

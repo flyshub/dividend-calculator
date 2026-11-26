@@ -190,7 +190,7 @@
         <li><strong>市赚率估值 ∈ 低估 / 合理偏低</strong>：PR ≤ <span data-policy="fair_low" data-format="one-decimal">1.0</span>（≤<span data-policy="undervalued">0.5</span> 低估、<span data-policy="undervalued">0.5</span>–<span data-policy="fair_low" data-format="one-decimal">1.0</span> 合理偏低；历史回测 PR≤<span data-policy="fair_low" data-format="int">1</span> 有超额收益）</li>
         <li><strong>股息可持续性 ∈ 可持续 / 偏弱</strong>：排除「不可持续」（分红与盈利/现金流明显不匹配，或存在致命红旗）</li>
       </ol>
-      <p>「前瞻股息率%」= 下一财年机构一致预期 EPS × 近 3 年支付率中位数 ÷ 现价（税前，模型估算，非公司公告）。仅作参考，<strong>不参与筛选</strong>；不可估时显示「—」，悬停可看财年与口径。</p>
+      <p>「前瞻股息率%」= 下一财年机构一致预期 EPS × 近 3 年支付率中位数 ÷ 现价（税前，模型估算，非公司公告）。仅作参考，<strong>不参与筛选</strong>；不可估时显示「—」，悬停可看原因（市场事实或数据缺口）、目标财年与口径。</p>
     </div>
 
     <div class="result-card">
@@ -221,7 +221,7 @@
   </main>
 
   <script src="js/policy.js?v=20261124-5"></script>
-  <script src="js/screener_render.js?v=20261126-1"></script>
+  <script src="js/screener_render.js?v=20261126-2"></script>
   <script>
     // 仿 datasources.js 的 jsonFetch 模式（同源 fetch JSON）
     function jsonFetch(url) {

@@ -158,6 +158,73 @@ class TestRunScreener:
         assert rows["600987"]["前瞻状态"] == "missing_inputs"
         assert rows["600987"]["前瞻股息率%"] == ""
 
+    @patch("src.screener._load_stock_list", return_value=["600900", "600987"])
+    @patch("src.screener_quotes.fetch_all_quotes")
+    @patch("src.screener_sustainability.make_sustainability_evaluator")
+    def test_single_forward_failure_isolated(self, mock_sus, mock_fetch, mock_list, tmp_path, capsys):
+        """#159：单只评估器抛异常 → 该行 fetch_error，其余行正常，进程不中断。"""
+        from types import SimpleNamespace
+        from src.screening import build_output_rows
+
+        cache = ScreenerCache(tmp_path / "s.db")
+        _seed_cache(cache)
+        mock_fetch.side_effect = lambda codes, cache=None: [
+            cache.get_quote(c) for c in codes if cache.get_quote(c) is not None]
+        mock_sus.return_value = lambda candidate: "可持续"
+
+        def flaky(candidate):
+            if candidate.code == "600900":
+                raise RuntimeError("快照 JSON 损坏")
+            return SimpleNamespace(forward_status="ok", forward_year=2026,
+                                   forward_yield_before_tax=4.5)
+
+        result = run_screener(cache, forward_evaluator=flaky)
+        rows = {r["代码"]: r for r in build_output_rows(result)}
+        assert rows["600900"]["前瞻状态"] == "fetch_error"
+        assert rows["600900"]["前瞻股息率%"] == ""
+        assert rows["600900"]["前瞻财年"] == 2026
+        assert rows["600987"]["前瞻状态"] == "ok"
+        assert "前瞻股息率: 1/2 可估" in capsys.readouterr().err
+
+    @patch("src.screener._load_stock_list", return_value=[f"{600000 + i}" for i in range(12)])
+    @patch("src.screener_quotes.fetch_all_quotes")
+    @patch("src.screener_sustainability.make_sustainability_evaluator")
+    def test_batch_failure_guard_clears_column_and_warns(self, mock_sus, mock_fetch,
+                                                         mock_list, tmp_path, capsys):
+        """#159：发起请求 ≥10 行且失败率 >50% → 整列留空 + ::warning::，CSV 照常产出。"""
+        from types import SimpleNamespace
+        from src.screening import build_output_rows
+
+        cache = ScreenerCache(tmp_path / "s.db")
+        for i in range(12):
+            code = f"{600000 + i}"
+            cache.upsert_quote(QuoteSnapshot(code=code, name="测试", price=10, pe_ttm=8.0,
+                                             pb=1.0, total_shares=1e9, market_cap=1e10,
+                                             quote_time="", source="腾讯"))
+            cache.upsert_finance(FinanceSnapshot(code=code, roe_latest=16.0,
+                                                 roe_period="2025年报", net_profit_annual=1e9,
+                                                 payout_ratio=0.5, finance_source="东财"))
+            cache.upsert_dividend(DividendSnapshot(
+                code=code, real_yield=6.0, ttm_yield=6.5, real_yield_year="2025",
+                ttm_period="p", total_dividend=6e8, ttm_dividend=6.5e8,
+                dividend_source="mootdx"))
+        mock_fetch.side_effect = lambda codes, cache=None: [
+            cache.get_quote(c) for c in codes if cache.get_quote(c) is not None]
+        mock_sus.return_value = lambda candidate: "可持续"
+
+        def mostly_failing(candidate):
+            status = "fetch_error" if int(candidate.code) < 600007 else "ok"
+            return SimpleNamespace(
+                forward_status=status, forward_year=2026,
+                forward_yield_before_tax=5.0 if status == "ok" else None)
+
+        result = run_screener(cache, forward_evaluator=mostly_failing)
+        rows = build_output_rows(result)
+        assert len(rows) == 12, "CSV 行照常产出"
+        assert all(r["前瞻股息率%"] == "" and r["前瞻状态"] == "" for r in rows), \
+            "护栏触发后三列全部留空"
+        assert "::warning::" in capsys.readouterr().out
+
     @patch("src.screener._load_stock_list", return_value=["600900"])
     @patch("src.screener_quotes.fetch_all_quotes")
     @patch("src.screener_sustainability.make_sustainability_evaluator")

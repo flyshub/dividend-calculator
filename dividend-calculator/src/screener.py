@@ -127,21 +127,35 @@ def run_screener(
               + (f"（{detail}）" if detail else "")
               + f"，其中 {result.fallback_passed} 只入选", file=sys.stderr)
 
-    # 前瞻股息率 enrichment（#157）：只对幸存行取一次一致预期，不进漏斗判定
+    # 前瞻股息率 enrichment（#157）：只对幸存行取一次一致预期，不进漏斗判定。
+    # #159：单只异常隔离（safe_evaluate）+ 整批失败护栏（失败率 >50% → 三列留空 + 告警）
     if with_forward and result.candidates:
+        from src.screener_forward import (
+            FORWARD_GUARD_FAILURE_RATIO,
+            apply_forward_guard,
+            make_forward_evaluator,
+            safe_evaluate,
+        )
         if forward_evaluator is None:
-            from src.screener_forward import make_forward_evaluator
             forward_evaluator = make_forward_evaluator(cache)
         status_counts = {}
         for c in result.candidates:
-            c.forward = forward_evaluator(c)
+            c.forward = safe_evaluate(forward_evaluator, c)
             status = c.forward.forward_status or "unknown"
             status_counts[status] = status_counts.get(status, 0) + 1
+        guard = apply_forward_guard(result.candidates)
         ok = status_counts.pop("ok", 0)
-        fwd_detail = "、".join(f"{k} {v} 只" for k, v in
-                              sorted(status_counts.items(), key=lambda kv: -kv[1]))
+        if guard["tripped"]:
+            ok = 0
+            fwd_detail = f"护栏触发：取数失败 {guard['failed']}/{guard['attempted']}"
+            print(f"::warning::前瞻股息率取数失败 {guard['failed']}/{guard['attempted']} 只"
+                  f"（>{int(FORWARD_GUARD_FAILURE_RATIO * 100)}%），判定为数据源故障，"
+                  f"本日三列留空；选股结果照常产出", file=sys.stdout)
+        else:
+            fwd_detail = "、".join(f"{k} {v} 只" for k, v in
+                                  sorted(status_counts.items(), key=lambda kv: -kv[1]))
         print(f"前瞻股息率: {ok}/{len(result.candidates)} 可估"
-              + (f"（不可估: {fwd_detail}）" if fwd_detail else ""), file=sys.stderr)
+              + (f"（{fwd_detail}）" if fwd_detail else ""), file=sys.stderr)
     return result
 
 

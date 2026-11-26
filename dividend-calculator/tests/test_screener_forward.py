@@ -5,6 +5,7 @@
 分红/财务行一律来自可持续性快照，缺快照 → missing_inputs（不按需补拉）。
 """
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -139,3 +140,61 @@ class TestForwardEvaluator:
         r = ev(_candidate(price=None))
         assert r.forward_status == "missing_inputs"
         assert r.forward_yield_before_tax is None
+
+
+class TestBatchGuard:
+    """#159 整批护栏：失败率 > 50%（且发起请求 ≥10 行）→ 判定数据源故障，整列留空。"""
+
+    def _cand(self, code, status):
+        c = _candidate(code)
+        c.forward = SimpleNamespace(
+            forward_status=status, forward_year=2026,
+            forward_yield_before_tax=5.0 if status == "ok" else None)
+        return c
+
+    def _cands(self, statuses):
+        return [self._cand(f"{600000 + i}", s) for i, s in enumerate(statuses)]
+
+    def test_trips_above_half_failure(self):
+        from src.screener_forward import apply_forward_guard
+        cands = self._cands(["fetch_error"] * 7 + ["ok"] * 5)
+        outcome = apply_forward_guard(cands)
+        assert outcome == {"attempted": 12, "failed": 7, "tripped": True}
+        assert all(c.forward is None for c in cands), "整列留空（含财年）"
+
+    def test_exactly_half_does_not_trip(self):
+        from src.screener_forward import apply_forward_guard
+        cands = self._cands(["fetch_error"] * 6 + ["ok"] * 6)
+        outcome = apply_forward_guard(cands)
+        assert outcome["tripped"] is False
+        assert all(c.forward is not None for c in cands)
+
+    def test_small_batch_never_trips(self):
+        """发起请求 <10 行：样本不足，逐行标注即可，不整列清空。"""
+        from src.screener_forward import apply_forward_guard
+        cands = self._cands(["fetch_error"] * 5)
+        assert apply_forward_guard(cands)["tripped"] is False
+        assert all(c.forward is not None for c in cands)
+
+    def test_market_facts_not_counted_as_failures(self):
+        from src.screener_forward import apply_forward_guard
+        cands = self._cands(["no_coverage"] * 7 + ["ok"] * 5)
+        outcome = apply_forward_guard(cands)
+        assert outcome == {"attempted": 12, "failed": 0, "tripped": False}
+
+    def test_missing_inputs_not_counted_as_attempted(self):
+        """快照缺失不发起请求，不计入分母（否则整批缺快照会被误判为数据源故障）。"""
+        from src.screener_forward import apply_forward_guard
+        cands = self._cands(["missing_inputs"] * 7 + ["ok"] * 5)
+        outcome = apply_forward_guard(cands)
+        assert outcome == {"attempted": 5, "failed": 0, "tripped": False}
+
+    def test_stale_counted_as_attempted(self):
+        """stale 的判定在一致预期取数之后，请求已发出 → 计入分母。
+
+        回归：若把 stale 排除，6 失败 / 6 stale 会被算成 100% 失败而误清整列。
+        """
+        from src.screener_forward import apply_forward_guard
+        cands = self._cands(["fetch_error"] * 6 + ["stale"] * 6)
+        outcome = apply_forward_guard(cands)
+        assert outcome == {"attempted": 12, "failed": 6, "tripped": False}
