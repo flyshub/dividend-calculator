@@ -10,7 +10,7 @@ from typing import Optional, List, Tuple
 
 import requests
 
-from .base import StockInfo, DividendDetail, DataSource
+from .base import StockInfo, DividendDetail
 from .tencent_source import TencentSource
 from ..utils import ensure_6digit
 

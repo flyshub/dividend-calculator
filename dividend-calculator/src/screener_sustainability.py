@@ -7,7 +7,6 @@
 """
 from typing import Callable, Optional
 
-import sys
 
 from src.screener_rate_limit import batch_wait
 from src.screener_cache import ScreenerCache, DividendSnapshot

@@ -9,9 +9,11 @@ from typing import Optional, Tuple
 # 行业关键词与判定来自 src/industry_policy.py（唯一来源，issue #149）。
 # 此处保留同名导入，兼容既有 `from src.pr_calculator import CYCLICAL_INDUSTRIES`。
 from src.industry_policy import (  # noqa: E402  （常量区后置导入，保持文件原结构）
-    CYCLICAL_INDUSTRIES,
-    GROWTH_INDUSTRIES,
-    TECH_INDUSTRIES,
+    CYCLICAL_INDUSTRIES,  # noqa: F401 — 对外再导出（历史调用点）
+    DEFENSIVE_INDUSTRIES,  # noqa: F401
+    FINANCE_INDUSTRIES,  # noqa: F401
+    GROWTH_INDUSTRIES,  # noqa: F401
+    TECH_INDUSTRIES,  # noqa: F401
     classify_pr_industry,
 )
 

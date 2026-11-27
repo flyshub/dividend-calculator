@@ -21,7 +21,7 @@ import sys
 import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))

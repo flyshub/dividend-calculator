@@ -1,11 +1,9 @@
 """SinaSource adapter 测试"""
-import pytest
 from unittest.mock import patch, MagicMock
 
 from src.datasource.sina_source import SinaSource, _get_price_from_sina
 from src.utils import ensure_6digit as _ensure_6digit
 from src.datasource.base import StockInfo
-from src.datasource.tencent_source import TencentSource
 
 
 class TestSinaSource:

@@ -95,7 +95,7 @@ class TestComputeDividends:
             calls.append(code)
             return _result(code=code)  # total_dividend=4e10
 
-        snaps = compute_dividends_for_candidates(
+        compute_dividends_for_candidates(
             ["600900"], cache, calc_provider=fake_calc)
         # 应重拉（provider 被调用），而非复用缓存
         assert calls == ["600900"]

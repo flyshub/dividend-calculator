@@ -34,7 +34,7 @@ from .sustainability_thresholds import (
     DIM_DEBT_RATIO,
     DIM_INTEREST_COVERAGE,
     DIM_CONSECUTIVE_YEARS,
-    CUT_WINDOW_YEARS,
+    CUT_WINDOW_YEARS,  # noqa: F401 — 对外再导出（测试/页面口径引用）
     skip_note,
     WEIGHTS,
     WARN_PAYOUT_OVER_100,
@@ -563,9 +563,6 @@ def check_warning_flags(latest: AnnualFinancial,
 # 历史教训：这里曾用 '电力行业'、JS 用 '电力'，导致「电力设备」在浏览器端被
 # 误判成防御性行业。词条与判定集中在 industry_policy，双端由校验脚本比对。
 from src.industry_policy import (  # noqa: E402
-    CYCLICAL_INDUSTRIES,
-    DEFENSIVE_INDUSTRIES,
-    FINANCE_INDUSTRIES,
     classify_sustainability_industry,
 )
 
@@ -716,12 +713,10 @@ def assess_sustainability(*,
 
     # Layer 2：分支评分（先算，供展示；红旗否决时也有维度分）
     dim_scores, score, missing_ratio = _score_by_branch(latest, history, metrics, is_bank, is_cyclical, is_defensive)
-    is_fallback = False
     # 银行走金融分支但专项全缺失时 _score_by_branch 内部已降级通用；此处补记 note/branch
     if is_bank and not any(k in dim_scores for k in ("capital_adequacy", "npl")):
         result.notes.append("银行专项指标（资本充足率/净息差/不良率）缺失，按通用指标评估")
         result.branch = "general-fallback"
-        is_fallback = True
         # T7：银行 fallback 时屏蔽资产负债表维度（银行天然 90%+，通用阈值必踩坑）
         dim_scores["balance_sheet"] = None
         score, missing_ratio = _weighted_score(dim_scores, WEIGHTS)

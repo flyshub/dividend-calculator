@@ -21,7 +21,7 @@ from __future__ import annotations
 import bisect
 import sqlite3
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Dict, List, Optional
 
 from src.backtest_factors import (

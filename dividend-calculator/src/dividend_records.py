@@ -37,7 +37,7 @@ from typing import List, Optional
 import pandas as pd
 
 from .datasource.base import DividendRecord
-from .sustainability import classify_fiscal_report, parse_dividend_rows
+from .sustainability import parse_dividend_rows
 
 _YEAR_RE = re.compile(r"(\d{4})")
 

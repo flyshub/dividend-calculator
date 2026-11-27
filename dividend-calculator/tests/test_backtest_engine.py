@@ -14,7 +14,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts.backtest_engine import (
-    BacktestLookup,
     build_day_after,
     funnel_layer,
     portfolio_return,
@@ -429,7 +428,6 @@ def test_delisted_stock_excluded_from_pool():
     # dead 在 2023-06-15 退市
     lk.delist = {"dead": date(2023, 6, 15)}
 
-    days = [date(2023, 3, 31), date(2023, 4, 3), date(2023, 6, 30)]
     res = run_backtest(lk, start=date(2023, 6, 1), end=date(2023, 6, 30))
     # 2023-06-30 调仓：dead 退市日 6-15 < 6-30，不应入选
     for pool_per_date in res["pools"].values():
@@ -668,9 +666,10 @@ def test_backtest_lookup_loads_l4_finance_fields(tmp_path, monkeypatch):
 
     import sys as _sys
     _sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-    from scripts.backtest_engine import BacktestLookup
 
-    lk = BacktestLookup(str(db))
+    from scripts.backtest_engine import BacktestLookup as _Lookup
+
+    lk = _Lookup(str(db))
     fin = lk.finance("X", date(2025, 12, 31))
     assert fin is not None
     # 5 个 L4 字段从 DB 加载（不再硬编码 None）

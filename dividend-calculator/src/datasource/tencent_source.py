@@ -9,7 +9,7 @@ from typing import Optional, List, Tuple
 
 from ..tencent_quote import fetch_tencent_quote
 from ..utils import ensure_6digit
-from .base import StockInfo, DividendDetail, DataSource
+from .base import StockInfo, DividendDetail
 from .mootdx_source import get_quotes_client
 
 logger = logging.getLogger(__name__)

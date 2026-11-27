@@ -52,7 +52,7 @@ class TestEastmoneyPrimary:
 
     def test_eastmoney_empty_returns_empty_without_fallback(self):
         """东财请求成功但真无分红（[]）→ 短路返回，不触发 mootdx"""
-        with patch(self.FETCH, return_value=[]) as fetch, \
+        with patch(self.FETCH, return_value=[]), \
              patch(self.CLIENT) as client:
             records, source = _get_all_dividend_records("600036")
         assert records == []

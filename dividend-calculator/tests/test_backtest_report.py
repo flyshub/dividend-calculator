@@ -1,11 +1,8 @@
 """T7 报告生成器测试（issue #90）。"""
-import os
 import sqlite3
 import sys
-from datetime import date
 from pathlib import Path
 
-import pytest
 
 _ROOT = Path(__file__).resolve().parent.parent
 _SCRIPTS = _ROOT / "scripts"
@@ -149,7 +146,6 @@ def test_report_volatility_unit_t13(tmp_path):
     assert "§3 组合绩效" in content
     # 波动列不能出现 "0.xx%" 形式的两位小数低量级（正确为 xx.xx%）
     # 抽取 §3 表格行，验证波动列格式为百分数（>= 1.00% 或 N/A）
-    import re
     # 找所有百分比单元格，确保没有 "0.0x%" 这种疑似单位错误的波动值
     # （测试数据固定收益，波动应显示为 0.00% 或明确百分数量级）
     assert "0.11%" not in content  # 旧 bug 的典型输出

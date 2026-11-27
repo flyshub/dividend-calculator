@@ -8,7 +8,6 @@
 先例：tests/test_screener_*.py（各层）、tests/test_web.py（CLI 冒烟）。
 """
 import io
-import sys
 from contextlib import redirect_stdout
 from types import SimpleNamespace
 from unittest.mock import patch

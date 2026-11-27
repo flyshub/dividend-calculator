@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """T5 组合构建与绩效评估测试（issue #88）"""
-import math
 import os
 import sqlite3
 import sys
@@ -19,9 +18,7 @@ from backtest_portfolio import (
     performance_metrics,
     max_drawdown,
     sharpe,
-    sortino,
     downside_risk,
-    calmar,
     win_rate,
     cum,
     annualized,

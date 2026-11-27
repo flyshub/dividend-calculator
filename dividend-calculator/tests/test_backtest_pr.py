@@ -15,7 +15,6 @@
 先例：tests/test_pr_calculator.py（纯函数 + 边界值）、tests/test_dividend.py。
 """
 import importlib.util
-import sys
 from pathlib import Path
 
 import pandas as pd

@@ -47,7 +47,6 @@ def probe_tencent_kline():
     for c in SAMPLE[:2]:
         prefix = "sh" if c.startswith("6") else "sz"
         total = 0
-        start, end = "2013-01-01", "2018-12-31"
         for s, e in [("2013-01-01", "2018-12-31"), ("2019-01-01", "2026-08-10")]:
             url = (f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
                    f"?param={prefix}{c},day,{s},{e},2000,")

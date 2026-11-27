@@ -80,7 +80,7 @@ def main() -> int:
     if not codes:
         codes = SAMPLE
 
-    print(f"双源 TTM 分红对比（滚动 365 天, 基准 2026-08-10, 每10股）\n")
+    print("双源 TTM 分红对比（滚动 365 天, 基准 2026-08-10, 每10股）\n")
     mismatches = 0
     for code in codes:
         try:

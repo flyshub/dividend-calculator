@@ -9,7 +9,7 @@ import sys
 from typing import Callable, List, Optional, Tuple
 
 from src.screener_cache import FinanceSnapshot, ScreenerCache
-from src.screener_fetch import (
+from src.screener_fetch import (  # noqa: F401 — effective_mass_failure_min 对外再导出
     DEFAULT_MAX_CONSECUTIVE_FAILURES,
     MIN_MASS_FAILURE_MIN,
     FetchPolicy,

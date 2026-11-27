@@ -215,10 +215,10 @@ def compute_python(raw: dict) -> dict:
     #    换算 total_div/year/details/explanation（旧 _parse_fhps_detail 已删除，#100）。
     summary = summarize_dividend_rows(raw["dividend_rows"], source="东财")
     if summary.latest_year and summary.fiscal_total_per_10 > 0:
-        total_div, year, details, expl = _summary_to_dividend(summary, stock_info)
+        total_div, year, _details, expl = _summary_to_dividend(summary, stock_info)
     else:
         # 无完整财年（无年报）→ 与 JS parseDividendRecords 一致：year=None、总额 0、不回退
-        total_div, year, details, expl = 0.0, None, [], "无有效分红数据"
+        total_div, year, _details, expl = 0.0, None, [], "无有效分红数据"
 
     # 1b. TTM 口径（#19）：summary.ttm_total_per_10（与 utils.compute_ttm_dividend 同窗口，
     #     已由 test_ttm_matches_compute_ttm_dividend 证明等价）；period 用窗口边界
@@ -299,7 +299,6 @@ def compute_python(raw: dict) -> dict:
     # JS 端 app.js 仅在 yields[0] > 0 时调用 assessSustainability；阈值门控在
     # assessSustainability 内部（#28），故 yield ≤ 阈值时返回「未评估」轻量结果。
     from src.sustainability import parse_dividend_rows, assess_for_stock
-    from src.sustainability_thresholds import THRESHOLD_YIELD
     sus = None
     sus_triggered = None
     sus_verdict = None

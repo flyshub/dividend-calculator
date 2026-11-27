@@ -8,9 +8,8 @@
 差异来自**输入信号不同**（除权日 vs 报告期），非规则本身。本文件固化
 「正常场景一致」+「已知不一致场景」，防止未来被静默破坏。
 """
-import pytest
 
-from src.utils import infer_fiscal_year, FiscalYear
+from src.utils import infer_fiscal_year
 from src.sustainability import parse_dividend_rows
 
 

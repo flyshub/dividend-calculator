@@ -15,7 +15,15 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
+    "ruff>=0.6",
 ]
+
+[tool.ruff]
+# 只上「真错误」类规则（pyflakes + 语法错误），不上格式/风格类：
+# 全量规则当前有 1200+ 项历史噪音，会淹没真问题。
+# 对外再导出的名字用 `# noqa: F401` 显式标注（见 pr.py / screener_finance.py）。
+[tool.ruff.lint]
+select = ["F", "E9"]
 
 [project.scripts]
 dividend = "src.main:dividend"

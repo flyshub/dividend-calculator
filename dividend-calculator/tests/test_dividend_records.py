@@ -12,7 +12,7 @@ import pytest
 from src.datasource.base import DividendRecord
 from src.sustainability import parse_dividend_rows
 from src.utils import compute_ttm_dividend
-from src.dividend_records import DividendSummary, summarize_dividend_rows
+from src.dividend_records import summarize_dividend_rows
 
 pytestmark = pytest.mark.unit  # 无网络，CI 必跑
 
@@ -339,8 +339,6 @@ def test_apply_dividend_fixes_empty_table(monkeypatch):
 
 def test_dividend_fixes_file_loadable_and_verified():
     """修正表 JSON 可加载：每条修正含必需字段（数据铁律：修正可追溯）。"""
-    import json
-    from pathlib import Path
     from src.eastmoney_fetcher import _load_dividend_fixes
 
     fixes = _load_dividend_fixes()
@@ -412,9 +410,10 @@ def test_summary_to_dividend_excludes_pure_transfer():
     与 JS parseDividendRecords 的 explanation 逐字一致（双端口径）。"""
     from src.datasource.base import StockInfo
     from src.dividend import _summary_to_dividend
-    from src.dividend_records import DividendSummary
 
-    summary = DividendSummary(
+    from src.dividend_records import DividendSummary as _DividendSummary
+
+    summary = _DividendSummary(
         records=[
             DividendRecord(ex_dividend_date="2022-06-10", dividend_per_10=5.0,
                            report_time="2021年报", total_shares=2.0e8),

@@ -2,7 +2,27 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
 const R = require('./screener_render.js');
+
+/* 从 docs/FORWARD_YIELD.md §5.1 解析「哪些状态的财年可以为空」。
+ * 契约是唯一来源：文档写 null/空 的状态，页面必须在无财年时仍给出原因，
+ * 否则会像 #158 一样，测试给每个状态都塞了财年，把死代码测成绿的。 */
+function docStatusesWithOptionalYear() {
+  const doc = fs.readFileSync(
+    path.join(__dirname, '..', '..', '..', 'docs', 'FORWARD_YIELD.md'), 'utf8');
+  const start = doc.indexOf('### 5.1');
+  const section = doc.slice(start, doc.indexOf('\n---\n', start));
+  const out = new Set();
+  for (const line of section.split('\n')) {
+    const m = line.match(/^\| `([a-z_]+)` \| ([^|]*) \| ([^|]*) \|/);
+    if (!m) continue;
+    const yearCell = m[3];
+    if (/null|空/.test(yearCell)) out.add(m[1]);
+  }
+  return out;
+}
 
 test('esc 转义 HTML 特殊字符（XSS 防护）', () => {
   assert.strictEqual(R.esc('格力电器'), '格力电器');
@@ -198,18 +218,20 @@ for (const [status, text] of FORWARD_REASONS) {
   });
 }
 
-test('forwardCell 无财年的不可估状态仍给原因（契约组合）', () => {
-  // §6.1：stale / no_complete_year / missing_inputs 的「前瞻财年」为空，
-  // 但原因必须仍然可见，否则用户只看到「—」（#158 AC 的原始意图）
-  for (const [status, text] of [
-    ['stale', '市场：近年无分红'],
-    ['no_complete_year', '市场：近年无完整财年分红'],
-    ['missing_inputs', '数据缺口：缺少现价'],
-  ]) {
+test('forwardCell 无财年的不可估状态仍给原因（状态表由文档 5.1 驱动）', () => {
+  // 契约 §5.1 规定哪些状态的财年可为空；文档改了，这里自动跟着变。
+  const optional = docStatusesWithOptionalYear();
+  assert.ok(optional.size >= 3, '文档 5.1 应标出至少 3 个财年可空的状态');
+  const copy = new Map([['stale', '市场：近年无分红'],
+                        ['no_complete_year', '市场：近年无完整财年分红'],
+                        ['missing_inputs', '数据缺口：缺少现价'],
+                        ['fetch_error', '数据缺口：前瞻取数失败']]);
+  for (const status of optional) {
+    assert.ok(copy.has(status), '新增的财年可空状态需同步本文案的文案表：' + status);
     for (const year of ['', null, undefined]) {
       const html = R.forwardCell({ '前瞻股息率%': '', '前瞻财年': year, '前瞻状态': status });
       assert.ok(html.includes('—'));
-      assert.ok(html.includes(text), '无财年也要给原因：' + status);
+      assert.ok(html.includes(copy.get(status)), '无财年也要给原因：' + status);
       assert.ok(!html.includes('前瞻财年'), '无财年时不写年份段');
       assert.ok(html.includes('非公司公告'), '口径说明始终存在');
     }

@@ -10,7 +10,6 @@
 离线：三类取数全部注入，不触网。
 """
 import json
-from pathlib import Path
 
 import pytest
 

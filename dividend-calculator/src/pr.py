@@ -12,13 +12,12 @@
   行业分类:     mootdx F10 → 东方财富 datacenter(RPT_F10_BASIC_ORGINFO) → 降级为 "未知行业"
 """
 import logging
-import re
 from dataclasses import dataclass, field
 from typing import Optional, List
 
 from .datasource.validation import check_pe, check_pb, check_roe, check_net_profit, check_payout_ratio
 
-from .pr_calculator import (
+from .pr_calculator import (  # noqa: F401 — 对外再导出（部分名字仅测试引用）
     compute_basic_pr,
     compute_corrected_pr,
     compute_pb_pr,
@@ -86,7 +85,7 @@ class PRResult:
 # 数据层 re-export（实现在 pr_data.py，#24 纯移动）
 # ---------------------------------------------------------------------------
 # 私有名一并 re-export，保持 tests/外部调用点兼容
-from .pr_data import (
+from .pr_data import (  # noqa: F401 — 私有名一并 re-export，保持 tests/外部调用点兼容
     _amount_to_float,
     _get_financial,
     _get_financial_em,

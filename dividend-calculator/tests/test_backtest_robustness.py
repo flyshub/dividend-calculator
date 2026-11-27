@@ -5,7 +5,6 @@ import sqlite3
 import sys
 from datetime import date
 
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
@@ -193,7 +192,6 @@ def test_run_variant_filter_in_pipeline(monkeypatch):
 def test_run_backtest_freq_param(monkeypatch):
     """run_backtest freq 参数：monthly/quarterly/semiannual 改变调仓日数。"""
     import backtest_engine
-    import backtest_sensitivity as bs
     from datetime import date as _date
 
     # 复用 quarterly_rebalance_dates 的测试交易日：每年 4 个季末日
@@ -204,7 +202,7 @@ def test_run_backtest_freq_param(monkeypatch):
     days.sort()
 
     q = backtest_engine.rebalance_dates(days, _date(2020, 1, 1), _date(2022, 12, 31), "quarterly")
-    m_ = backtest_engine.rebalance_dates(days, _date(2020, 1, 1), _date(2022, 12, 31), "monthly")
+    _m = backtest_engine.rebalance_dates(days, _date(2020, 1, 1), _date(2022, 12, 31), "monthly")
     s_ = backtest_engine.rebalance_dates(days, _date(2020, 1, 1), _date(2022, 12, 31), "semiannual")
     # 季度 = 12 个调仓日 / 月度 = 36（但 fake days 只有季末日 → m_ 退化为同 q）
     # 半年 = 6
@@ -233,7 +231,6 @@ def test_funnel_layer_threshold_params():
 def test_run_portfolio_weighting_param(monkeypatch):
     """run_portfolio weighting 参数：equal/cap/yield 三种加权方式均可跑通。"""
     import backtest_portfolio as bp
-    import backtest_engine
 
     class FakeLookup:
         prices = {"A": {date(2020, 1, 1): 10.0, date(2020, 3, 31): 11.0},

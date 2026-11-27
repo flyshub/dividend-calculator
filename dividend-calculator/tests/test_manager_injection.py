@@ -1,5 +1,4 @@
 """测试 DataSourceManager 依赖注入（消除全局单例泄漏）"""
-from unittest.mock import MagicMock
 
 import pytest
 

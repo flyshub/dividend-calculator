@@ -7,7 +7,6 @@ akshare 1.20.41 移除 stock_financial_abstract_ths，同花顺对机房 IP 返�
 """
 from unittest.mock import patch
 
-import pytest
 
 from src.pr import _get_financial, _get_financial_em
 

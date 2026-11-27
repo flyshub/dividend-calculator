@@ -14,7 +14,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from src.screener_cache import (  # noqa: E402
     DividendSnapshot,
-    FinanceSnapshot,
     ScreenerCache,
     StockListItem,
 )

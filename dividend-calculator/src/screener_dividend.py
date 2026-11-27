@@ -4,7 +4,6 @@
 复用 calculate_true_dividend_yield（完整财年口径，支持注入 provider 便于测试）。
 漏斗② 的判定与降级回退已收进 src.screening（ADR-0001），本模块只负责取数与缓存。
 """
-import sys
 from typing import Callable, List, Optional
 
 from src.dividend import DividendResult, calculate_true_dividend_yield

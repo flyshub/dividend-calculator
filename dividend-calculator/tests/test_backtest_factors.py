@@ -20,7 +20,6 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.backtest_factors import (
-    PRFactor,
     real_dividend_yield,
     ttm_dividend_yield,
     pr,

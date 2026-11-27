@@ -13,7 +13,6 @@ from typing import Callable, Optional
 
 from src.forward_yield import (
     STATUS_FETCH_ERROR,
-    STATUS_MISSING_INPUTS,
     STATUS_NO_COVERAGE,
     STATUS_NO_PAYOUT_HISTORY,
     STATUS_NO_POSITIVE_EPS,

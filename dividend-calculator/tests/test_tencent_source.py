@@ -1,5 +1,4 @@
 """TencentSource adapter 测试"""
-import pytest
 from unittest.mock import patch
 
 from src.datasource.tencent_source import TencentSource

@@ -22,8 +22,8 @@ import sqlite3
 from datetime import date
 from typing import Dict, List, Optional, Sequence
 
-from backtest_engine import BacktestLookup, run_backtest, quarterly_rebalance_dates
-from backtest_portfolio import performance_metrics, cum, run_portfolio
+from backtest_engine import BacktestLookup, run_backtest
+from backtest_portfolio import cum, run_portfolio
 from backtest_significance import block_bootstrap_ci
 
 DB_PATH = "data/backtest.db"

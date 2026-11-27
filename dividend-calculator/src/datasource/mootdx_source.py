@@ -12,11 +12,10 @@ import logging
 import math
 import re
 from typing import Optional, List, Tuple, Dict
-from collections import OrderedDict
 
 from mootdx.quotes import Quotes
 
-from .base import StockInfo, DividendDetail, DataSource
+from .base import StockInfo, DividendDetail
 from ..utils import infer_fiscal_year, ensure_6digit
 
 logger = logging.getLogger(__name__)

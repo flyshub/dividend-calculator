@@ -20,7 +20,6 @@ import argparse
 import os
 import sqlite3
 import sys
-from collections import defaultdict
 from datetime import date
 from pathlib import Path
 from typing import Optional
@@ -284,7 +283,6 @@ def section_robustness(lookup: BacktestLookup, conn) -> str:
     # 主回测基线（用于算超额）
     base_res = run_variant(lookup, "主回测 T+1")
     base_cum = base_res.get("cumulative_returns", {}).get("full")
-    base_rets = base_res.get("quarterly_returns", {}).get("full", [])
 
     rows = []
     for name, fn in variants:
@@ -554,8 +552,8 @@ def generate_report(db_path: str, out_path: str) -> None:
     parts = [
         "# 四层漏斗分层回测报告 V3\n\n",
         f"> 生成日期：{date.today()}\n",
-        f"> 数据范围：2013-01-01 至 2026-08-10，季度调仓，T+1 建仓，双边 0.3% 成本\n",
-        f"> 税后分红复投（三档税率：>1年 0%，1月-1年 10%，<1月 20%）\n",
+        "> 数据范围：2013-01-01 至 2026-08-10，季度调仓，T+1 建仓，双边 0.3% 成本\n",
+        "> 税后分红复投（三档税率：>1年 0%，1月-1年 10%，<1月 20%）\n",
         "> 口径对齐：总额法（Index 73）、最新完整财年、PE_TTM/ROE_latest\n\n",
 
         "## §1 数据范围与口径\n\n",

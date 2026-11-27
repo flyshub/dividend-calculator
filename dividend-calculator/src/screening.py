@@ -14,7 +14,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Sequence
 
 from src.pr_calculator import (
-    compute_basic_pr,
     compute_tsr,
     judge_pr,
 )

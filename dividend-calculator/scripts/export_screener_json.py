@@ -118,13 +118,13 @@ def write_json_files(out_dir: Path, by_date: dict) -> list:
     """写 latest/history/按日 JSON 到指定目录，返回 history 列表。"""
     out_dir.mkdir(parents=True, exist_ok=True)
     history = []
-    for date in sorted(by_date.keys()):
-        files = sorted(by_date[date])
+    for day in sorted(by_date.keys()):
+        files = sorted(by_date[day])
         latest = files[-1]  # 该日最后批次
         rows = parse_csv(latest)
-        (out_dir / f"screener_{date}.json").write_text(
+        (out_dir / f"screener_{day}.json").write_text(
             json.dumps(rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        history.append({"date": date, "file": f"screener_{date}.json", "count": len(rows)})
+        history.append({"date": day, "file": f"screener_{day}.json", "count": len(rows)})
 
     # latest.json = 最近日期
     latest_date = history[-1]["date"]

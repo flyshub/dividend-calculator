@@ -174,7 +174,7 @@ def main():
     n_list = counts["stock_list"]
     n_quote = counts["quote_snapshot"]
     n_fin = counts["finance_snapshot"]
-    print(f"\n补全完成:")
+    print("\n补全完成:")
     print(f"  stock_list: {n_list} 只")
     print(f"  quote_snapshot: {n_quote} 只")
     print(f"  finance_snapshot: {n_fin} 只")

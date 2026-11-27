@@ -10,11 +10,9 @@
     python scripts/backtest_sensitivity.py --db data/backtest.db
 """
 import argparse
-import sqlite3
 import sys
-from datetime import date
 from pathlib import Path
-from typing import Dict, List
+from typing import List
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _ROOT = _SCRIPT_DIR.parent
@@ -24,8 +22,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from backtest_engine import BacktestLookup, run_backtest
-from backtest_portfolio import (annualized, cum, max_drawdown, performance_metrics,
-                                run_portfolio, sharpe)
+from backtest_portfolio import (annualized, cum, max_drawdown, run_portfolio, sharpe)
 from backtest_robustness import random_start_offsets
 
 # freq → 每年期数（T4 #109：年化/夏普按实际期长缩放）

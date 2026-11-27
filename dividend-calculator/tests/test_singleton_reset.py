@@ -1,6 +1,6 @@
 """#21 单例 reset 钩子与 conftest 隔离。"""
 import src.datasource as ds
-from src.datasource.mootdx_source import get_quotes_client, reset_quotes_client
+from src.datasource.mootdx_source import reset_quotes_client
 
 
 def test_reset_data_source_manager_rebuilds_lazily():

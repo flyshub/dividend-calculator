@@ -1,14 +1,15 @@
 """
 公共工具模块 - 统一股票代码标准化、分红解析等公共逻辑
 """
-import re
 import logging
 from dataclasses import dataclass
-from typing import Optional, List, Tuple
+from typing import TYPE_CHECKING, Optional, List, Tuple
 
-import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:  # 仅字符串注解使用（compute_ttm_dividend），避免运行时循环导入
+    from .datasource.base import DividendRecord
 
 
 def ensure_6digit(stock_input: str) -> Optional[str]:

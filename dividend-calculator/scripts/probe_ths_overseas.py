@@ -52,7 +52,7 @@ def main() -> int:
             try:
                 sec, _ = probe(code)
                 times.append(f"{sec:.2f}s")
-            except Exception as e:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 times.append("FAIL")
             time.sleep(0.3)
         print(f"  {code}: {times}", flush=True)

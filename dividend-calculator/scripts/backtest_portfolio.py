@@ -13,11 +13,10 @@
 dividends()（公告日 ≤ asof 过滤，无未来函数）；税率口径与 src 三档一致。
 """
 
-import json
 import math
 import sqlite3
 from datetime import date, timedelta
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence
 
 from backtest_engine import BacktestLookup, run_backtest, _d
 from src.backtest_factors import ttm_dividend_yield
@@ -474,7 +473,7 @@ def main() -> None:
     conn = sqlite3.connect(DB_PATH)
     bench_main = load_benchmark(conn, BENCH_MAIN, res["rebalance_dates"])
     bench_alt = load_benchmark(conn, BENCH_ALT, res["rebalance_dates"])
-    print(f"\n== 基准对比（同期累计）==")
+    print("\n== 基准对比（同期累计）==")
     print(f"  中证红利全收益 H00922: {cum(bench_main)*100:+.2f}%")
     print(f"  沪深300全收益 H00300: {cum(bench_alt)*100:+.2f}%")
     full_ret = performance_metrics(res["quarterly_returns"])["full"]

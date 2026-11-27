@@ -9,6 +9,25 @@ permissions:
   contents: read
 
 jobs:
+  python-lint:
+    name: Python lint (ruff F,E9)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      # 只跑 pyflakes + 语法错误：拦死导入、未定义名、未使用变量/遮蔽。
+      # 规则集与配置见 dividend-calculator/pyproject.toml 的 [tool.ruff]。
+      - name: Install ruff
+        run: pip install "ruff>=0.6"
+
+      - name: Run ruff
+        working-directory: dividend-calculator
+        run: ruff check src scripts tests
+
   python-tests:
     name: Python tests
     runs-on: ubuntu-latest
