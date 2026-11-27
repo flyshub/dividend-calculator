@@ -27,6 +27,9 @@ cd dividend-calculator && python -m src.web
 # 运行全部测试
 cd dividend-calculator && python -m pytest -v
 
+# Python 静态检查（CI 必跑；F,E9 真错误类，对外再导出用 noqa: F401 标注）
+cd dividend-calculator && ruff check src scripts tests
+
 # 同步生产数据（本地 screener.db 不自动更新；排查选股数据前先跑）
 cd dividend-calculator && python scripts/sync_seed_db.py
 
