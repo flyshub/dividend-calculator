@@ -142,6 +142,13 @@ CSV/JSON 按 **90 天保留周期**自动清理；DB 快照表**不做时间裁�
 
 改 CSV/JSON 保留天数时，需同时更新 `export_screener_json.py` 的 `RETENTION_DAYS` 与此处文档。Release 备份的 7 天窗口在 `screener_daily.yml` 的 Upload 步（`cutoff=date -u -d '7 days ago'`），改窗口时同步改此处文档。
 
+### 选股输出契约（CSV / 按日 JSON）
+
+- **列清单单点 = `screening.FIELDS`**（当前 17 列，含前瞻三列）。CSV 与 `site/screener/*.json` 同源同序；页面列序另有 `screener.html` 的 `<th>` 与 `screener_render.js::rowHtml` 两处，改动必须三处同步。
+- **前瞻三列**（紧跟「真实股息率%」）：`前瞻股息率%`（仅 `前瞻状态 == ok` 有值，2 位小数，税前、模型估算）、`前瞻财年`（L+1）、`前瞻状态`（九值枚举）。口径、状态语义与页面文案映射见 `docs/FORWARD_YIELD.md` §6.1；前瞻**不进漏斗判定、不排序**。
+- 改列时必须同步：`screening.FIELDS` → `export_screener_json.py`（`NUMERIC` + 历史表头白名单，旧 CSV 仍可导出）→ 页面 `<th>`/`rowHtml` → `?v=` 版本戳。历史按日 JSON 缺新列时渲染「—」，不回溯补算。
+- 每日任务可能「跑成功但数据塌了」，`scripts/check_screener_data_health.py` 由 `screener_health.yml` 每轮检查（行数 < 5、前瞻列缺失或整列非 ok 即开告警 issue，按标题去重）。
+
 ### A+H 股两地上市
 
 对于中远海控、中国铝业等 A+H 股，**必须用总股本**（含全部股份），不能用流通股本：

@@ -58,3 +58,54 @@ jobs:
             } else {
               console.log(`Health OK：最近一次成功 ${lastOk.created_at}（${ageDays.toFixed(1)} 天前）`);
             }
+
+      # 数据质量：run 成功但结果塌了（漏斗 0 只、前瞻整列空）不会让 run 变红，
+      # 所以直接看仓库里的 latest.json。判据与阈值见脚本 docstring。
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Check screener data quality
+        id: data
+        continue-on-error: true
+        run: |
+          python dividend-calculator/scripts/check_screener_data_health.py \
+            --path dividend-calculator/site/screener/latest.json \
+            --json-out /tmp/screener_health.json
+
+      - name: Report data quality problems
+        if: steps.data.outcome != 'success'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const { problems } = JSON.parse(fs.readFileSync('/tmp/screener_health.json', 'utf8'));
+            if (!problems.length) {
+              console.log('无数据质量问题');
+              return;
+            }
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', per_page: 100,
+            });
+            for (const p of problems) {
+              // 去重：已有未关闭的同类告警则跳过（每轮检查都会跑到）
+              const dup = open.find(i => i.title === p.title && !i.pull_request);
+              if (dup) {
+                console.log(`已有同类告警 issue #${dup.number}，跳过：${p.title}`);
+                continue;
+              }
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title: p.title,
+                body: `## 数据质量问题\n\n${p.detail}\n\n`
+                  + `数据源：\`site/screener/latest.json\`（仓库内，非 Pages）。\n`
+                  + `排查入口：Screener Daily / Screener Data Refresh 运行日志。`,
+                labels: ['bug', 'automation'],
+              });
+              console.log(`已开告警：${p.title}`);
+            }
