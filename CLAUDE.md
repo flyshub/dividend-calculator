@@ -130,6 +130,8 @@ CSV/JSON 按 **90 天保留周期**自动清理；DB 快照表**不做时间裁�
 
 `prepare`（判过期覆盖）→ `shard ×8`（`fill_screener_data.py --shard i/8 --export-rows shard.json`）→ `merge`（`merge_shard_rows.py` 合并 + `prefetch_sustainability.py` + 上传）
 
+预拉候选 = 库内高股息（real>5 且 ttm>5）**∪ 最近一次漏斗候选**（`site/screener/latest.json`）：漏斗② 用实时行情，股价涨进漏斗的股票库内旧值可能不到阈值（600211 库内 4.48%、当日 5.09%），只按库内值筛会永远漏掉它们。文件缺失时退化为纯阈值集合。
+
 - **幂等可续跑**：刷过的行变成「新鲜」（30 天窗口），下一轮自动跳过。因此 6 小时一次的 cron 只在 `check_stale_coverage.py` 判断确有过期行时才启动分片，无缺口时空转约 2 分钟
 - **分片互不重叠**：`shard_codes()` 按排序后的代码切 i/n 段，各片并集等于全量（有单测）
 - **分片产物必须同名唯一**：各片导出 `shard-<n>.json`。若都叫 `shard.json`，`download-artifact` 的 `merge-multiple` 会把同名文件**拼接**成一个非法 JSON（run 43593390858 合并失败的根因）
