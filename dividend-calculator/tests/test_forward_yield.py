@@ -332,16 +332,31 @@ def test_missing_price_keeps_context_warnings():
 
 
 def test_estimate_forward_yield_missing_inputs_fail_soft():
-    assert estimate_forward_yield(
+    r = estimate_forward_yield(
         stock_code="000000", price=None, total_shares=SHARES,
-        dividend_rows=_div_rows(), financial_rows=_fin_rows(), forecast_rows=_forecast(),
-    ).forward_note == "缺少现价，不做前瞻"
+        dividend_rows=_div_rows(), financial_rows=_fin_rows(), forecast_rows=_forecast())
+    assert r.forward_note == "缺少现价，不做前瞻"
+    # 契约 §5.1：缺现价时未取分红，财年不可确定 → 空（不猜 L+1）
+    assert r.forward_year is None
 
-    assert estimate_forward_yield(
+    r = estimate_forward_yield(
         stock_code="000000", price=10.0, total_shares=SHARES,
         dividend_rows=None, financial_rows=_fin_rows(), forecast_rows=_forecast(),
         dividend_fetcher=lambda code: None,
-    ).forward_note == "前瞻取数失败（分红明细），稍后重试"
+    )
+    assert r.forward_note == "前瞻取数失败（分红明细），稍后重试"
+    assert r.forward_year is None, "分红明细失败时财年未知"
+
+
+def test_estimate_forward_yield_keeps_year_when_known_on_fetch_error():
+    """契约 §5.1：财年已知（分红明细到手）时，财务/预测失败仍给 L+1。"""
+    r = estimate_forward_yield(
+        stock_code="000000", price=10.0, total_shares=SHARES,
+        dividend_rows=_div_rows(), forecast_rows=_forecast(),
+        financial_fetcher=lambda code: None,
+    )
+    assert r.forward_status == "fetch_error"
+    assert r.forward_year == 2026
 
     assert estimate_forward_yield(
         stock_code="000000", price=10.0, total_shares=SHARES,

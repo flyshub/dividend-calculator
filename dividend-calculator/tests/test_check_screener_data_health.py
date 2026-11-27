@@ -36,13 +36,13 @@ class TestCheckRows:
     def test_forward_column_missing(self):
         rows = [{"代码": "600001"}, {"代码": "600002"}] * 6
         (p,) = health.check_rows(rows)
-        assert p["title"] == health.TITLE_NO_FORWARD
+        assert p["title"] == health.TITLE_FORWARD_COLUMN
         assert "契约未生效" in p["detail"]
 
     def test_forward_all_empty(self):
         rows = _rows(9, status="fetch_error") + _rows(3, status="no_coverage")
         (p,) = health.check_rows(rows)
-        assert p["title"] == health.TITLE_NO_FORWARD
+        assert p["title"] == health.TITLE_FORWARD_COLUMN
         assert "无一行可估" in p["detail"]
 
     def test_one_ok_is_enough(self):

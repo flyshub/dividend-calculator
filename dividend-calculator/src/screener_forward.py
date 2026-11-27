@@ -24,6 +24,7 @@ from src.forward_yield import (
     estimate_forward_yield,
     fetch_dividend_rows,
     fetch_earnings_forecast,
+    next_fiscal_year,
     fetch_financial_rows,
 )
 from src.screening import FunnelCandidate
@@ -44,12 +45,6 @@ _YEAR_KNOWN_STATUSES = {
 _REQUEST_STATUSES = _YEAR_KNOWN_STATUSES | {STATUS_OK, STATUS_STALE}
 
 
-def _next_year(latest_year) -> Optional[int]:
-    """最新完整财年（"2025"）→ 下一财年（2026）；非法/缺失 → None。"""
-    s = str(latest_year or "")[:4]
-    return int(s) + 1 if s.isdigit() and len(s) == 4 else None
-
-
 # 整批护栏（#159）：实际发起一致预期请求的行 ≥10 且失败率 >50% → 判定数据源故障。
 # 阈值与「连续 30 只失败中止」同一思路：小样本的偶发失败逐行标注即可，不整列清空。
 FORWARD_GUARD_MIN_ATTEMPTS = 10
@@ -64,7 +59,7 @@ def safe_evaluate(
     try:
         return evaluator(candidate)
     except Exception as exc:  # noqa: BLE001 — 单只隔离是数据源不可靠时的设计目标
-        year = _next_year(candidate.dividend.real_yield_year if candidate.dividend else None)
+        year = next_fiscal_year(candidate.dividend.real_yield_year if candidate.dividend else None)
         return ForwardYieldResult(
             forward_status=STATUS_FETCH_ERROR,
             forward_year=year,
@@ -132,7 +127,7 @@ def make_forward_evaluator(
             forecast_fetcher=forecast_fetcher,
         )
         if res.forward_year is None and res.forward_status in _YEAR_KNOWN_STATUSES:
-            res.forward_year = _next_year(latest_year)
+            res.forward_year = next_fiscal_year(latest_year)
         return res
 
     return evaluate

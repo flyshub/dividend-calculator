@@ -198,6 +198,24 @@ for (const [status, text] of FORWARD_REASONS) {
   });
 }
 
+test('forwardCell 无财年的不可估状态仍给原因（契约组合）', () => {
+  // §6.1：stale / no_complete_year / missing_inputs 的「前瞻财年」为空，
+  // 但原因必须仍然可见，否则用户只看到「—」（#158 AC 的原始意图）
+  for (const [status, text] of [
+    ['stale', '市场：近年无分红'],
+    ['no_complete_year', '市场：近年无完整财年分红'],
+    ['missing_inputs', '数据缺口：缺少现价'],
+  ]) {
+    for (const year of ['', null, undefined]) {
+      const html = R.forwardCell({ '前瞻股息率%': '', '前瞻财年': year, '前瞻状态': status });
+      assert.ok(html.includes('—'));
+      assert.ok(html.includes(text), '无财年也要给原因：' + status);
+      assert.ok(!html.includes('前瞻财年'), '无财年时不写年份段');
+      assert.ok(html.includes('非公司公告'), '口径说明始终存在');
+    }
+  }
+});
+
 test('forwardCell 未知状态不渲染未映射枚举', () => {
   const html = R.forwardCell({ '前瞻股息率%': '', '前瞻状态': 'some_future_status' });
   assert.ok(html.includes('—'));

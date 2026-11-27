@@ -33,7 +33,7 @@ FORWARD_STATUS_KEY = "前瞻状态"
 FORWARD_OK = "ok"
 
 TITLE_TOO_FEW = "🔔 选股结果异常偏少"
-TITLE_NO_FORWARD = "🔔 前瞻股息率整列为空"
+TITLE_FORWARD_COLUMN = "🔔 前瞻股息率列异常"
 TITLE_UNREADABLE = "🔔 选股结果文件缺失或无法解析"
 
 
@@ -58,7 +58,7 @@ def check_rows(rows: list) -> list:
     statuses = [r.get(FORWARD_STATUS_KEY) for r in rows if isinstance(r, dict)]
     if all(s is None for s in statuses):
         problems.append(_problem(
-            TITLE_NO_FORWARD,
+            TITLE_FORWARD_COLUMN,
             "latest.json 全部 %d 行都没有 `%s` 字段，前瞻列契约未生效"
             "（导出脚本或页面版本可能回退）。" % (len(rows), FORWARD_STATUS_KEY)))
     elif not any(s == FORWARD_OK for s in statuses):
@@ -68,7 +68,7 @@ def check_rows(rows: list) -> list:
         detail = "、".join("%s %d 只" % (k or "空", v) for k, v in sorted(
             counts.items(), key=lambda kv: -kv[1]))
         problems.append(_problem(
-            TITLE_NO_FORWARD,
+            TITLE_FORWARD_COLUMN,
             "latest.json 共 %d 行，无一行可估（%s）。若为整批护栏触发，"
             "说明一致预期数据源故障，读者会看到整列「—」。" % (len(rows), detail)))
     return problems

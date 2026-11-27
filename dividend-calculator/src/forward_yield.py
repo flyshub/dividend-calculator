@@ -323,11 +323,17 @@ def compute_forward_yield(
     return res
 
 
+def next_fiscal_year(latest_year) -> Optional[int]:
+    """最新完整财年（2025 或 "2025"）→ 下一财年（2026）；非法/缺失 → None。"""
+    s = str(latest_year or "")[:4]
+    return int(s) + 1 if len(s) == 4 and s.isdigit() else None
+
+
 def _empty(note: str, status: str, year=None) -> ForwardYieldResult:
     """不估时的结果。目标财年能确定就给出（契约见 docs/FORWARD_YIELD.md §5.1）。"""
     return ForwardYieldResult(
         forward_status=status, forward_note=note,
-        forward_year=(int(year) + 1) if year is not None else None)
+        forward_year=next_fiscal_year(year))
 
 
 def estimate_forward_yield(
@@ -391,5 +397,6 @@ __all__ = [
     "dividend_totals_by_year",
     "estimate_forward_yield",
     "net_profit_by_year",
+    "next_fiscal_year",
     "parse_forecast_row",
 ]

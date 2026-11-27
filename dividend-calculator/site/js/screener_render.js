@@ -107,10 +107,11 @@
     var reason = forwardReason(r['前瞻状态']);
     var basis = '模型估算，税前，非公司公告';
     if (!y) {
-      if (year == null || year === '') return '<td class="num">—</td>';
       if (!reason) return '<td class="num">—</td>';
-      return '<td class="num" title="' +
-        esc('前瞻财年 ' + year + '；' + reason + '；' + basis) + '">—</td>';
+      // 契约允许无财年（stale / no_complete_year / missing_inputs）：原因仍须给出，
+      // 否则用户只看到「—」而不知道是市场事实还是数据缺口（#158 AC）。
+      var miss = (year ? '前瞻财年 ' + year + '；' : '') + reason + '；' + basis;
+      return '<td class="num" title="' + esc(miss) + '">—</td>';
     }
     var tip = (year ? '前瞻财年 ' + year + '；' : '') + basis;
     return '<td class="num" title="' + esc(tip) + '">' + y + '</td>';
