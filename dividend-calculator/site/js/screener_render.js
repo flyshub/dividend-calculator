@@ -90,7 +90,7 @@
     no_complete_year: '市场：近年无完整财年分红',
     stale: '市场：近年无分红',
     fetch_error: '数据缺口：前瞻取数失败',
-    missing_inputs: '数据缺口：缺少分红/财务快照',
+    missing_inputs: '数据缺口：缺少现价',
     no_payout_history: '数据缺口：无可用分红历史',
   };
 

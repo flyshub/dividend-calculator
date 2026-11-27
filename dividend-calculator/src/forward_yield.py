@@ -323,8 +323,11 @@ def compute_forward_yield(
     return res
 
 
-def _empty(note: str, status: str) -> ForwardYieldResult:
-    return ForwardYieldResult(forward_status=status, forward_note=note)
+def _empty(note: str, status: str, year=None) -> ForwardYieldResult:
+    """不估时的结果。目标财年能确定就给出（契约见 docs/FORWARD_YIELD.md §5.1）。"""
+    return ForwardYieldResult(
+        forward_status=status, forward_note=note,
+        forward_year=(int(year) + 1) if year is not None else None)
 
 
 def estimate_forward_yield(
@@ -359,12 +362,14 @@ def estimate_forward_yield(
     if financial_rows is None:
         financial_rows = financial_fetcher(stock_code)
         if financial_rows is None:
-            return _empty(FETCH_FAILED_FMT % "财务数据", STATUS_FETCH_ERROR)
+            return _empty(FETCH_FAILED_FMT % "财务数据", STATUS_FETCH_ERROR,
+                          summary.latest_year)
 
     if forecast_rows is None:
         forecast_rows = forecast_fetcher(stock_code)
         if forecast_rows is None:
-            return _empty(FETCH_FAILED_FMT % "盈利预测", STATUS_FETCH_ERROR)
+            return _empty(FETCH_FAILED_FMT % "盈利预测", STATUS_FETCH_ERROR,
+                          summary.latest_year)
 
     totals = dividend_totals_by_year(summary.records, total_shares)
     fins = parse_financial_rows(financial_rows or [])
